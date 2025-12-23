@@ -4,20 +4,20 @@
 - [x] **Rust Toolchain**
     - [x] Install Rust (`rustup`).
     - [x] Verify `cargo` and `rustc` installation.
-- [ ] **System Dependencies**
-    - [ ] Install `build-essential` (gcc, make, etc).
-    - [ ] Install `libssl-dev` (common dependency).
+- [x] **System Dependencies**
+    - [x] Install `build-essential` (gcc, make, etc).
+    - [x] Install `libssl-dev` (common dependency).
 - [x] **Git Setup**
     - [x] Initialize Git Repository.
     - [x] Configure User (Subeshrock).
     - [x] Create `.gitignore`.
 
 ## Phase 1: Foundation & Setup
-- [ ] **Project Initialization**
-    - [ ] Create Rust Workspace (`Cargo.toml`).
-    - [ ] Initialize `mvmd` (daemon) bin crate.
-    - [ ] Initialize `mvm` (CLI) bin crate.
-    - [ ] Initialize `mvm-core` (shared library) lib crate.
+- [x] **Project Initialization**
+    - [x] Create Rust Workspace (`Cargo.toml`).
+    - [x] Initialize `mvmd` (daemon) bin crate.
+    - [x] Initialize `mvm` (CLI) bin crate.
+    - [x] Initialize `mvm-core` (shared library) lib crate.
     - [ ] Set up logging/tracing infrastructure.
 
 ## Phase 2: The Image Engine ("OCI-to-Block")
