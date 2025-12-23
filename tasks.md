@@ -1,9 +1,9 @@
 # Tasks Tracker
 
 ## Phase 0: Environment Setup
-- [ ] **Rust Toolchain**
-    - [ ] Install Rust (`rustup`).
-    - [ ] Verify `cargo` and `rustc` installation.
+- [x] **Rust Toolchain**
+    - [x] Install Rust (`rustup`).
+    - [x] Verify `cargo` and `rustc` installation.
 - [ ] **System Dependencies**
     - [ ] Install `build-essential` (gcc, make, etc).
     - [ ] Install `libssl-dev` (common dependency).
