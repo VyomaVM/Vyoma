@@ -94,21 +94,7 @@ impl OciManager {
         // Format: docker.io/library/alpine:latest or library/alpine:latest or alpine:latest
         // Simplify: Assume library/image:tag
         
-        let parts: Vec<&str> = image.split(':').collect();
-        let (repo_raw, tag) = if parts.len() == 2 {
-            (parts[0], parts[1])
-        } else {
-             ("library/alpine", "latest") // Fallback for test 
-        };
-
-        // Handle implicit library/
-        let repository = if !repo_raw.contains('/') {
-            format!("library/{}", repo_raw)
-        } else if repo_raw.starts_with("docker.io/") {
-             repo_raw.replace("docker.io/", "")
-        } else {
-            repo_raw.to_string()
-        };
+        let (repository, tag) = self.parse_image(image);
 
         let token = self.authenticate(&repository).await?;
 
@@ -160,5 +146,49 @@ impl OciManager {
         }
 
         Ok(body)
+    }
+
+    pub async fn pull_layer(&mut self, image: &str, digest: &str) -> Result<Vec<u8>> {
+        let (repository, _) = self.parse_image(image);
+        let token = self.authenticate(&repository).await?;
+        
+        // Ensure digest has SHA256 prefix if missing commonly, though Docker usually sends it
+        // URL: /v2/<name>/blobs/<digest>
+        let layer_url = format!("{}/{}/blobs/{}", DOCKER_REGISTRY_V2, repository, digest);
+        
+        info!("Fetching layer blob: {}", digest);
+
+        let resp = self.client.get(&layer_url)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await?;
+        
+        if !resp.status().is_success() {
+             return Err(anyhow!("Failed to fetch layer {}: {}", digest, resp.status()));
+        }
+
+        // Return raw bytes (gzip tarball usually)
+        let bytes = resp.bytes().await?;
+        Ok(bytes.to_vec())
+    }
+
+    fn parse_image(&self, image: &str) -> (String, String) {
+        let parts: Vec<&str> = image.split(':').collect();
+        let (repo_raw, tag) = if parts.len() == 2 {
+            (parts[0], parts[1])
+        } else {
+             ("library/alpine", "latest") 
+        };
+
+        // Handle implicit library/
+        let repository = if !repo_raw.contains('/') {
+            format!("library/{}", repo_raw)
+        } else if repo_raw.starts_with("docker.io/") {
+             repo_raw.replace("docker.io/", "")
+        } else {
+            repo_raw.to_string()
+        };
+        
+        (repository, tag.to_string())
     }
 }
