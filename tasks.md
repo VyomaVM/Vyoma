@@ -60,10 +60,10 @@
     - [ ] **Verification**: Ping from a tap interface to the external internet. (Skipped: Requires SUDO)
 
 ## Phase 5: The Hypervisor (Firecracker integration)
-- [ ] **VMM Control**
-    - [ ] Generate Firecracker config JSON.
-    - [ ] Launch Firecracker process.
-    - [ ] Manage API socket communication with Firecracker.
+- [x] **VMM Control**
+    - [x] Generate Firecracker config JSON.
+    - [x] Launch Firecracker process.
+    - [x] Manage API socket communication with Firecracker.
 - [ ] **Lifecycle Management**
     - [ ] Implement `start`, `stop`, `pause`.
     - [ ] **Verification**: Successfully boot a Hello World kernel.
