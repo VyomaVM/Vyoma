@@ -1,19 +1,75 @@
-use tracing::{info, debug};
-use tracing_subscriber::FmtSubscriber;
+use clap::{Parser, Subcommand};
+use tracing::{info, error};
+use anyhow::Result;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 
-fn main() {
-    // Initialize logging
-    // For CLI, we might want to default to cleaner output, but for dev, full logs are fine.
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(tracing::Level::INFO)
-        .finish();
+#[derive(Parser)]
+#[command(name = "ign")]
+#[command(about = "Ignite: Docker for Micro-VMs", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("setting default subscriber failed");
+#[derive(Subcommand)]
+enum Commands {
+    /// Run a new VM
+    Run {
+        /// Image to run (e.g. ubuntu:latest)
+        image: String,
+    },
+    /// List active VMs (Not implemented yet)
+    Ps,
+}
 
-    debug!("Ignite CLI initializing...");
-    info!("Ignite CLI (ign) - v0.1.0");
-    
-    // Placeholder command dispatch
-    println!("Hello from ign! Use --help (once implemented) for commands.");
+#[derive(Serialize)]
+struct RunRequest {
+    image: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct RunResponse {
+    vm_id: String,
+    status: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+    let cli = Cli::parse();
+    let client = Client::new();
+    let daemon_url = "http://127.0.0.1:3000";
+
+    match cli.command {
+        Commands::Run { image } => {
+            info!("Requesting to run image: {}", image);
+            let payload = RunRequest { image };
+            
+            let resp = client.post(format!("{}/run", daemon_url))
+                .json(&payload)
+                .send()
+                .await;
+
+            match resp {
+                Ok(response) => {
+                     if response.status().is_success() {
+                         let body: RunResponse = response.json().await?;
+                         info!("Success! VM ID: {}, Status: {}", body.vm_id, body.status);
+                     } else {
+                         error!("Daemon returned error: {}", response.status());
+                     }
+                }
+                Err(e) => {
+                    error!("Failed to connect to daemon at {}: {}", daemon_url, e);
+                    info!("Is 'ignited' running?");
+                }
+            }
+        }
+        Commands::Ps => {
+            info!("ps command not yet implemented on daemon.");
+        }
+    }
+
+    Ok(())
 }

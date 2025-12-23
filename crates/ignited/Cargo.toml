@@ -8,5 +8,12 @@ authors.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+ignite-core = { path = "../ignite-core" }
+serde.workspace = true
+serde_json.workspace = true
+axum = "0.7"
+anyhow.workspace = true
+tempfile.workspace = true
+uuid = { version = "1.7", features = ["v4"] }
 
 
