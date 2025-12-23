@@ -40,11 +40,11 @@
     - [x] Implement `losetup` wrapper (attach file to `/dev/loopX`).
 - [x] **COW Strategy**
     - [x] Implement Sparse File creation for writes.
-- [ ] **Device Mapper**
-    - [ ] Integrate `devicemapper` Rust bindings (or sys calls).
-    - [ ] Implement Snapshot target creation (Base RO + Top RW).
-    - [ ] Implement teardown/cleanup logic.
-    - [ ] **Verification**: Manually write to the snapshot device, verify base is unchanged.
+- [x] **Device Mapper**
+    - [x] Integrate `devicemapper` Rust bindings (or sys calls).
+    - [x] Implement Snapshot target creation (Base RO + Top RW).
+    - [x] Implement teardown/cleanup logic.
+    - [ ] **Verification**: Manually write to the snapshot device, verify base is unchanged. (Skipped: Requires SUDO)
 
 ## Phase 4: Networking ("The Bridge")
 - [ ] **Host Networking**
