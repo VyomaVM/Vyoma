@@ -29,11 +29,11 @@
     - [x] Implement layer unpacking (handle tarballs).
     - [x] Implement "Flattening" logic (merge layers).
     - [x] **Verification**: functional test that unpacks an image to a temporary directory.
-- [ ] **Block Device Creation**
-    - [ ] Implement Empty File creation (allocating space).
-    - [ ] Implement `mkfs.ext4` wrapper (format the file).
-    - [ ] Implement file population (copy unpacked rootfs to block file).
-    - [ ] **Verification**: mount the generated ext4 file to check file contents.
+- [x] **Block Device Creation**
+    - [x] Implement Empty File creation (allocating space).
+    - [x] Implement `mkfs.ext4` wrapper (format the file).
+    - [x] Implement file population (copy unpacked rootfs to block file).
+    - [ ] **Verification**: mount the generated ext4 file to check file contents. (Skipped: Requires SUDO, logic implemented but not verified in CI)
 
 ## Phase 3: Storage Layer ("Instant Clones")
 - [ ] **Loopback Management**
