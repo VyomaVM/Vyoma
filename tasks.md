@@ -18,7 +18,7 @@
     - [x] Initialize `ignited` (daemon) bin crate.
     - [x] Initialize `ign` (CLI) bin crate.
     - [x] Initialize `ignite-core` (shared library) lib crate.
-    - [ ] Set up logging/tracing infrastructure.
+    - [x] Set up logging/tracing infrastructure.
 
 ## Phase 2: The Image Engine ("OCI-to-Block")
 - [ ] **OCI Interaction**
