@@ -25,10 +25,10 @@
     - [x] Implement Docker Registry authentication & connection.
     - [x] Implement `pull` logic (download layers).
     - [x] **Verification**: Create a test that successfully pulls an image manifest and layers from Docker Hub.
-- [ ] **Layer Processing**
-    - [ ] Implement layer unpacking (handle tarballs).
-    - [ ] Implement "Flattening" logic (merge layers).
-    - [ ] **Verification**: functional test that unpacks an image to a temporary directory.
+- [x] **Layer Processing**
+    - [x] Implement layer unpacking (handle tarballs).
+    - [x] Implement "Flattening" logic (merge layers).
+    - [x] **Verification**: functional test that unpacks an image to a temporary directory.
 - [ ] **Block Device Creation**
     - [ ] Implement Empty File creation (allocating space).
     - [ ] Implement `mkfs.ext4` wrapper (format the file).
