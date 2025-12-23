@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "crates/mvmd",
-    "crates/mvm",
-    "crates/mvm-core",
+    "crates/ignited",
+    "crates/ign",
+    "crates/ignite-core",
 ]
 resolver = "2"
 

@@ -15,9 +15,9 @@
 ## Phase 1: Foundation & Setup
 - [x] **Project Initialization**
     - [x] Create Rust Workspace (`Cargo.toml`).
-    - [x] Initialize `mvmd` (daemon) bin crate.
-    - [x] Initialize `mvm` (CLI) bin crate.
-    - [x] Initialize `mvm-core` (shared library) lib crate.
+    - [x] Initialize `ignited` (daemon) bin crate.
+    - [x] Initialize `ign` (CLI) bin crate.
+    - [x] Initialize `ignite-core` (shared library) lib crate.
     - [ ] Set up logging/tracing infrastructure.
 
 ## Phase 2: The Image Engine ("OCI-to-Block")
@@ -44,7 +44,7 @@
 
 ## Phase 4: Networking ("The Bridge")
 - [ ] **Host Networking**
-    - [ ] Create/Manage `mvm0` bridge.
+    - [ ] Create/Manage `ign0` bridge.
     - [ ] Setup NAT/Masquerading via `iptables`/`nftables`.
 - [ ] **VM Networking**
     - [ ] Create TAP interfaces.
@@ -62,12 +62,12 @@
 ## Phase 6: CLI & Daemon Glue
 - [ ] **Daemon API**
     - [ ] Design internal HTTP/Unix Socket API.
-    - [ ] Implement API handlers in `mvmd`.
+    - [ ] Implement API handlers in `ignited`.
 - [ ] **CLI commands**
-    - [ ] `mvm pull <image>`
-    - [ ] `mvm run <image>`
-    - [ ] `mvm ps` / `mvm list`
-    - [ ] `mvm stop <id>`
+    - [ ] `ign pull <image>`
+    - [ ] `ign run <image>`
+    - [ ] `ign ps` / `ign list`
+    - [ ] `ign stop <id>`
 
 ## Phase 7: Advanced Features (Innovation)
 - [ ] **Teleportation**

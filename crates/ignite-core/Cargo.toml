@@ -1,5 +1,5 @@
 [package]
-name = "mvm-core"
+name = "ignite-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

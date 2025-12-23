@@ -1,12 +1,12 @@
 # Product Spec: The Micro-VM Ecosystem
 
 ## Vision
-**"Docker for Micro-VMs"**
+**"Ignite: Docker for Micro-VMs"**
 A comprehensive tooling suite that makes creating, running, and managing Micro-VMs (like Firecracker) as easy as managing containers.
 
 ## Technology Stack: Rust 🦀
-*   **Daemon (`mvmd`)**: Rust + Tokio + Hyper.
-*   **CLI (`mvm`)**: Rust + Clap.
+*   **Daemon (`ignited`)**: Rust + Tokio + Hyper.
+*   **CLI (`ign`)**: Rust + Clap.
 *   **Core Logic**: `rtnetlink` (Networking), `devicemapper-rs` (Storage).
 
 ## Technical Deep Dive: The Internals
@@ -17,34 +17,34 @@ The hardest problem: Docker images are tarballs; VMs need block devices.
     1.  **Pull**: Use `oci-distribution` crate to pull standard Docker layers.
     2.  **Flatten**: Unpack layers (OverlayFS style) into a temporary directory.
     3.  **Format**: Create an empty file, format as `ext4`, and copy files in.
-    4.  **Result**: `~/.mvm/images/ubuntu-22.04.ext4` (Read-Only Base Image).
+    4.  **Result**: `~/.ignite/images/ubuntu-22.04.ext4` (Read-Only Base Image).
 *   **Kernel**: We ship a default high-performance kernel (Linux 6.x) bundled with the daemon, but allow images to override it.
 
 ### 2. Storage Strategy: "Instant Clones" 💾
 We cannot copy a 500MB disk for every container start.
 *   **Solution**: **Device Mapper Snapshots** (The tech behind Docker's original speed).
     *   **Base**: The `ubuntu-22.04.ext4` file is setup as a Loop Device (`/dev/loop0`).
-    *   **Instance**: When `mvm run` starts, we create a tiny "Cow File" (sparse file).
+    *   **Instance**: When `ign run` starts, we create a tiny "Cow File" (sparse file).
     *   **Map**: We use Device Mapper to create a virtual block device that reads from `loop0` but writes changes to the `cow-file`.
     *   **Speed**: Creation time is < 10ms. Disk usage is ~10KB per new VM.
 
 ### 3. Networking: "The Bridge to Everywhere" 🌐
 *   **Architecture**:
-    *   **Host**: A bridge interface `mvm0` (Default Gateway: 172.16.0.1).
-    *   **VM**: Each VM gets a TAP device (e.g., `vmtap123`) connected to `mvm0`.
+    *   **Host**: A bridge interface `ign0` (Default Gateway: 172.16.0.1).
+    *   **VM**: Each VM gets a TAP device (e.g., `vmtap123`) connected to `ign0`.
     *   **IP Management**: The Daemon runs a tiny internal DHCP server (or configures static IPs via kernel command line arguments) to assign 172.16.0.x IPs.
-    *   **Internet**: `iptables` rules on the host to Masquerade (NAT) traffic from `mvm0` to the main internet interface (WiFi/Ethernet).
+    *   **Internet**: `iptables` rules on the host to Masquerade (NAT) traffic from `ign0` to the main internet interface (WiFi/Ethernet).
 
 ### 4. Innovation Implementation ⚡
 *   **Teleportation**:
     *   Firecracker supports `snapshot`. It dumps the entire RAM + CPU Registers to a file.
     *   To "Teleport": Pause VM -> Snapshot -> `scp` the snapshot file & the COW file -> Load Snapshot on remote.
 *   **Time Travel**:
-    *   Just a Git wrapper around the Firecracker Snapshot files. `git commit` = `mvm snapshot`.
+    *   Just a Git wrapper around the Firecracker Snapshot files. `git commit` = `ign snapshot`.
 
 ## Ecosystem Architecture
 
-### 1. The Engine (`mvmd`)
+### 1. The Engine (`ignited`)
 *   **Role**: Background daemon.
 *   **Responsibilities**: API Server, Hypervisor Abstraction, Network Manager.
 

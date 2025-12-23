@@ -1,5 +1,5 @@
 [package]
-name = "mvmd"
+name = "ignited"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
