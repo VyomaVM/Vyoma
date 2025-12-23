@@ -69,15 +69,15 @@
     - [ ] **Verification**: Successfully boot a Hello World kernel.
 
 ## Phase 6: CLI & Daemon Glue
-- [ ] **Daemon API**
-    - [ ] Design internal HTTP/Unix Socket API.
-    - [ ] Implement API handlers in `ignited`.
-- [ ] **CLI commands**
-    - [ ] `ign pull <image>`
-    - [ ] `ign run <image>`
-    - [ ] `ign ps` / `ign list`
-    - [ ] `ign stop <id>`
-    - [ ] **Verification**: End-to-end `cli -> daemon -> vm` flow.
+- [x] **Daemon API**
+    - [x] Design internal HTTP/Unix Socket API.
+    - [x] Implement API handlers in `ignited`.
+- [x] **CLI commands**
+    - [x] `ign pull <image>`
+    - [x] `ign run <image>`
+    - [x] `ign ps` / `ign list`
+    - [x] `ign stop <id>`
+    - [x] **Verification**: End-to-end `cli -> daemon -> vm` flow.
 
 ## Phase 7: Advanced Features (Innovation)
 - [ ] **Teleportation**
