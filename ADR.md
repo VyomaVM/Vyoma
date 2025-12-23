@@ -56,4 +56,19 @@ This document tracks significant architectural decisions, their context, consequ
 *   **Reasoning**:
     *   Allows starting 100 VMs from 1 base image with minimal space overhead.
     *   Standard Linux kernel feature (stable).
-*   **Implementation**: Wrapped `dmsetup` CLI.
+
+## 007. Verification Strategy & Known Gaps
+*   **Date**: 2025-12-23
+*   **Context**: Development is happening in a constrained environment (WSL2/Container) where Root/Sudo and KVM permissions are not always available to the automated test runner.
+*   **Decision**:
+    1.  Implement logic robustly using best-practice wrappers.
+    2.  Write Integration Tests for all privileged operations but mark them as `#[ignore]`.
+    3.  Track skipped verifications explicitly.
+*   **Known Gaps (requiring manual verification)**:
+    *   **Storage Population**: `mount` and `cp` require `sudo`. Logic confirmed via `test_storage_population` but requires manual run.
+    *   **Loopback/DM**: `losetup` and `dmsetup` require `sudo`.
+    *   **Networking**: `ip link` and `iptables` require `NET_ADMIN`/`sudo`.
+    *   **Firecracker Boot**: Requires user to be in `kvm` group or have RW access to `/dev/kvm`.
+*   **Risk Mitigation**:
+    *   The `ignite-core` library is designed to be modular. If one component fails (e.g., networking), the others (storage) remain testable.
+    *   Future CI pipeline MUST run on a bare-metal or nested-virt enabled runner with passwordless sudo to fully validate the `#[ignore]` tests.
