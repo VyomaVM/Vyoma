@@ -36,10 +36,10 @@
     - [ ] **Verification**: mount the generated ext4 file to check file contents. (Skipped: Requires SUDO, logic implemented but not verified in CI)
 
 ## Phase 3: Storage Layer ("Instant Clones")
-- [ ] **Loopback Management**
-    - [ ] Implement `losetup` wrapper (attach file to `/dev/loopX`).
-- [ ] **COW Strategy**
-    - [ ] Implement Sparse File creation for writes.
+- [x] **Loopback Management**
+    - [x] Implement `losetup` wrapper (attach file to `/dev/loopX`).
+- [x] **COW Strategy**
+    - [x] Implement Sparse File creation for writes.
 - [ ] **Device Mapper**
     - [ ] Integrate `devicemapper` Rust bindings (or sys calls).
     - [ ] Implement Snapshot target creation (Base RO + Top RW).
