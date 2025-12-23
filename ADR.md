@@ -36,3 +36,24 @@ This document tracks significant architectural decisions, their context, consequ
 *   **Status**: Pending
 *   **Context**: We need to track running VMs, allocated IPs, and active loop devices.
 *   **Current Direction**: Likely file-based JSON/ToML in `~/.ignite/state` for MVP.
+
+## 005. Networking Strategy
+*   **Date**: 2025-12-23
+*   **Decision**: Use Linux Bridge (`brctl`/`ip link`) + TAP interfaces + `iptables` NAT.
+*   **Reasoning**:
+    *   Standard Docker-like networking model.
+    *   Allows VMs to communicate with each other (via bridge) and internet (via NAT).
+*   **Alternatives**:
+    *   **MacVTap**: Higher performance, but harder to perform host-to-VM communication (hairpin mode issues).
+    *   **User-mode Networking (slirp)**: Safer (no root needed), but much slower and harder to expose ports.
+*   **Consequences**:
+    *   Requires `NET_ADMIN` capability or Root.
+    *   Daemon must run with high privileges.
+
+## 006. Storage Stategy: Device Mapper
+*   **Date**: 2025-12-23
+*   **Decision**: Use `dm-snapshot` for instant cloning.
+*   **Reasoning**:
+    *   Allows starting 100 VMs from 1 base image with minimal space overhead.
+    *   Standard Linux kernel feature (stable).
+*   **Implementation**: Wrapped `dmsetup` CLI.
