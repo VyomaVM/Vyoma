@@ -21,10 +21,10 @@
     - [x] Set up logging/tracing infrastructure.
 
 ## Phase 2: The Image Engine ("OCI-to-Block")
-- [ ] **OCI Interaction**
-    - [ ] Implement Docker Registry authentication & connection.
-    - [ ] Implement `pull` logic (download layers).
-    - [ ] **Verification**: Create a test that successfully pulls an image manifest and layers from Docker Hub.
+- [x] **OCI Interaction**
+    - [x] Implement Docker Registry authentication & connection.
+    - [x] Implement `pull` logic (download layers).
+    - [x] **Verification**: Create a test that successfully pulls an image manifest and layers from Docker Hub.
 - [ ] **Layer Processing**
     - [ ] Implement layer unpacking (handle tarballs).
     - [ ] Implement "Flattening" logic (merge layers).
