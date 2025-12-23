@@ -53,3 +53,26 @@ fn test_storage_population() -> Result<()> {
     println!("Population successful (assumed if no panic)");
     Ok(())
 }
+
+#[test]
+#[ignore]
+fn test_loop_device_lifecycle() -> Result<()> {
+    use ignite_core::storage::StorageManager;
+    
+    let dir = tempfile::tempdir()?;
+    let image_path = dir.path().join("test_loop.img");
+    
+    // Create actual file
+    StorageManager::create_empty_file(&image_path, 10)?;
+    
+    // Attach
+    let loop_dev = StorageManager::setup_loop_device(&image_path)?;
+    println!("Loop device attached: {}", loop_dev);
+    assert!(loop_dev.starts_with("/dev/loop"));
+    
+    // Detach
+    StorageManager::detach_loop_device(&loop_dev)?;
+    println!("Loop device detached");
+    
+    Ok(())
+}

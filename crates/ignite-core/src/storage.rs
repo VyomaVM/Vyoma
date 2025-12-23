@@ -25,6 +25,13 @@ impl StorageManager {
         Ok(())
     }
 
+    /// Creates a sparse COW file.
+    /// This is functionally identical to create_empty_file, but ensures semantic clarity.
+    pub fn create_cow_file(path: &Path, size_mb: u64) -> Result<()> {
+        info!("Creating COW file (sparse) of {}MB at {:?}", size_mb, path);
+        Self::create_empty_file(path, size_mb)
+    }
+
     /// Formats the given file as ext4.
     pub fn format_ext4(path: &Path) -> Result<()> {
         info!("Formatting {:?} as ext4", path);
@@ -95,6 +102,44 @@ impl StorageManager {
             warn!("Failed to unmount {:?}. You may need to do it manually.", mount_path);
         }
 
+        Ok(())
+    }
+    /// Attaches the file to a loop device. Returns the loop device path (e.g., /dev/loop0).
+    /// Requires sudo.
+    pub fn setup_loop_device(path: &Path) -> Result<String> {
+        info!("Setting up loop device for {:?}", path);
+        // losetup --find --show <path>
+        let output = Command::new("sudo")
+            .arg("losetup")
+            .arg("--find")
+            .arg("--show")
+            .arg(path)
+            .output()
+            .map_err(|e| anyhow!("Failed to execute losetup: {}", e))?;
+
+        if !output.status.success() {
+            return Err(anyhow!("losetup failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+
+        let device = String::from_utf8(output.stdout)?.trim().to_string();
+        info!("Attached {:?} to {}", path, device);
+        Ok(device)
+    }
+
+    /// Detaches the loop device.
+    /// Requires sudo.
+    pub fn detach_loop_device(device_path: &str) -> Result<()> {
+        info!("Detaching loop device {}", device_path);
+        let status = Command::new("sudo")
+            .arg("losetup")
+            .arg("-d")
+            .arg(device_path)
+            .status()
+            .map_err(|e| anyhow!("Failed to execute losetup -d: {}", e))?;
+
+        if !status.success() {
+             return Err(anyhow!("losetup -d failed with status: {}", status));
+        }
         Ok(())
     }
 }
