@@ -4,6 +4,9 @@
 - [x] **Rust Toolchain**
     - [x] Install Rust (`rustup`).
     - [x] Verify `cargo` and `rustc` installation.
+- [x] **Firecracker Setup**
+    - [x] Download `firecracker` binary (v1.6+).
+    - [x] Add to PATH or configure path in Ignite.
 - [x] **System Dependencies**
     - [x] Install `build-essential` (gcc, make, etc).
     - [x] Install `libssl-dev` (common dependency).
