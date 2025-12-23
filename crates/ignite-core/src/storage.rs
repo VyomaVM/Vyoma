@@ -142,4 +142,69 @@ impl StorageManager {
         }
         Ok(())
     }
+    /// Creates a Device Mapper snapshot target.
+    /// 
+    /// Arguments:
+    /// * `name`: Unique name for the mapping (e.g., "ignite-vm-123")
+    /// * `base_dev`: Path to the read-only base device (e.g., /dev/loop0)
+    /// * `cow_dev`: Path to the read-write COW device (e.g., /dev/loop1)
+    /// * `size_sectors`: Size of the volume in 512-byte sectors.
+    pub fn create_dm_snapshot(name: &str, base_dev: &str, cow_dev: &str, size_sectors: u64) -> Result<String> {
+        info!("Creating Device Mapper snapshot '{}'", name);
+        
+        // Table format: <start_sector> <length> snapshot <origin> <cow> <persistent> <chunksize>
+        // P = Persistent (survives reboot if metadata on disk, but here just means standard snapshot)
+        // N = Not persistent (we usually use P or N, but 'P' is standard for generic file-backed snapshots in some contexts, 
+        // actually for dm-snapshot 'P' or 'N' refers to metadata validity. 
+        // For simple transient VMs, we might want 'N' if we don't care, but let's stick to standard syntax usage.
+        // Actually, for `snapshot`, the args are: <origin> <COW device> <p|n> <chunksize>
+        
+        // 8 sectors = 4KB chunk size (standard page size)
+        let table = format!("0 {} snapshot {} {} N 8", size_sectors, base_dev, cow_dev);
+        
+        // Pipe the table to dmsetup create
+        let mut child = Command::new("sudo")
+            .arg("dmsetup")
+            .arg("create")
+            .arg(name)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| anyhow!("Failed to spawn dmsetup: {}", e))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(table.as_bytes())?;
+        }
+
+        let status = child.wait()?;
+
+        if !status.success() {
+             return Err(anyhow!("dmsetup create failed for {}", name));
+        }
+
+        let device_path = format!("/dev/mapper/{}", name);
+        info!("Created DM device: {}", device_path);
+        
+        Ok(device_path)
+    }
+
+    /// Removes a Device Mapper device.
+    pub fn remove_dm_device(name: &str) -> Result<()> {
+        info!("Removing DM device '{}'", name);
+        
+        let status = Command::new("sudo")
+            .arg("dmsetup")
+            .arg("remove")
+            .arg("--retry") // Retry if busy handy for quick teardowns
+            .arg(name)
+            .status()
+            .map_err(|e| anyhow!("Failed to execute dmsetup remove: {}", e))?;
+            
+        if !status.success() {
+            return Err(anyhow!("dmsetup remove failed for {}", name));
+        }
+        
+        Ok(())
+    }
 }
+
