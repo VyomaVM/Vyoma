@@ -47,14 +47,14 @@
     - [ ] **Verification**: Manually write to the snapshot device, verify base is unchanged. (Skipped: Requires SUDO)
 
 ## Phase 4: Networking ("The Bridge")
-- [ ] **Host Networking**
-    - [ ] Create/Manage `ign0` bridge.
-    - [ ] Setup NAT/Masquerading via `iptables`/`nftables`.
-- [ ] **VM Networking**
-    - [ ] Create TAP interfaces.
-    - [ ] Attach TAP to Bridge.
-    - [ ] Implement IPAM (IP Address Management) / Internal DHCP.
-    - [ ] **Verification**: Ping from a tap interface to the external internet.
+- [x] **Host Networking**
+    - [x] Create/Manage `ign0` bridge.
+    - [x] Setup NAT/Masquerading via `iptables`/`nftables`.
+- [x] **VM Networking**
+    - [x] Create TAP interfaces.
+    - [x] Attach TAP to Bridge.
+    - [x] Implement IPAM (IP Address Management) / Internal DHCP.
+    - [ ] **Verification**: Ping from a tap interface to the external internet. (Skipped: Requires SUDO)
 
 ## Phase 5: The Hypervisor (Firecracker integration)
 - [ ] **VMM Control**
