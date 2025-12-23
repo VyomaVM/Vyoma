@@ -24,13 +24,16 @@
 - [ ] **OCI Interaction**
     - [ ] Implement Docker Registry authentication & connection.
     - [ ] Implement `pull` logic (download layers).
+    - [ ] **Verification**: Create a test that successfully pulls an image manifest and layers from Docker Hub.
 - [ ] **Layer Processing**
     - [ ] Implement layer unpacking (handle tarballs).
     - [ ] Implement "Flattening" logic (merge layers).
+    - [ ] **Verification**: functional test that unpacks an image to a temporary directory.
 - [ ] **Block Device Creation**
     - [ ] Implement Empty File creation (allocating space).
     - [ ] Implement `mkfs.ext4` wrapper (format the file).
     - [ ] Implement file population (copy unpacked rootfs to block file).
+    - [ ] **Verification**: mount the generated ext4 file to check file contents.
 
 ## Phase 3: Storage Layer ("Instant Clones")
 - [ ] **Loopback Management**
@@ -41,6 +44,7 @@
     - [ ] Integrate `devicemapper` Rust bindings (or sys calls).
     - [ ] Implement Snapshot target creation (Base RO + Top RW).
     - [ ] Implement teardown/cleanup logic.
+    - [ ] **Verification**: Manually write to the snapshot device, verify base is unchanged.
 
 ## Phase 4: Networking ("The Bridge")
 - [ ] **Host Networking**
@@ -50,6 +54,7 @@
     - [ ] Create TAP interfaces.
     - [ ] Attach TAP to Bridge.
     - [ ] Implement IPAM (IP Address Management) / Internal DHCP.
+    - [ ] **Verification**: Ping from a tap interface to the external internet.
 
 ## Phase 5: The Hypervisor (Firecracker integration)
 - [ ] **VMM Control**
@@ -58,6 +63,7 @@
     - [ ] Manage API socket communication with Firecracker.
 - [ ] **Lifecycle Management**
     - [ ] Implement `start`, `stop`, `pause`.
+    - [ ] **Verification**: Successfully boot a Hello World kernel.
 
 ## Phase 6: CLI & Daemon Glue
 - [ ] **Daemon API**
@@ -68,6 +74,7 @@
     - [ ] `ign run <image>`
     - [ ] `ign ps` / `ign list`
     - [ ] `ign stop <id>`
+    - [ ] **Verification**: End-to-end `cli -> daemon -> vm` flow.
 
 ## Phase 7: Advanced Features (Innovation)
 - [ ] **Teleportation**
