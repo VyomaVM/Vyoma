@@ -89,6 +89,7 @@ async fn main() {
         .route("/resume/:id", post(resume_vm))
         .route("/ps", get(list_vms))
         .route("/snapshot/:id", post(snapshot_vm))
+        .route("/restore", post(restore_vm))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
@@ -373,6 +374,132 @@ async fn snapshot_vm(
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
     }
+}
+
+#[derive(Deserialize)]
+struct RestoreRequest {
+    snapshot_path: String,
+    mem_path: String,
+    // For MVP, we presume the disk state (COW) is already in a known location or passed here.
+    // Ideally, "Teleportation" means standardizing the bundle format.
+    // For now, let's assume we are "Teleporting" to the SAME machine but a new VM ID for verification.
+    original_vm_id: String, // To find the original disk resources
+}
+
+async fn restore_vm(
+    State(state): State<AppState>,
+    Json(payload): Json<RestoreRequest>,
+) -> Result<Json<RunResponse>, (StatusCode, String)> {
+     info!("Request to restore VM from snapshot: {}", payload.snapshot_path);
+     
+     // 1. Setup New VM State
+     // We need to CLONE the disk state or reusing it? 
+     // "Teleportation" usually implies moving.
+     // "Restoration" (Backup) implies reusing.
+     
+     // Let's implement a "Clone from Snapshot" flow.
+     // We need a backing disk. We can look up the original VM's base image path if we had persistence.
+     // Since we don't have DB persistence, this is tricky.
+     // HACK: We will assume we are restoring `alpine:latest` for this MVP demo, 
+     // reusing the same base image path logic as run_vm.
+     
+    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+    let ignite_root = home.join(".ignite");
+    let images_root = ignite_root.join("images");
+    let vms_root = ignite_root.join("vms");
+    
+    // Assume alpine:latest base for now (Simplification for MVP Validation)
+    let safe_image_name = "alpine_latest"; 
+    let image_store_path = images_root.join(&safe_image_name);
+    let base_image_file = image_store_path.join("base.ext4");
+
+     // 2. New VM ID & Dir
+    let vm_id = uuid::Uuid::new_v4().to_string();
+    let vm_dir = vms_root.join(&vm_id);
+    std::fs::create_dir_all(&vm_dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // 3. New COW File
+    let cow_file = vm_dir.join("diff.cow");
+    let size_mb = 2048;
+    StorageManager::create_cow_file(&cow_file, size_mb).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // 4. Setup Storage Stack
+    let base_loop = StorageManager::setup_loop_device(&base_image_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Loop base: {}", e)))?;
+    let cow_loop = StorageManager::setup_loop_device(&cow_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Loop cow: {}", e)))?;
+    
+    let dm_name = format!("ign-{}", vm_id);
+    let size_sectors = size_mb * 1024 * 1024 / 512;
+    let dm_path = StorageManager::create_dm_snapshot(&dm_name, &base_loop, &cow_loop, size_sectors).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DM create: {}", e)))?;
+    
+    // 5. Setup Network
+    // Ensure bridge exists (idempotent-ish)
+    let bridge_name = "ign0";
+    let bridge_cidr = "172.16.0.1/24";
+    // We skip bridge setup here assuming it's up from previous run, or we should just call it safe.
+    // NetworkManager::setup_bridge(bridge_name, bridge_cidr)... 
+    
+    let tap_name = format!("tap{}", &vm_id[0..8]);
+    NetworkManager::setup_tap(&tap_name, bridge_name).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("TAP setup: {}", e)))?;
+    
+    let random_octet = rand::random::<u8>(); 
+    let safe_octet = std::cmp::max(2, std::cmp::min(254, random_octet));
+    let vm_ip = format!("172.16.0.{}", safe_octet);
+    
+    // 6. Firecracker VMM
+    let socket_path = format!("/tmp/firecracker_{}.socket", vm_id);
+    let mut vmm = VmmManager::new(&socket_path);
+    
+    if let Err(e) = vmm.start_daemon("bin/firecracker") {
+         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start FC: {}", e)));
+    }
+    
+    // 7. Load Snapshot INSTEAD of Boot Source
+    if let Err(e) = vmm.load_snapshot(&payload.snapshot_path, &payload.mem_path).await {
+        let _ = vmm.kill();
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Load snapshot: {}", e)));
+    }
+    
+    // 8. Add Drives (Must match configuration of snapped VM usually, but we are attaching NEW cow)
+    // Firecracker snapshot restoration often involves re-attaching block devices.
+    // The device ID "rootfs" must match.
+    if let Err(e) = vmm.add_drive("rootfs", &dm_path, true).await {
+         let _ = vmm.kill();
+         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add drive: {}", e)));
+    }
+     
+    // 9. Add Network
+    if let Err(e) = vmm.add_network_interface("eth0", &tap_name, None).await {
+         let _ = vmm.kill();
+         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add net: {}", e)));
+    }
+    
+    // 10. Resume
+    if let Err(e) = vmm.resume_instance().await {
+          let _ = vmm.kill();
+          return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Resume instance: {}", e)));
+    }
+
+    // Success - Store State
+    let instance = VmInstance {
+        vmm,
+        id: vm_id.clone(),
+        tap_name: tap_name.clone(),
+        dm_name: dm_name.clone(),
+        loop_devices: vec![base_loop, cow_loop],
+        cow_file_path: cow_file.to_string_lossy().to_string(),
+        ip_address: vm_ip.clone(),
+    };
+    
+    {
+        let mut vms = state.vms.lock().unwrap();
+        vms.insert(vm_id.clone(), Arc::new(TokioMutex::new(instance)));
+    }
+
+    Ok(Json(RunResponse {
+        vm_id,
+        status: "Restored".to_string(),
+        ip_address: vm_ip,
+    }))
 }
 
 #[derive(Serialize)]
