@@ -64,9 +64,10 @@
     - [x] Generate Firecracker config JSON.
     - [x] Launch Firecracker process.
     - [x] Manage API socket communication with Firecracker.
-- [ ] **Lifecycle Management**
-    - [ ] Implement `start`, `stop`, `pause`.
-    - [ ] **Verification**: Successfully boot a Hello World kernel.
+- [x] **Lifecycle Management**
+    - [x] Implement `start`, `stop`, `pause` (and `resume`).
+    - [x] Expose in Daemon and CLI.
+    - [ ] **Verification**: Successfully boot a Hello World kernel. (Partial: Lifecycle API flow verified).
 
 ## Phase 6: CLI & Daemon Glue
 - [x] **Daemon API**

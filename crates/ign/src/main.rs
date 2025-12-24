@@ -19,6 +19,21 @@ enum Commands {
         /// Image to run (e.g. ubuntu:latest)
         image: String,
     },
+    /// Stop a VM
+    Stop {
+        /// VM ID
+        id: String,
+    },
+    /// Pause a VM
+    Pause {
+         /// VM ID
+        id: String,
+    },
+    /// Resume a VM
+    Resume {
+         /// VM ID
+        id: String,
+    },
     /// List active VMs (Not implemented yet)
     Ps,
 }
@@ -51,25 +66,73 @@ async fn main() -> Result<()> {
                 .send()
                 .await;
 
-            match resp {
-                Ok(response) => {
-                     if response.status().is_success() {
-                         let body: RunResponse = response.json().await?;
-                         info!("Success! VM ID: {}, Status: {}", body.vm_id, body.status);
-                     } else {
-                         error!("Daemon returned error: {}", response.status());
-                     }
-                }
-                Err(e) => {
-                    error!("Failed to connect to daemon at {}: {}", daemon_url, e);
-                    info!("Is 'ignited' running?");
-                }
-            }
+            handle_response(resp, daemon_url).await?;
+        }
+        Commands::Stop { id } => {
+            info!("Requesting to stop VM: {}", id);
+            let resp = client.post(format!("{}/stop/{}", daemon_url, id))
+                .send()
+                .await;
+             handle_simple_response(resp, daemon_url).await?;
+        }
+        Commands::Pause { id } => {
+             info!("Requesting to pause VM: {}", id);
+            let resp = client.post(format!("{}/pause/{}", daemon_url, id))
+                .send()
+                .await;
+             handle_simple_response(resp, daemon_url).await?;
+        }
+        Commands::Resume { id } => {
+             info!("Requesting to resume VM: {}", id);
+            let resp = client.post(format!("{}/resume/{}", daemon_url, id))
+                .send()
+                .await;
+             handle_simple_response(resp, daemon_url).await?;
         }
         Commands::Ps => {
             info!("ps command not yet implemented on daemon.");
         }
     }
 
+    Ok(())
+}
+
+async fn handle_response(resp: Result<reqwest::Response, reqwest::Error>, url: &str) -> Result<()> {
+     match resp {
+        Ok(response) => {
+             if response.status().is_success() {
+                 let body: RunResponse = response.json().await?;
+                 info!("Success! VM ID: {}, Status: {}", body.vm_id, body.status);
+             } else {
+                 let status = response.status();
+                 let text = response.text().await.unwrap_or_default();
+                 error!("Daemon returned error: {} - {}", status, text);
+             }
+        }
+        Err(e) => {
+            error!("Failed to connect to daemon at {}: {}", url, e);
+            info!("Is 'ignited' running?");
+        }
+    }
+    Ok(())
+}
+
+async fn handle_simple_response(resp: Result<reqwest::Response, reqwest::Error>, url: &str) -> Result<()> {
+     match resp {
+        Ok(response) => {
+             if response.status().is_success() {
+                 let text = response.text().await?;
+                 info!("Success: {}", text);
+             } else {
+                 let status = response.status();
+                 let text = response.text().await.unwrap_or_default();
+                 error!("Daemon returned error: {} - {}", status, text);
+             }
+        }
+        Err(e) => {
+            error!("Failed to connect to daemon at {}: {}", url, e);
+            info!("Is 'ignited' running?");
+        }
+    }
     Ok(())
 }

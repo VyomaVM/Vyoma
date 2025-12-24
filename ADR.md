@@ -72,3 +72,13 @@ This document tracks significant architectural decisions, their context, consequ
 *   **Risk Mitigation**:
     *   The `ignite-core` library is designed to be modular. If one component fails (e.g., networking), the others (storage) remain testable.
     *   Future CI pipeline MUST run on a bare-metal or nested-virt enabled runner with passwordless sudo to fully validate the `#[ignore]` tests.
+
+## 008. Daemon State Management
+*   **Date**: 2025-12-24
+*   **Decision**: Store active VM instances in `ignited` memory using `Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<VmmManager>>>>>`.
+*   **Reasoning**:
+    *   Daemon is the source of truth for running processes.
+    *   `VmmManager` owns the `std::process::Child` handle.
+    *   `tokio::sync::Mutex` allows locking the VMM handle across async API calls (like pause/resume) which wait for Firecracker's HTTP response.
+*   **Consequences**:
+    *   Daemon restart loses control of running VMs (orphaned processes). (Future task: State persistence/recovery).

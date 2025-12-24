@@ -145,6 +145,26 @@ impl VmmManager {
         self.api_request("/actions", "PUT", Some(&action)).await
     }
 
+    /// Pauses the VM.
+    pub async fn pause_instance(&self) -> Result<()> {
+        #[derive(Serialize)]
+        struct StateChange {
+            state: String,
+        }
+        let change = StateChange { state: "Paused".to_string() };
+        self.api_request("/vm", "PATCH", Some(&change)).await
+    }
+
+    /// Resumes the VM.
+    pub async fn resume_instance(&self) -> Result<()> {
+        #[derive(Serialize)]
+        struct StateChange {
+            state: String,
+        }
+        let change = StateChange { state: "Resumed".to_string() };
+        self.api_request("/vm", "PATCH", Some(&change)).await
+    }
+
     pub fn kill(&mut self) -> Result<()> {
         if let Some(mut child) = self.process.take() {
             info!("Killing Firecracker process");
