@@ -131,3 +131,11 @@ This document tracks significant architectural decisions, their context, consequ
     *   `FROM <image>`: Starts from a base image.
     *   `RUN <cmd>`: Executes command in chroot.
     *   `COPY <src> <dest>`: Copies files from build context to image.
+
+## 013. Resource Limits Strategy (Cgroups v2)
+*   **Date**: 2025-12-24
+*   **Decision**: Use Cgroups v2 explicitly to manage VM resource limits (CPU, Memory).
+*   **Reasoning**:
+    *   **Modern Standard**: Cgroups v2 is the standard on modern Linux (Ubuntu 22.04+).
+    *   **Firecracker Integration**: Firecracker supports running inside a Cgroup. We will create a parent cgroup `ignite.slice` and sub-cgroups for each VM `ignite-<id>.scope`.
+    *   **Implementation**: We will use direct file system manipulation of `/sys/fs/cgroup/ignite.slice/` for simplicity and control, rather than `systemd-run` for now, unless `systemd` integration is strictly required. Direct FS manipulation is more educational and portable for a "from scratch" project build.

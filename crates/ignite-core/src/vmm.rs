@@ -55,6 +55,10 @@ impl VmmManager {
             log_sender: tx,
         }
     }
+    
+    pub fn get_pid(&self) -> Option<u32> {
+        self.process.as_ref().map(|p| p.id())
+    }
 
     /// Spawns the Firecracker process in a background thread/process.
     pub fn start_daemon(&mut self, binary_path: &str) -> Result<()> {

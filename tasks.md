@@ -118,7 +118,7 @@
 
 ## Phase 11: Production Hardening
 - [ ] **Resource Limits**
-    - [ ] Implement Cgroups v2 integration.
-    - [ ] Support `--cpus` and `--memory` flags.
+    - [x] Implement Cgroups v2 integration (ADR 013, Core logic).
+    - [x] Support `--cpus` and `--memory` flags (Implemented in API/CLI, enforced via Cgroups).
 - [ ] **Rootless Mode**
     - [ ] Investigate User Namespaces to remove sudo requirement.

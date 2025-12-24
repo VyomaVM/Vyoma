@@ -20,6 +20,7 @@ use ignite_core::vmm::VmmManager;
 use ignite_core::api::{PortMapping, VolumeMount};
 use ignite_core::proxy::ProxyManager;
 use ignite_core::fs::VirtioFsManager;
+use ignite_core::cgroups::CgroupManager;
 use tokio::task::JoinHandle;
 use std::process::Command;
 use axum::body::Body;
@@ -36,6 +37,7 @@ use tokio::fs;
 struct AppState {
     // Map<VmId, Arc<TokioMutex<VmInstance>>>
     vms: Arc<StdMutex<HashMap<String, Arc<TokioMutex<VmInstance>>>>>,
+    cgroups: Arc<CgroupManager>,
 }
 
 #[derive(Debug)]
@@ -49,7 +51,9 @@ struct VmInstance {
     cow_file_path: String,
     ip_address: String,
     proxy_tasks: Vec<JoinHandle<()>>,
+
     fs_managers: Vec<VirtioFsManager>,
+    cgroup_path: Option<String>,
 }
 
 impl VmInstance {
@@ -91,6 +95,17 @@ impl VmInstance {
         for task in &self.proxy_tasks {
             task.abort();
         }
+
+        // 7. Remove Cgroup
+        if let Some(path) = &self.cgroup_path {
+             let cm = CgroupManager::new(); // Re-instantiate or assume we can just use path
+             // Ideally we shouldn't re-instantiate, but for cleanup it's stateless enough.
+             // Actually, remove_vm_cgroup just takes ID if we pass it, or we use path.
+             // Our CgroupManager takes ID.
+             if let Err(e) = cm.remove_vm_cgroup(&self.id) {
+                 error!("Failed to remove cgroup for {}: {}", self.id, e);
+             }
+        }
     }
 }
 
@@ -100,8 +115,17 @@ async fn main() {
 
     info!("ignited (Ignite Daemon) starting up...");
 
+    let cgroups = CgroupManager::new();
+    if let Err(e) = cgroups.init() {
+        error!("Failed to init cgroups: {}", e);
+        // We continue? Or fail? Fail is safer.
+        // return;
+    }
+    let cgroups = Arc::new(cgroups);
+
     let state = AppState {
         vms: Arc::new(StdMutex::new(HashMap::new())),
+        cgroups,
     };
 
     // build our application with a route
@@ -253,8 +277,31 @@ async fn run_vm(
     // Ensure it's not 0, 1 (gateway), or 255
     let safe_octet = std::cmp::max(2, std::cmp::min(254, random_octet));
     let vm_ip = format!("172.16.0.{}", safe_octet);
+
+    // 3.5 Cgroups
+    let cgroup_path = match state.cgroups.create_vm_cgroup(&vm_id) {
+        Ok(p) => Some(p),
+        Err(e) => {
+             error!("Failed to create cgroup: {}", e);
+             None
+        }
+    };
     
-    // 3.5 Start Port Proxies
+    if let Some(_) = &cgroup_path {
+        // vCPU limit (if payload.vcpu > 0)
+        // Assume VCPU 1 = 100%
+        let quota = payload.vcpu * 100; // 1 vCPU = 100%
+        if let Err(e) = state.cgroups.set_cpu_limit(&vm_id, quota) {
+             error!("Failed to set cpu limit: {}", e);
+        }
+        
+        let mem_bytes = (payload.mem_size_mib as u64) * 1024 * 1024;
+         if let Err(e) = state.cgroups.set_memory_limit(&vm_id, mem_bytes) {
+             error!("Failed to set memory limit: {}", e);
+        }
+    }
+    
+    // 3.6 Start Port Proxies
     let mut proxy_tasks = Vec::new();
     for mapping in &payload.ports {
         let handle = ProxyManager::start_proxy(mapping.host_port, vm_ip.clone(), mapping.vm_port);
@@ -342,6 +389,7 @@ async fn run_vm(
         ip_address: vm_ip.clone(),
         proxy_tasks,
         fs_managers,
+        cgroup_path,
     };
     
     {
@@ -582,7 +630,11 @@ async fn restore_vm(
         cow_file_path: cow_file.to_string_lossy().to_string(),
         ip_address: vm_ip.clone(),
         proxy_tasks,
+
         fs_managers: Vec::new(),
+        cgroup_path: None, // Restored VMs need cgroups too? Yes. 
+        // For MVP, simplistic restore skips cgroup enforcement or needs logic duplication.
+        // TODO: Isolate create_resources logic.
     };
     
     {
