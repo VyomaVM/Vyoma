@@ -380,9 +380,8 @@ async fn snapshot_vm(
 struct RestoreRequest {
     snapshot_path: String,
     mem_path: String,
+    cow_path: String, // Path to the existing COW file to restore from
     // For MVP, we presume the disk state (COW) is already in a known location or passed here.
-    // Ideally, "Teleportation" means standardizing the bundle format.
-    // For now, let's assume we are "Teleporting" to the SAME machine but a new VM ID for verification.
     original_vm_id: String, // To find the original disk resources
 }
 
@@ -420,14 +419,20 @@ async fn restore_vm(
     
     // 3. New COW File
     let cow_file = vm_dir.join("diff.cow");
-    let size_mb = 2048;
-    StorageManager::create_cow_file(&cow_file, size_mb).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // Copy existing COW state directly
+    info!("Restoring disk state from {}", payload.cow_path);
+    std::fs::copy(&payload.cow_path, &cow_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to copy COW file: {}", e)))?;
+    
+    // We don't create empty cow file anymore
+    // StorageManager::create_cow_file(&cow_file, size_mb)...
     
     // 4. Setup Storage Stack
     let base_loop = StorageManager::setup_loop_device(&base_image_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Loop base: {}", e)))?;
     let cow_loop = StorageManager::setup_loop_device(&cow_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Loop cow: {}", e)))?;
     
     let dm_name = format!("ign-{}", vm_id);
+    let size_mb = 2048; // Must match original
     let size_sectors = size_mb * 1024 * 1024 / 512;
     let dm_path = StorageManager::create_dm_snapshot(&dm_name, &base_loop, &cow_loop, size_sectors).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DM create: {}", e)))?;
     
