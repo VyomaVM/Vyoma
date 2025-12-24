@@ -41,11 +41,25 @@ enum Commands {
         /// VM ID
         id: String,
     },
+    /// Restore a VM from a snapshot
+    Restore {
+        /// Path to snapshot file
+        snapshot_path: String,
+        /// Path to memory file
+        mem_path: String,
+    },
 }
 
 #[derive(Serialize)]
 struct RunRequest {
     image: String,
+}
+
+#[derive(Serialize)]
+struct RestoreRequest {
+    snapshot_path: String,
+    mem_path: String,
+    original_vm_id: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -122,6 +136,21 @@ async fn main() -> Result<()> {
                 .send()
                 .await;
              handle_simple_response(resp, daemon_url).await?;
+        }
+        Commands::Restore { snapshot_path, mem_path } => {
+            info!("Requesting to restore VM from: {}", snapshot_path);
+            let payload = RestoreRequest {
+                snapshot_path,
+                mem_path,
+                original_vm_id: "unknown".to_string(),
+            };
+            
+            let resp = client.post(format!("{}/restore", daemon_url))
+                .json(&payload)
+                .send()
+                .await;
+                
+            handle_response(resp, daemon_url).await?;
         }
     }
 
