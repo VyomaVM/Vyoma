@@ -12,6 +12,7 @@ use tar::Archive; // Removed Builder since we will use tar::Builder inline
 use futures::stream::StreamExt;
 
 use ignite_core::api::PortMapping;
+use ignite_core::api::VolumeMount;
 
 #[derive(Parser)]
 #[command(name = "ign")]
@@ -32,6 +33,10 @@ enum Commands {
         /// Port mappings (e.g. -p 8080:80)
         #[arg(short, long)]
         ports: Vec<String>,
+        
+        /// Volume mounts (e.g. -v /home/user/app:/app)
+        #[arg(short, long)]
+        volumes: Vec<String>,
     },
     /// Stop a VM
     Stop {
@@ -90,6 +95,7 @@ enum Commands {
 struct RunRequest {
     image: String,
     ports: Vec<PortMapping>,
+    volumes: Vec<VolumeMount>,
 }
 
 #[derive(Serialize)]
@@ -114,7 +120,7 @@ async fn main() -> Result<()> {
     let daemon_url = "http://127.0.0.1:3000";
 
     match cli.command {
-        Commands::Run { image, ports } => {
+        Commands::Run { image, ports, volumes } => {
             info!("Requesting to run image: {}", image);
             
             let mut port_mappings = Vec::new();
@@ -130,8 +136,22 @@ async fn main() -> Result<()> {
                 
                 port_mappings.push(PortMapping { host_port, vm_port });
             }
+
+            let mut volume_mounts = Vec::new();
+            for v in volumes {
+                let parts: Vec<&str> = v.split(':').collect();
+                 if parts.len() != 2 {
+                    error!("Invalid volume format: {}. Use host:vm (e.g., /foo:/bar)", v);
+                    return Ok(());
+                }
+                volume_mounts.push(VolumeMount {
+                    host_path: parts[0].to_string(),
+                    vm_path: parts[1].to_string(),
+                    read_only: false, // Default RW for now
+                });
+            }
             
-            let payload = RunRequest { image, ports: port_mappings };
+            let payload = RunRequest { image, ports: port_mappings, volumes: volume_mounts };
             
             let resp = client.post(format!("{}/run", daemon_url))
                 .json(&payload)

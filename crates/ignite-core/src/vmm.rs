@@ -245,6 +245,27 @@ impl VmmManager {
         self.api_request("/snapshot/create", "PUT", Some(&config)).await
     }
 
+    /// Adds a VirtioFS file system.
+    pub async fn add_file_system(&self, fs_id: &str, socket_path: &str, tag: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct FileSystemConfig {
+            device_id: String,
+            socket_path: String,
+            tag: String,
+        }
+        
+        let config = FileSystemConfig {
+            device_id: fs_id.to_string(),
+            socket_path: socket_path.to_string(),
+            tag: tag.to_string(),
+        };
+        // Note: Endpoint might be /filesystems/ID or just /filesystems?
+        // Firecracker docs usually say PUT /filesystems/<id>
+        // But let's try /filesystems/id
+        let endpoint = format!("/filesystems/{}", fs_id);
+        self.api_request(&endpoint, "PUT", Some(&config)).await
+    }
+
     /// Loads a snapshot from disk.
     /// This should be called before starting the instance (and instead of booting a kernel).
     pub async fn load_snapshot(&self, snapshot_path: &str, mem_file_path: &str) -> Result<()> {

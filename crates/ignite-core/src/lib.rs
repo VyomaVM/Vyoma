@@ -5,6 +5,7 @@ pub mod network;
 pub mod vmm;
 pub mod api;
 pub mod proxy;
+pub mod fs;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

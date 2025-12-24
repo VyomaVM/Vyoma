@@ -17,8 +17,9 @@ use tracing::{info, error};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
 use ignite_core::vmm::VmmManager;
-use ignite_core::api::PortMapping;
+use ignite_core::api::{PortMapping, VolumeMount};
 use ignite_core::proxy::ProxyManager;
+use ignite_core::fs::VirtioFsManager;
 use tokio::task::JoinHandle;
 use std::process::Command;
 
@@ -39,6 +40,7 @@ struct VmInstance {
     cow_file_path: String,
     ip_address: String,
     proxy_tasks: Vec<JoinHandle<()>>,
+    fs_managers: Vec<VirtioFsManager>,
 }
 
 impl VmInstance {
@@ -127,6 +129,8 @@ struct RunRequest {
     mem_size_mib: u32,
     #[serde(default)]
     ports: Vec<PortMapping>,
+    #[serde(default)]
+    volumes: Vec<VolumeMount>,
 }
 
 fn default_vcpu() -> u32 { 1 }
@@ -246,7 +250,7 @@ async fn run_vm(
         let handle = ProxyManager::start_proxy(mapping.host_port, vm_ip.clone(), mapping.vm_port);
         proxy_tasks.push(handle);
     }
-    
+
     let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0::eth0:off init=/bin/sh", vm_ip, "172.16.0.1");
     // "ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>"
     // Correct kernel format: ip=172.16.0.X::172.16.0.1:255.255.255.0::eth0:off
@@ -282,6 +286,29 @@ async fn run_vm(
          let _ = vmm.kill();
          return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add net: {}", e)));
     }
+
+    // Add Volumes
+    let mut fs_managers = Vec::new();
+    for (idx, vol) in payload.volumes.iter().enumerate() {
+        let tag = format!("vol{}", idx);
+        let socket_path = vm_dir.join(format!("fs_{}.sock", idx));
+        
+        let mut fs_mgr = VirtioFsManager::new(&tag, socket_path.to_string_lossy().as_ref());
+        // Start virtiofsd
+        if let Err(e) = fs_mgr.start(&vol.host_path) {
+             let _ = vmm.kill();
+             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start virtiofsd for {}: {}", vol.host_path, e)));
+        }
+        
+        // Add to FC
+        if let Err(e) = vmm.add_file_system(&tag, socket_path.to_string_lossy().as_ref(), &tag).await {
+              let _ = vmm.kill();
+              let _ = fs_mgr.kill(); 
+              return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add fs: {}", e)));
+        }
+        
+        fs_managers.push(fs_mgr);
+    }
     
     if let Err(e) = vmm.set_machine_config(payload.vcpu, payload.mem_size_mib).await {
           let _ = vmm.kill();
@@ -304,6 +331,7 @@ async fn run_vm(
         cow_file_path: cow_file.to_string_lossy().to_string(),
         ip_address: vm_ip.clone(),
         proxy_tasks,
+        fs_managers,
     };
     
     {
@@ -544,6 +572,7 @@ async fn restore_vm(
         cow_file_path: cow_file.to_string_lossy().to_string(),
         ip_address: vm_ip.clone(),
         proxy_tasks,
+        fs_managers: Vec::new(),
     };
     
     {

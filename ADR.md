@@ -106,3 +106,16 @@ This document tracks significant architectural decisions, their context, consequ
 *   **Consequences**:
     *   Clients must handle SSE parsing (implemented in CLI).
     *   Logs are transient in memory (buffer size 100). If no one is listening, logs are dropped. (Acceptable for "streaming" logs, but means we don't have "history" unless we implement persistent logging).
+
+## 011. Volume Mount Strategy (VirtioFS)
+*   **Date**: 2025-12-24
+*   **Decision**: Use **VirtioFS** with the Rust-based `virtiofsd` binary for sharing host directories.
+*   **Reasoning**:
+    *   Standard way to share files with Firecracker.
+    *   Performance is near-native for cached reads.
+    *   Allows "Hot Reload" workflows (editing code on host, running in VM).
+*   **Implementation**:
+    *   **Dependency**: Requires `virtiofsd` binary in `bin/` or system PATH.
+    *   **Daemon**: Spawns a dedicated `virtiofsd` process for *each* shared volume (or one per VM handling multiple paths if supported, but usually one socket per fs).
+    *   **Socket**: `virtiofsd` listens on a Unix socket, Firecracker connects to it.
+    *   **Kernel**: Depends on guest kernel having `virtiofs`.

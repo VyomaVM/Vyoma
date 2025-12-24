@@ -1,0 +1,68 @@
+use anyhow::{anyhow, Result};
+use std::process::{Command, Child};
+use std::path::Path;
+use tracing::info;
+
+#[derive(Debug)]
+pub struct VirtioFsManager {
+    process: Option<Child>,
+    socket_path: String,
+    tag: String,
+}
+
+impl VirtioFsManager {
+    pub fn new(tag: &str, socket_path: &str) -> Self {
+        Self {
+            tag: tag.to_string(),
+            socket_path: socket_path.to_string(),
+            process: None,
+        }
+    }
+
+    pub fn start(&mut self, source_path: &str) -> Result<()> {
+        info!("Starting virtiofsd for tag {} on socket {}", self.tag, self.socket_path);
+        
+        // Ensure socket doesn't exist
+        if Path::new(&self.socket_path).exists() {
+            std::fs::remove_file(&self.socket_path)?;
+        }
+
+        // Try to find virtiofsd in bin/ or PATH
+        // We assume it's "virtiofsd" in PATH or "bin/virtiofsd" relative to CWD
+        let binary = if Path::new("bin/virtiofsd").exists() {
+            "bin/virtiofsd"
+        } else {
+            "virtiofsd"
+        };
+        
+        let child = Command::new(binary)
+            .arg(format!("--socket-path={}", self.socket_path))
+            .arg(format!("--shared-dir={}", source_path))
+            .arg("--sandbox=none") // Required for unprivileged execution (if rootless) or simple setup
+            .arg("--seccomp=none") // Relax security for MVP
+             // .arg("--log-level=debug")
+            .spawn()
+            .map_err(|e| anyhow!("Failed to spawn virtiofsd (is it installed?): {}", e))?;
+
+        self.process = Some(child);
+        Ok(())
+    }
+
+    pub fn kill(&mut self) -> Result<()> {
+        if let Some(mut child) = self.process.take() {
+            info!("Killing virtiofsd for tag {}", self.tag);
+            child.kill()?;
+            child.wait()?;
+        }
+        if Path::new(&self.socket_path).exists() {
+            let _ = std::fs::remove_file(&self.socket_path);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for VirtioFsManager {
+    fn drop(&mut self) {
+        let _ = self.kill();
+    }
+}

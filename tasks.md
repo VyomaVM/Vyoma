@@ -104,9 +104,9 @@
 
 ## Phase 9: Persistence & Data (The "Hot Reload" Gap)
 - [ ] **Volume Mounts**
-    - [ ] Research & Enable VirtioFS in Kernel/Firecracker.
-    - [ ] Implement `ign run -v <host_path>:<vm_path>`.
-    - [ ] Start `virtiofsd` daemon alongside `ignited`.
+    - [x] Research & Enable VirtioFS in Kernel/Firecracker.
+    - [x] Implement `ign run -v <host_path>:<vm_path>`.
+    - [x] Start `virtiofsd` daemon alongside `ignited`.
     - [ ] **Verification**: Edit file on host, see change in VM.
 
 ## Phase 10: The Builder (Ignitefile)
