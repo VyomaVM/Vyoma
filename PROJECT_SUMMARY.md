@@ -15,7 +15,7 @@ The project is organized as a Rust Workspace with three main crates:
 
 2.  **`ign` (CLI)**: The user-facing command-line tool.
     *   Communicates with the daemon via HTTP.
-    *   Commands: `run`, `stop`, `ps`, `snapshot`, `restore`, `export`, `import`.
+    *   Commands: `run`, `stop`, `ps`, `snapshot`, `restore`, `export`, `import`, `logs`, `build`, `doctor`.
 
 3.  **`ignite-core` (Library)**: Shared business logic.
     *   **`oci`**: Pulls Docker images (manifests/layers) and parses them.
@@ -51,6 +51,10 @@ The project is organized as a Rust Workspace with three main crates:
 ### 5. Innovation: Time Travel
 *   **Git Integration**: The daemon explicitly initializes a Git repository inside the VM's state directory.
 *   **Versioning**: Every snapshot action triggers a `git commit`, enabling version control of the VM's entire runtime state.
+
+### 6. Production Hardening
+*   **Resource Limits**: Uses Cgroups v2 to enforce CPU (`--vcpu`) and Memory (`--memory`) limits on VM processes.
+*   **Health Checks**: `ign doctor` validates system prerequisites (KVM, Cgroups, binaries, networking) to parse environment readiness.
 
 ## Directory Structure
 ```text
@@ -109,5 +113,5 @@ micro-vm-ecosystem/
 
 ## Future Work
 *   **Secure Networking**: Add CNI plugin support.
-*   **Resource Limits**: fully utilize cgroups for CPU/Memory isolation (Firecracker does this, but Ignite can expose fine-grained controls).
+*   **Rootless Mode**: Investigate running Daemon without root privileges (User Namespaces).
 *   **Registry Auth**: Support private Docker registries.
