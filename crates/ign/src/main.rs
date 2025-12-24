@@ -47,6 +47,8 @@ enum Commands {
         snapshot_path: String,
         /// Path to memory file
         mem_path: String,
+        /// Path to COW file
+        cow_path: String,
     },
 }
 
@@ -59,6 +61,7 @@ struct RunRequest {
 struct RestoreRequest {
     snapshot_path: String,
     mem_path: String,
+    cow_path: String,
     original_vm_id: String,
 }
 
@@ -137,11 +140,12 @@ async fn main() -> Result<()> {
                 .await;
              handle_simple_response(resp, daemon_url).await?;
         }
-        Commands::Restore { snapshot_path, mem_path } => {
+        Commands::Restore { snapshot_path, mem_path, cow_path } => {
             info!("Requesting to restore VM from: {}", snapshot_path);
             let payload = RestoreRequest {
                 snapshot_path,
                 mem_path,
+                cow_path,
                 original_vm_id: "unknown".to_string(),
             };
             
