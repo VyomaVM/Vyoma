@@ -92,3 +92,32 @@
     - [x] Implement `ign import <file>` (unpacking and restoring).
 - [x] **Time Travel**
     - [x] Implement Git integration for snapshots.
+
+## Phase 8: Developer Accessibility (The "Localhost" Gap)
+- [x] **Port Mapping**
+    - [x] Implement `ign run -p <host>:<vm>` parsing.
+    - [x] Build TCP Proxy (forward host port to VM IP).
+    - [x] **Verification**: Access web server in VM via `localhost:8080`. (Verified via curl)
+- [ ] **Log Streaming**
+    - [ ] Implement `ign logs -f <id>`.
+    - [ ] Stream stdout/stderr from Firecracker to CLI.
+
+## Phase 9: Persistence & Data (The "Hot Reload" Gap)
+- [ ] **Volume Mounts**
+    - [ ] Research & Enable VirtioFS in Kernel/Firecracker.
+    - [ ] Implement `ign run -v <host_path>:<vm_path>`.
+    - [ ] Start `virtiofsd` daemon alongside `ignited`.
+    - [ ] **Verification**: Edit file on host, see change in VM.
+
+## Phase 10: The Builder (Ignitefile)
+- [ ] **Build System**
+    - [ ] Define `Ignitefile` syntax (FROM, RUN, COPY).
+    - [ ] Implement `ign build` command.
+    - [ ] execute steps -> snapshot -> export as new image.
+
+## Phase 11: Production Hardening
+- [ ] **Resource Limits**
+    - [ ] Implement Cgroups v2 integration.
+    - [ ] Support `--cpus` and `--memory` flags.
+- [ ] **Rootless Mode**
+    - [ ] Investigate User Namespaces to remove sudo requirement.

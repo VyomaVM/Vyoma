@@ -82,3 +82,15 @@ This document tracks significant architectural decisions, their context, consequ
     *   `tokio::sync::Mutex` allows locking the VMM handle across async API calls (like pause/resume) which wait for Firecracker's HTTP response.
 *   **Consequences**:
     *   Daemon restart loses control of running VMs (orphaned processes). (Future task: State persistence/recovery).
+
+## 009. Port Mapping Strategy (Phase 8)
+*   **Date**: 2025-12-24
+*   **Decision**: Use userspace TCP proxying (Tokio tasks) instead of `iptables` DNAT.
+*   **Reasoning**:
+    1.  **Flexibility**: Allows mapping `localhost:8080` to VM `80` without managing complex NAT tables or avoiding port conflicts on the bridge.
+    2.  **Safety**: Isolates the port opening logic to the `ignited` process. If the daemon dies, the ports close automatically (unlike iptables rules which persist).
+    3.  **Future-Proofing**: Aligns with "Rootless" goals (Phase 11). Userspace proxies don't strictly *need* root (if binding non-privileged ports), whereas `iptables` always does.
+*   **Implementation**:
+    *   Spawn a `tokio::task` for each mapped port.
+    *   Bind `0.0.0.0:HOST_PORT`.
+    *   Accept connections and pump bytes to `VM_IP:VM_PORT`.

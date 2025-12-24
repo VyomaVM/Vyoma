@@ -10,6 +10,8 @@ use flate2::read::GzDecoder;
 use flate2::Compression;
 use tar::Archive; // Removed Builder since we will use tar::Builder inline
 
+use ignite_core::api::PortMapping;
+
 #[derive(Parser)]
 #[command(name = "ign")]
 #[command(about = "Ignite: Docker for Micro-VMs", long_about = None)]
@@ -23,7 +25,12 @@ enum Commands {
     /// Run a new VM
     Run {
         /// Image to run (e.g. ubuntu:latest)
+        /// Image to run (e.g. ubuntu:latest)
         image: String,
+        
+        /// Port mappings (e.g. -p 8080:80)
+        #[arg(short, long)]
+        ports: Vec<String>,
     },
     /// Stop a VM
     Stop {
@@ -73,6 +80,7 @@ enum Commands {
 #[derive(Serialize)]
 struct RunRequest {
     image: String,
+    ports: Vec<PortMapping>,
 }
 
 #[derive(Serialize)]
@@ -97,9 +105,24 @@ async fn main() -> Result<()> {
     let daemon_url = "http://127.0.0.1:3000";
 
     match cli.command {
-        Commands::Run { image } => {
+        Commands::Run { image, ports } => {
             info!("Requesting to run image: {}", image);
-            let payload = RunRequest { image };
+            
+            let mut port_mappings = Vec::new();
+            for p in ports {
+                let parts: Vec<&str> = p.split(':').collect();
+                if parts.len() != 2 {
+                    error!("Invalid port format: {}. Use host:vm (e.g., 8080:80)", p);
+                    return Ok(());
+                }
+                
+                let host_port = parts[0].parse::<u16>().map_err(|_| anyhow::anyhow!("Invalid host port: {}", parts[0]))?;
+                let vm_port = parts[1].parse::<u16>().map_err(|_| anyhow::anyhow!("Invalid vm port: {}", parts[1]))?;
+                
+                port_mappings.push(PortMapping { host_port, vm_port });
+            }
+            
+            let payload = RunRequest { image, ports: port_mappings };
             
             let resp = client.post(format!("{}/run", daemon_url))
                 .json(&payload)

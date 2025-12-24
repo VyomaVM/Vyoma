@@ -12,6 +12,9 @@ use tracing::{info, error};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
 use ignite_core::vmm::VmmManager;
+use ignite_core::api::PortMapping;
+use ignite_core::proxy::ProxyManager;
+use tokio::task::JoinHandle;
 use std::process::Command;
 
 #[derive(Clone)]
@@ -30,6 +33,7 @@ struct VmInstance {
     loop_devices: Vec<String>,
     cow_file_path: String,
     ip_address: String,
+    proxy_tasks: Vec<JoinHandle<()>>,
 }
 
 impl VmInstance {
@@ -65,6 +69,11 @@ impl VmInstance {
         // Let's delete it for "ephemeral" feeling.
         if std::path::Path::new(&self.cow_file_path).exists() {
              let _ = std::fs::remove_file(&self.cow_file_path);
+        }
+        
+        // 6. Abort Proxy Tasks
+        for task in &self.proxy_tasks {
+            task.abort();
         }
     }
 }
@@ -110,6 +119,8 @@ struct RunRequest {
     vcpu: u32,
     #[serde(default = "default_mem")]
     mem_size_mib: u32,
+    #[serde(default)]
+    ports: Vec<PortMapping>,
 }
 
 fn default_vcpu() -> u32 { 1 }
@@ -222,6 +233,14 @@ async fn run_vm(
     // Ensure it's not 0, 1 (gateway), or 255
     let safe_octet = std::cmp::max(2, std::cmp::min(254, random_octet));
     let vm_ip = format!("172.16.0.{}", safe_octet);
+    
+    // 3.5 Start Port Proxies
+    let mut proxy_tasks = Vec::new();
+    for mapping in &payload.ports {
+        let handle = ProxyManager::start_proxy(mapping.host_port, vm_ip.clone(), mapping.vm_port);
+        proxy_tasks.push(handle);
+    }
+    
     let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0::eth0:off init=/bin/sh", vm_ip, "172.16.0.1");
     // "ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>"
     // Correct kernel format: ip=172.16.0.X::172.16.0.1:255.255.255.0::eth0:off
@@ -269,6 +288,7 @@ async fn run_vm(
     }
     
     // Success - Store State
+
     let instance = VmInstance {
         vmm,
         id: vm_id.clone(),
@@ -277,6 +297,7 @@ async fn run_vm(
         loop_devices: vec![base_loop, cow_loop],
         cow_file_path: cow_file.to_string_lossy().to_string(),
         ip_address: vm_ip.clone(),
+        proxy_tasks,
     };
     
     {
@@ -507,6 +528,7 @@ async fn restore_vm(
     }
 
     // Success - Store State
+    let proxy_tasks = Vec::new(); // No ports restored for now
     let instance = VmInstance {
         vmm,
         id: vm_id.clone(),
@@ -515,6 +537,7 @@ async fn restore_vm(
         loop_devices: vec![base_loop, cow_loop],
         cow_file_path: cow_file.to_string_lossy().to_string(),
         ip_address: vm_ip.clone(),
+        proxy_tasks,
     };
     
     {

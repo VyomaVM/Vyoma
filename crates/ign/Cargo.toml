@@ -17,3 +17,4 @@ tar = "0.4"
 flate2 = "1.0"
 dirs = "5.0"
 tempfile = "3.8" # To locate .ignite dir
+ignite-core = { path = "../ignite-core" }
