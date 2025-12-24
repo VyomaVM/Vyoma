@@ -3,7 +3,17 @@ use serde::{Serialize, Deserialize};
 use std::path::Path;
 use std::process::{Command, Child};
 use std::time::Duration;
+use std::fmt;
 use tracing::info;
+
+impl fmt::Debug for VmmManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VmmManager")
+         .field("socket_path", &self.socket_path)
+         .field("process", &if self.process.is_some() { "Some(Child)" } else { "None" })
+         .finish()
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BootSource {
@@ -143,6 +153,25 @@ impl VmmManager {
         }
         let action = Action { action_type: "InstanceStart".to_string() };
         self.api_request("/actions", "PUT", Some(&action)).await
+    }
+
+    /// Adds a network interface.
+    pub async fn add_network_interface(&self, iface_id: &str, host_dev_name: &str, guest_mac: Option<&str>) -> Result<()> {
+        #[derive(Serialize)]
+        struct NetworkInterface {
+            iface_id: String,
+            host_dev_name: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            guest_mac: Option<String>,
+        }
+        
+        let net = NetworkInterface {
+            iface_id: iface_id.to_string(),
+            host_dev_name: host_dev_name.to_string(),
+            guest_mac: guest_mac.map(|s| s.to_string()),
+        };
+        let endpoint = format!("/network-interfaces/{}", iface_id);
+        self.api_request(&endpoint, "PUT", Some(&net)).await
     }
 
     /// Pauses the VM.

@@ -15,10 +15,56 @@ use ignite_core::vmm::VmmManager;
 
 #[derive(Clone)]
 struct AppState {
-    // Map<VmId, Arc<TokioMutex<VmmManager>>>
-    // Outer Mutex (Std) creates synchronization for the Map.
-    // Inner Mutex (Tokio) creates synchronization for the VmmManager (and allows async locking).
-    vms: Arc<StdMutex<HashMap<String, Arc<TokioMutex<VmmManager>>>>>,
+    // Map<VmId, Arc<TokioMutex<VmInstance>>>
+    vms: Arc<StdMutex<HashMap<String, Arc<TokioMutex<VmInstance>>>>>,
+}
+
+#[derive(Debug)]
+struct VmInstance {
+    vmm: VmmManager,
+    // Resources to clean up
+    id: String,
+    tap_name: String,
+    dm_name: String,
+    loop_devices: Vec<String>,
+    cow_file_path: String,
+}
+
+impl VmInstance {
+    pub async fn cleanup(&mut self) {
+        info!("Cleaning up VM resources for {}", self.id);
+        
+        // 1. Kill VMM
+        if let Err(e) = self.vmm.kill() {
+            error!("Failed to kill VMM: {}", e);
+        }
+
+        // 2. Remove Network Interface
+        if let Err(e) = NetworkManager::remove_interface(&self.tap_name) {
+             error!("Failed to remove TAP {}: {}", self.tap_name, e);
+        }
+        
+        // 3. Remove DM Device
+        // This might fail if VMM is still holding it open, but kill() should have released it.
+        // Sometimes a small delay helps or retry logic in remove_dm_device
+        if let Err(e) = StorageManager::remove_dm_device(&self.dm_name) {
+             error!("Failed to remove DM {}: {}", self.dm_name, e);
+        }
+
+        // 4. Detach Loop Devices
+        for dev in &self.loop_devices {
+            if let Err(e) = StorageManager::detach_loop_device(dev) {
+                error!("Failed to detach loop {}: {}", dev, e);
+            }
+        }
+        
+        // 5. Remove COW file (optional, maybe keep for persistence?)
+        // For now, let's keep it to allow debugging, or maybe delete it. 
+        // Let's delete it for "ephemeral" feeling.
+        if std::path::Path::new(&self.cow_file_path).exists() {
+             let _ = std::fs::remove_file(&self.cow_file_path);
+        }
+    }
 }
 
 #[tokio::main]
@@ -55,13 +101,26 @@ async fn health_check() -> &'static str {
 #[derive(Deserialize)]
 struct RunRequest {
     image: String,
+    #[serde(default = "default_vcpu")]
+    vcpu: u32,
+    #[serde(default = "default_mem")]
+    mem_size_mib: u32,
 }
+
+fn default_vcpu() -> u32 { 1 }
+fn default_mem() -> u32 { 512 }
 
 #[derive(Serialize)]
 struct RunResponse {
     vm_id: String,
     status: String,
+    ip_address: String,
 }
+
+use ignite_core::oci::OciManager;
+use ignite_core::layers::LayerManager;
+use ignite_core::storage::StorageManager;
+use ignite_core::network::NetworkManager;
 
 async fn run_vm(
     State(state): State<AppState>,
@@ -69,30 +128,155 @@ async fn run_vm(
 ) -> Result<Json<RunResponse>, (StatusCode, String)> {
     info!("Received request to run image: {}", payload.image);
     
-    // Generate ID
-    let vm_id = uuid::Uuid::new_v4().to_string();
-    let socket_path = format!("/tmp/firecracker_{}.socket", vm_id);
+    // 1. Setup Directories
+    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+    let ignite_root = home.join(".ignite");
+    let images_root = ignite_root.join("images");
+    let vms_root = ignite_root.join("vms");
     
-    // Create VmmManager
-    let mut vmm = VmmManager::new(&socket_path);
+    std::fs::create_dir_all(&images_root).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    std::fs::create_dir_all(&vms_root).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // 2. Pull Image & Prepare Base
+    // Strategy: 
+    // - Check if image dir exists (simple caching).
+    // - If not, pull and unpack.
+    // - Create base.ext4.
     
-    let binary = "bin/firecracker";
+    // Sanitize image name for path (replace / and : with _)
+    let safe_image_name = payload.image.replace('/', "_").replace(':', "_");
+    let image_store_path = images_root.join(&safe_image_name);
+    let base_image_file = image_store_path.join("base.ext4");
     
-    // Start Daemon
-    if let Err(e) = vmm.start_daemon(binary) {
-        error!("Failed to start firecracker: {}", e);
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start VMM: {}", e)));
+    if !base_image_file.exists() {
+        info!("Image {} not found locally. Pulling...", payload.image);
+        std::fs::create_dir_all(&image_store_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        
+        let mut oci = OciManager::new();
+        let manifest_json = oci.pull_manifest(&payload.image).await.map_err(|e| (StatusCode::BAD_REQUEST, format!("Pull failed: {}", e)))?;
+        
+        let layers = oci.parse_layers(&manifest_json).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        
+        let temp_unpack_dir = tempfile::tempdir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        
+        for digest in layers {
+             let layer_data = oci.pull_layer(&payload.image, &digest).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed layer {}: {}", digest, e)))?;
+             LayerManager::unpack_layer(&layer_data, temp_unpack_dir.path()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Unpack failed: {}", e)))?;
+        }
+        
+        // Create base Ext4
+        // Default 2GB for base
+        let size_mb = 2048;
+        StorageManager::create_empty_file(&base_image_file, size_mb).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        StorageManager::format_ext4(&base_image_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        StorageManager::populate_image(&base_image_file, temp_unpack_dir.path()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Populate failed: {}", e)))?;
+    } else {
+        info!("Image found locally at {:?}", base_image_file);
     }
 
-    // Store in state
+    // 3. VM Specific Setup
+    let vm_id = uuid::Uuid::new_v4().to_string();
+    let vm_dir = vms_root.join(&vm_id);
+    std::fs::create_dir_all(&vm_dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // COW File
+    let cow_file = vm_dir.join("diff.cow");
+    let size_mb = 2048; // Same as base for simplicity, or larger?
+    StorageManager::create_cow_file(&cow_file, size_mb).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // Loop Devices
+    let base_loop = StorageManager::setup_loop_device(&base_image_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Loop base: {}", e)))?;
+    let cow_loop = StorageManager::setup_loop_device(&cow_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Loop cow: {}", e)))?;
+    
+    // DM Snapshot
+    let dm_name = format!("ign-{}", vm_id);
+    // Size in sectors: 2048MB * 1024 * 1024 / 512 = 4,194,304
+    let size_sectors = size_mb * 1024 * 1024 / 512;
+    let dm_path = StorageManager::create_dm_snapshot(&dm_name, &base_loop, &cow_loop, size_sectors).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DM create: {}", e)))?;
+    
+    // Network
+    // Ensure bridge exists
+    let bridge_name = "ign0";
+    let bridge_cidr = "172.16.0.1/24";
+    NetworkManager::setup_bridge(bridge_name, bridge_cidr).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Bridge setup: {}", e)))?;
+    NetworkManager::setup_nat("172.16.0.0/24").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("NAT setup: {}", e)))?;
+    
+    let tap_name = format!("tap{}", &vm_id[0..8]); // shorten for ifname limit
+    NetworkManager::setup_tap(&tap_name, bridge_name).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("TAP setup: {}", e)))?;
+    
+    // Determine VM IP (Hack: random in subnet or increment. For MVP, we need to manage this state.)
+    // TODO: Implement proper IPAM.
+    // Hack: Generate random byte for last octet unique-ish.
+    // This is race-prone but "good enough" for single user manual test.
+    let random_octet = rand::random::<u8>(); 
+    // Ensure it's not 0, 1 (gateway), or 255
+    let safe_octet = std::cmp::max(2, std::cmp::min(254, random_octet));
+    let vm_ip = format!("172.16.0.{}", safe_octet);
+    let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0::eth0:off", vm_ip, "172.16.0.1");
+    // "ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>"
+    // Correct kernel format: ip=172.16.0.X::172.16.0.1:255.255.255.0::eth0:off
+    
+    // 4. Firecracker VMM
+    let socket_path = format!("/tmp/firecracker_{}.socket", vm_id);
+    let mut vmm = VmmManager::new(&socket_path);
+    
+    // Kernel path: bin/vmlinux (relative to CWD of daemon)
+    let kernel_path = "bin/vmlinux";
+    if !std::path::Path::new(kernel_path).exists() {
+         return Err((StatusCode::INTERNAL_SERVER_ERROR, "Kernel binary (bin/vmlinux) not found".into()));
+    }
+
+    if let Err(e) = vmm.start_daemon("bin/firecracker") {
+         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start FC: {}", e)));
+    }
+    
+    // Config
+    if let Err(e) = vmm.set_boot_source(kernel_path, &boot_args).await {
+        let _ = vmm.kill();
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Boot source: {}", e)));
+    }
+    
+    if let Err(e) = vmm.add_drive("rootfs", &dm_path, true).await {
+         let _ = vmm.kill();
+         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add drive: {}", e)));
+    }
+    
+    // Add network
+    // guest MAC: random
+    if let Err(e) = vmm.add_network_interface("eth0", &tap_name, None).await {
+         let _ = vmm.kill();
+         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add net: {}", e)));
+    }
+    
+    if let Err(e) = vmm.set_machine_config(payload.vcpu, payload.mem_size_mib).await {
+          let _ = vmm.kill();
+         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Machine config: {}", e)));
+    }
+    
+    if let Err(e) = vmm.start_instance().await {
+         let _ = vmm.kill();
+         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Start instance: {}", e)));
+    }
+    
+    // Success - Store State
+    let instance = VmInstance {
+        vmm,
+        id: vm_id.clone(),
+        tap_name: tap_name.clone(),
+        dm_name: dm_name.clone(),
+        loop_devices: vec![base_loop, cow_loop],
+        cow_file_path: cow_file.to_string_lossy().to_string(),
+    };
+    
     {
         let mut vms = state.vms.lock().unwrap();
-        vms.insert(vm_id.clone(), Arc::new(TokioMutex::new(vmm)));
+        vms.insert(vm_id.clone(), Arc::new(TokioMutex::new(instance)));
     }
 
     Ok(Json(RunResponse {
         vm_id,
         status: "Running".to_string(),
+        ip_address: vm_ip,
     }))
 }
 
@@ -102,15 +286,15 @@ async fn stop_vm(
 ) -> Result<String, (StatusCode, String)> {
     info!("Request to stop VM: {}", id);
     
-    let vmm_arc = {
+    let vm_arc = {
         let mut vms = state.vms.lock().unwrap();
         vms.remove(&id)
     };
 
-    if let Some(vmm_mutex) = vmm_arc {
-        let mut vmm = vmm_mutex.lock().await;
-        vmm.kill().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        Ok(format!("VM {} stopped", id))
+    if let Some(vm_mutex) = vm_arc {
+        let mut vm = vm_mutex.lock().await;
+        vm.cleanup().await;
+        Ok(format!("VM {} stopped and cleaned up", id))
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
     }
@@ -122,14 +306,14 @@ async fn pause_vm(
 ) -> Result<String, (StatusCode, String)> {
     info!("Request to pause VM: {}", id);
     
-    let vmm_arc = {
+    let vm_arc = {
         let vms = state.vms.lock().unwrap();
         vms.get(&id).cloned()
     };
     
-    if let Some(vmm_mutex) = vmm_arc {
-        let vmm = vmm_mutex.lock().await;
-        vmm.pause_instance().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if let Some(vm_mutex) = vm_arc {
+        let vm = vm_mutex.lock().await;
+        vm.vmm.pause_instance().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         Ok(format!("VM {} paused", id))
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
@@ -142,14 +326,14 @@ async fn resume_vm(
 ) -> Result<String, (StatusCode, String)> {
     info!("Request to resume VM: {}", id);
     
-    let vmm_arc = {
+     let vm_arc = {
         let vms = state.vms.lock().unwrap();
         vms.get(&id).cloned()
     };
     
-    if let Some(vmm_mutex) = vmm_arc {
-        let vmm = vmm_mutex.lock().await;
-        vmm.resume_instance().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if let Some(vm_mutex) = vm_arc {
+        let vm = vm_mutex.lock().await;
+        vm.vmm.resume_instance().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         Ok(format!("VM {} resumed", id))
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))

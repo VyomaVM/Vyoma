@@ -26,40 +26,40 @@ enum ManifestResponse {
     V2(ManifestV2),
 }
 
-#[derive(Deserialize, Debug)]
-struct ManifestList {
-    manifests: Vec<ManifestDescriptor>,
+#[derive(Deserialize, Debug, Clone)]
+pub struct ManifestList {
+    pub manifests: Vec<ManifestDescriptor>,
 }
 
-#[derive(Deserialize, Debug)]
-struct ManifestDescriptor {
-    digest: String,
-    platform: Platform,
+#[derive(Deserialize, Debug, Clone)]
+pub struct ManifestDescriptor {
+    pub digest: String,
+    pub platform: Platform,
 }
 
-#[derive(Deserialize, Debug)]
-struct Platform {
-    architecture: String,
-    os: String,
+#[derive(Deserialize, Debug, Clone)]
+pub struct Platform {
+    pub architecture: String,
+    pub os: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[allow(dead_code)]
-struct ManifestV2 {
-    config: ConfigDescriptor,
-    layers: Vec<LayerDescriptor>,
+pub struct ManifestV2 {
+    pub config: ConfigDescriptor,
+    pub layers: Vec<LayerDescriptor>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[allow(dead_code)]
-struct ConfigDescriptor {
-    digest: String,
+pub struct ConfigDescriptor {
+    pub digest: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[allow(dead_code)]
-struct LayerDescriptor {
-    digest: String,
+pub struct LayerDescriptor {
+    pub digest: String,
 }
 
 impl OciManager {
@@ -143,7 +143,7 @@ impl OciManager {
                  .await?;
              
              return Ok(resolved_resp.text().await?);
-        }
+         }
 
         Ok(body)
     }
@@ -190,5 +190,12 @@ impl OciManager {
         };
         
         (repository, tag.to_string())
+    }
+
+    pub fn parse_layers(&self, manifest_json: &str) -> Result<Vec<String>> {
+        let v2: ManifestV2 = serde_json::from_str(manifest_json)
+            .map_err(|e| anyhow!("Failed to parse Manifest V2: {}", e))?;
+        
+        Ok(v2.layers.iter().map(|l| l.digest.clone()).collect())
     }
 }
