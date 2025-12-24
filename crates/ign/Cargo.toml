@@ -13,3 +13,7 @@ reqwest = { version = "0.11", features = ["json"] }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+tar = "0.4"
+flate2 = "1.0"
+dirs = "5.0"
+tempfile = "3.8" # To locate .ignite dir
