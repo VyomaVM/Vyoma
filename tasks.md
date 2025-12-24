@@ -81,8 +81,14 @@
     - [x] **Verification**: End-to-end `cli -> daemon -> vm` flow.
 
 ## Phase 7: Advanced Features (Innovation)
-- [ ] **Teleportation**
-    - [ ] Implement Snapshot logic.
-    - [ ] Implement Transfer logic (scp/rsync wrapper).
+- [ ] **Snapshotting (Teleportation Part 1)**
+    - [ ] Implement `create_snapshot` in `VmmManager` (Firecracker API).
+    - [ ] Implement `load_snapshot` in `VmmManager`.
+    - [ ] Add `ign snapshot <id>` command.
+    - [ ] Add `ign restore <snapshot_path>` command.
+    - [ ] **Verification**: Pause VM, Snapshot, Kill, Restore, Verify running state.
+- [ ] **Teleportation (Part 2)**
+    - [ ] Implement export/import logic (bundling snapshot + cow file).
+    - [ ] **Verification**: Move snapshot bundle to new directory and restore.
 - [ ] **Time Travel**
     - [ ] Implement Git integration for snapshots.

@@ -36,6 +36,11 @@ enum Commands {
     },
     /// List active VMs (Not implemented yet)
     Ps,
+    /// Create a snapshot of a VM
+    Snapshot {
+        /// VM ID
+        id: String,
+    },
 }
 
 #[derive(Serialize)]
@@ -110,6 +115,13 @@ async fn main() -> Result<()> {
                     error!("Failed to connect to daemon at {}: {}", daemon_url, e);
                 }
             }
+        }
+        Commands::Snapshot { id } => {
+            info!("Requesting to snapshot VM: {}", id);
+            let resp = client.post(format!("{}/snapshot/{}", daemon_url, id))
+                .send()
+                .await;
+             handle_simple_response(resp, daemon_url).await?;
         }
     }
 

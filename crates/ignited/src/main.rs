@@ -88,6 +88,7 @@ async fn main() {
         .route("/pause/:id", post(pause_vm))
         .route("/resume/:id", post(resume_vm))
         .route("/ps", get(list_vms))
+        .route("/snapshot/:id", post(snapshot_vm))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
@@ -338,6 +339,37 @@ async fn resume_vm(
         let vm = vm_mutex.lock().await;
         vm.vmm.resume_instance().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         Ok(format!("VM {} resumed", id))
+    } else {
+        Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
+    }
+}
+
+async fn snapshot_vm(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<String, (StatusCode, String)> {
+    info!("Request to snapshot VM: {}", id);
+    
+    let vm_arc = {
+        let vms = state.vms.lock().unwrap();
+        vms.get(&id).cloned()
+    };
+    
+    if let Some(vm_mutex) = vm_arc {
+        let vm = vm_mutex.lock().await;
+        
+        // Define paths
+        let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+        let vm_dir = home.join(".ignite").join("vms").join(&id);
+        let snapshot_path = vm_dir.join("snapshot.snap");
+        let mem_path = vm_dir.join("memory.mem");
+        
+        vm.vmm.create_snapshot(
+            snapshot_path.to_string_lossy().as_ref(), 
+            mem_path.to_string_lossy().as_ref()
+        ).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        
+        Ok(format!("Snapshot created for VM {}", id))
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
     }

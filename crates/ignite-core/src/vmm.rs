@@ -194,6 +194,44 @@ impl VmmManager {
         self.api_request("/vm", "PATCH", Some(&change)).await
     }
 
+    /// Creates a snapshot of the current VM state.
+    /// The VM must be paused first.
+    pub async fn create_snapshot(&self, snapshot_path: &str, mem_file_path: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct SnapshotConfig {
+            snapshot_path: String,
+            mem_file_path: String,
+            snapshot_type: String, // Full or Diff
+        }
+        
+        let config = SnapshotConfig {
+            snapshot_path: snapshot_path.to_string(),
+            mem_file_path: mem_file_path.to_string(),
+            snapshot_type: "Full".to_string(),
+        };
+        
+        self.api_request("/snapshot/create", "PUT", Some(&config)).await
+    }
+
+    /// Loads a snapshot from disk.
+    /// This should be called before starting the instance (and instead of booting a kernel).
+    pub async fn load_snapshot(&self, snapshot_path: &str, mem_file_path: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct LoadConfig {
+            snapshot_path: String,
+            mem_file_path: String,
+            // enable_diff_snapshots: bool, // Optional
+            // resume_vm: bool, // Optional
+        }
+        
+        let config = LoadConfig {
+            snapshot_path: snapshot_path.to_string(),
+            mem_file_path: mem_file_path.to_string(),
+        };
+        
+        self.api_request("/snapshot/load", "PUT", Some(&config)).await
+    }
+
     pub fn kill(&mut self) -> Result<()> {
         if let Some(mut child) = self.process.take() {
             info!("Killing Firecracker process");
