@@ -222,7 +222,7 @@ async fn run_vm(
     // Ensure it's not 0, 1 (gateway), or 255
     let safe_octet = std::cmp::max(2, std::cmp::min(254, random_octet));
     let vm_ip = format!("172.16.0.{}", safe_octet);
-    let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0::eth0:off", vm_ip, "172.16.0.1");
+    let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0::eth0:off init=/bin/sh", vm_ip, "172.16.0.1");
     // "ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>"
     // Correct kernel format: ip=172.16.0.X::172.16.0.1:255.255.255.0::eth0:off
     
@@ -371,10 +371,21 @@ async fn snapshot_vm(
         let snapshot_path = vm_dir.join("snapshot.snap");
         let mem_path = vm_dir.join("memory.mem");
         
-        vm.vmm.create_snapshot(
+        // 1. Pause VM (Required for snapshot)
+        vm.vmm.pause_instance().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to pause: {}", e)))?;
+        
+        // 2. Create Snapshot
+        let snap_result = vm.vmm.create_snapshot(
             snapshot_path.to_string_lossy().as_ref(), 
             mem_path.to_string_lossy().as_ref()
-        ).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).await;
+        
+        // 3. Resume VM (Always resume, even if snapshot failed)
+        if let Err(e) = vm.vmm.resume_instance().await {
+            error!("Failed to resume VM {} after snapshot: {}", id, e);
+        }
+        
+        snap_result.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Snapshot failed: {}", e)))?;
         
         // Commit snapshot to Git
         if let Err(e) = git_commit(&vm_dir, &format!("Snapshot {}", id)) {
@@ -551,6 +562,16 @@ async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {
 fn git_init(path: &std::path::Path) -> std::io::Result<()> {
     Command::new("git")
         .arg("init")
+        .current_dir(path)
+        .output()?;
+        
+    Command::new("git")
+        .args(&["config", "user.email", "ignite@daemon"])
+        .current_dir(path)
+        .output()?;
+        
+    Command::new("git")
+        .args(&["config", "user.name", "Ignite Daemon"])
         .current_dir(path)
         .output()?;
     Ok(())

@@ -10,29 +10,63 @@ impl NetworkManager {
     pub fn setup_bridge(name: &str, ip_cidr: &str) -> Result<()> {
         info!("Setting up bridge '{}' with IP {}", name, ip_cidr);
 
-        // 1. Create bridge
-        // sudo ip link add name <name> type bridge
-        let status = Command::new("sudo")
-            .args(&["ip", "link", "add", "name", name, "type", "bridge"])
-            .status()?;
-            
-        if !status.success() {
-             // It might already exist, which is fine, but let's check or fail.
-             // For robustness, usually we check existence first or ignore "File exists"
-             // But for now, let's treat failure as error (user can run cleanup).
-             return Err(anyhow!("Failed to create bridge {}. Status: {}", name, status));
+        // 0. Check if already exists
+        // sudo ip link show <name>
+        let check_status = Command::new("sudo")
+             .args(&["ip", "link", "show", name])
+             .stdout(std::process::Stdio::null())
+             .stderr(std::process::Stdio::null())
+             .status();
+
+        let exists = match check_status {
+            Ok(s) => s.success(),
+            Err(_) => false,
+        };
+
+        if !exists {
+            // 1. Create bridge
+            // sudo ip link add name <name> type bridge
+            let status = Command::new("sudo")
+                .args(&["ip", "link", "add", "name", name, "type", "bridge"])
+                .status()?;
+                
+            if !status.success() {
+                 return Err(anyhow!("Failed to create bridge {}. Status: {}", name, status));
+            }
+        } else {
+             info!("Bridge {} already exists, skipping creation.", name);
         }
 
         // 2. Assign IP
-        // sudo ip addr add <cidr> dev <name>
+        // Check if IP is already assigned: ip addr show <name> | grep <ip>
+        // Getting exact match is tricky with shell commands.
+        // Alternative: Just try `ip addr add` and ignore "File exists" (exit code 2).
+        
         let status = Command::new("sudo")
             .args(&["ip", "addr", "add", ip_cidr, "dev", name])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()?;
             
         if !status.success() {
-            // Rollback?
-            let _ = Self::remove_interface(name);
-            return Err(anyhow!("Failed to assign IP to bridge. Status: {}", status));
+             // If exit code is 2 (or 254 on some systems), it usually means "File exists" (IP exists)
+             // We can check the code or just verify if the IP is there.
+             // Let's verify.
+             let check = Command::new("ip")
+                .args(&["addr", "show", "dev", name])
+                .output()?;
+             let output = String::from_utf8_lossy(&check.stdout);
+             // ip_cidr is like "172.16.0.1/24"
+             // verification: just check for the IP part "172.16.0.1"
+             let ip_only = ip_cidr.split('/').next().unwrap_or(ip_cidr);
+             
+             if !output.contains(ip_only) {
+                  // Real failure
+                  let _ = Self::remove_interface(name);
+                  return Err(anyhow!("Failed to assign IP to bridge. Status: {}", status));
+             } else {
+                 info!("IP {} already assigned to {}", ip_only, name);
+             }
         }
 
         // 3. Set UP
@@ -40,6 +74,8 @@ impl NetworkManager {
         let status = Command::new("sudo")
             .args(&["ip", "link", "set", "dev", name, "up"])
             .status()?;
+            
+        // ... remainder ...
 
         if !status.success() {
              let _ = Self::remove_interface(name);
@@ -109,29 +145,50 @@ impl NetworkManager {
     pub fn setup_nat(bridge_cidr: &str) -> Result<()> {
         info!("Enabling NAT/Masquerade for source {}", bridge_cidr);
         
-        // sudo iptables -t nat -A POSTROUTING -s <cidr> ! -d <cidr> -j MASQUERADE
-        // Note: The ! -d <cidr> prevents NAT for internal bridge traffic (optional but good practice)
-        let status = Command::new("sudo")
+        // Check if rule exists: -C (Check)
+        let check_status = Command::new("sudo")
             .args(&[
-                "iptables", "-t", "nat", "-A", "POSTROUTING",
+                "iptables", "-t", "nat", "-C", "POSTROUTING",
                 "-s", bridge_cidr,
                 "!", "-d", bridge_cidr,
                 "-j", "MASQUERADE"
             ])
-            .status()?;
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
 
-        if !status.success() {
-             return Err(anyhow!("Failed to setup iptables NAT. Status: {}", status));
+        let exists = match check_status {
+            Ok(s) => s.success(),
+            Err(_) => false,
+        };
+
+        if !exists {
+            let output = Command::new("sudo")
+                .args(&[
+                    "iptables", "-t", "nat", "-A", "POSTROUTING",
+                    "-s", bridge_cidr,
+                    "!", "-d", bridge_cidr,
+                    "-j", "MASQUERADE"
+                ])
+                .output()?;
+
+            if !output.status.success() {
+                 let stderr = String::from_utf8_lossy(&output.stderr);
+                 return Err(anyhow!("Failed to setup iptables NAT. Output: {}", stderr));
+            }
+        } else {
+            info!("NAT rule for {} already exists.", bridge_cidr);
         }
 
         // Enable IPv4 forwarding
         // sudo sysctl -w net.ipv4.ip_forward=1
-        let status = Command::new("sudo")
+        let output = Command::new("sudo")
             .args(&["sysctl", "-w", "net.ipv4.ip_forward=1"])
-            .status()?;
+            .output()?;
 
-        if !status.success() {
-             warn!("Failed to enable ip_forward. Internet access might fail.");
+        if !output.status.success() {
+             let stderr = String::from_utf8_lossy(&output.stderr);
+             warn!("Failed to enable ip_forward: {}", stderr);
         }
 
         Ok(())
