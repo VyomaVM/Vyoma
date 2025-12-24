@@ -81,7 +81,7 @@ micro-vm-ecosystem/
 ## How to Run
 
 ### Prerequisites
-*   Linux (or WSL2).
+*   Linux (Ubuntu recommended).
 *   `sudo` access (passwordless recommended for automation).
 *   `firecracker` binary in `bin/`.
 *   `vmlinux` kernel in `bin/`.

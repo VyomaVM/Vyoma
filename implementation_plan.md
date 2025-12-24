@@ -53,5 +53,5 @@ We cannot copy a 500MB disk for every container start.
 
 ## Next Steps
 1.  **Environment**: Since we need `KVM`, `TAP`, and `Device Mapper`, implementing this directly on Windows is impossible.
-2.  **Constraint**: We MUST run this inside **WSL2** (Ubuntu distro).
-3.  **Action**: Set up a Rust development environment inside WSL2.
+2.  **Constraint**: We run this on **Pure Linux (Ubuntu)**.
+3.  **Action**: Set up a Rust development environment.

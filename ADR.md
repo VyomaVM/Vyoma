@@ -59,7 +59,7 @@ This document tracks significant architectural decisions, their context, consequ
 
 ## 007. Verification Strategy & Known Gaps
 *   **Date**: 2025-12-23
-*   **Context**: Development is happening in a constrained environment (WSL2/Container) where Root/Sudo and KVM permissions are not always available to the automated test runner.
+*   **Context**: Development is happening in a **Pure Linux (Ubuntu)** environment. Root/Sudo and KVM permissions should be available.
 *   **Decision**:
     1.  Implement logic robustly using best-practice wrappers.
     2.  Write Integration Tests for all privileged operations but mark them as `#[ignore]`.
