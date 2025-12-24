@@ -85,6 +85,7 @@ micro-vm-ecosystem/
 *   `sudo` access (passwordless recommended for automation).
 *   `firecracker` binary in `bin/`.
 *   `vmlinux` kernel in `bin/`.
+*   `virtiofsd` binary in `bin/` (for Volume Mounts).
 
 ### Steps
 1.  **Build**:
