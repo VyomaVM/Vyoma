@@ -110,10 +110,11 @@
     - [ ] **Verification**: Edit file on host, see change in VM.
 
 ## Phase 10: The Builder (Ignitefile)
-- [ ] **Build System**
-    - [ ] Define `Ignitefile` syntax (FROM, RUN, COPY).
-    - [ ] Implement `ign build` command.
-    - [ ] execute steps -> snapshot -> export as new image.
+- [x] **Core**: Define `Ignitefile` syntax (FROM, RUN, COPY).
+- [x] **CLI**: Implement `ign build` command (context tarball + POST).
+- [x] **Daemon**: Implement `POST /build` (Unpack -> Parse -> Execute).
+- [ ] **Daemon**: Implement `RUN` via `chroot` (Verified implementation).
+- [ ] **Daemon**: Implement `FROM` caching logic (Basic copy implemented).
 
 ## Phase 11: Production Hardening
 - [ ] **Resource Limits**

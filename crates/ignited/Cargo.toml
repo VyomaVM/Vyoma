@@ -19,5 +19,8 @@ rand = "0.8"
 dirs = "5.0"
 futures.workspace = true
 tokio-stream = { version = "0.1.17", features = ["sync"] }
+tar.workspace = true
+flate2.workspace = true
+tokio-util = { version = "0.7.17", features = ["io"] }
 
 

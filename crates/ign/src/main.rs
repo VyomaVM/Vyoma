@@ -89,6 +89,12 @@ enum Commands {
         #[arg(short = 'f', long)]
         follow: bool,
     },
+    /// Build a new image from an Ignitefile
+    Build {
+        /// Path to build context (directory containing Ignitefile)
+        #[arg(default_value = ".")]
+        path: String,
+    },
 }
 
 #[derive(Serialize)]
@@ -262,8 +268,48 @@ async fn main() -> Result<()> {
                  }
              }
         }
+        Commands::Build { path } => {
+            info!("Building image from context: {}", path);
+            build_image(&path, daemon_url).await?;
+        }
     }
 
+    Ok(())
+}
+
+async fn build_image(context_path: &str, daemon_url: &str) -> Result<()> {
+    let context_path = Path::new(context_path);
+    if !context_path.exists() {
+        return Err(anyhow::anyhow!("Context path does not exist: {:?}", context_path));
+    }
+    
+    // Create tarball in memory (or temp file if large, memory for now)
+    // Actually, reqwest Body can take a File.
+    // Let's tar to a temp file.
+    let temp_dir = tempfile::tempdir()?;
+    let tar_path = temp_dir.path().join("context.tar.gz");
+    let tar_file = File::create(&tar_path)?;
+    
+    let enc = GzEncoder::new(tar_file, Compression::default());
+    let mut tar = tar::Builder::new(enc);
+    
+    // Add directory content to tar (recursively)
+    tar.append_dir_all(".", context_path)?;
+    tar.finish()?;
+    
+    // Send to daemon
+    let file = tokio::fs::File::open(&tar_path).await?;
+    let stream = tokio_util::codec::FramedRead::new(file, tokio_util::codec::BytesCodec::new());
+    let body = reqwest::Body::wrap_stream(stream);
+    
+    let client = Client::new();
+    let resp = client.post(format!("{}/build", daemon_url))
+        .body(body)
+        .send()
+        .await;
+        
+    handle_simple_response(resp, daemon_url).await?;
+    
     Ok(())
 }
 

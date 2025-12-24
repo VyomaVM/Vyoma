@@ -119,3 +119,15 @@ This document tracks significant architectural decisions, their context, consequ
     *   **Daemon**: Spawns a dedicated `virtiofsd` process for *each* shared volume (or one per VM handling multiple paths if supported, but usually one socket per fs).
     *   **Socket**: `virtiofsd` listens on a Unix socket, Firecracker connects to it.
     *   **Kernel**: Depends on guest kernel having `virtiofs`.
+
+## 012. Builder Strategy (Ignitefile)
+*   **Date**: 2025-12-24
+*   **Decision**: Implement `ign build` via a Client-Server model where the Daemon performs the build using `chroot` for `RUN` instructions.
+*   **Reasoning**:
+    *   **Context**: The daemon manages the image store (`~/.ignite/images`), which is often root-owned or privileged.
+    *   **Performance**: `RUN` commands are executed via `chroot` on a mounted loopback device of the image. This avoids the overhead of booting a full Firecracker VM for every build step, similar to how Docker builds work (mostly).
+    *   **Simplicity**: We mimic Docker's context sending (streaming tarball to daemon).
+*   **Directives MVP**:
+    *   `FROM <image>`: Starts from a base image.
+    *   `RUN <cmd>`: Executes command in chroot.
+    *   `COPY <src> <dest>`: Copies files from build context to image.

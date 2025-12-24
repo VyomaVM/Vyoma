@@ -19,3 +19,4 @@ dirs = "5.0"
 tempfile = "3.8" # To locate .ignite dir
 ignite-core = { path = "../ignite-core" }
 futures.workspace = true
+tokio-util = { version = "0.7.17", features = ["codec"] }

@@ -7,7 +7,7 @@ use axum::{
     response::sse::{Event, Sse},
 };
 use tokio_stream::wrappers::BroadcastStream;
-use tokio_stream::StreamExt;
+// use tokio_stream::StreamExt;
 use futures::stream::Stream;
 use std::convert::Infallible;
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,15 @@ use ignite_core::proxy::ProxyManager;
 use ignite_core::fs::VirtioFsManager;
 use tokio::task::JoinHandle;
 use std::process::Command;
+use axum::body::Body;
+use axum::body::Bytes;
+use tokio_util::io::StreamReader;
+use tokio::io::AsyncReadExt;
+use flate2::read::GzDecoder;
+use tar::Archive;
+use ignite_core::builder::{IgniteFile, Instruction};
+// use futures::StreamExt as FuturesStreamExt;
+use tokio::fs;
 
 #[derive(Clone)]
 struct AppState {
@@ -108,6 +117,7 @@ async fn main() {
         .route("/snapshot/:id", post(snapshot_vm))
         .route("/restore", post(restore_vm))
         .route("/logs/:id", get(stream_logs))
+        .route("/build", post(build_image))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
@@ -666,6 +676,7 @@ async fn stream_logs(
     if let Some(vm_mutex) = vm_arc {
         let vm = vm_mutex.lock().await;
         let rx = vm.vmm.subscribe_logs();
+        use tokio_stream::StreamExt;
         
         // Transform broadcast receiver into SSE stream
         let stream = BroadcastStream::new(rx)
@@ -681,3 +692,194 @@ async fn stream_logs(
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
     }
 }
+
+
+
+
+async fn build_image(
+    State(_state): State<AppState>,
+    body: Body,
+) -> Result<String, (StatusCode, String)> {
+    info!("Received build request");
+
+    // 1. Stream body to a temp file (tar.gz)
+    let temp_dir = tempfile::tempdir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let tar_path = temp_dir.path().join("context.tar.gz");
+    
+    {
+        // Convert Body stream to AsyncRead
+        use futures::StreamExt;
+        let stream = body.into_data_stream().map(|b| b.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
+        let mut reader = StreamReader::new(stream);
+        let mut file = tokio::fs::File::create(&tar_path).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        tokio::io::copy(&mut reader, &mut file).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+
+    // 2. Unpack
+    let tar_file = std::fs::File::open(&tar_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let decoder = GzDecoder::new(tar_file);
+    let mut archive = Archive::new(decoder);
+    let context_dir = temp_dir.path().join("context");
+    std::fs::create_dir(&context_dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    archive.unpack(&context_dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Unpack failed: {}", e)))?;
+
+    // 3. Parse Ignitefile
+    let ignitefile_path = context_dir.join("Ignitefile");
+    if !ignitefile_path.exists() {
+        return Err((StatusCode::BAD_REQUEST, "Ignitefile not found in build context".to_string()));
+    }
+    
+    let ignite_file = IgniteFile::parse(&ignitefile_path).map_err(|e| (StatusCode::BAD_REQUEST, format!("Parse error: {}", e)))?;
+    
+    // 4. Build Process
+    // We need to track the "current image base".
+    // 1. FROM -> Pull image, setup as current base.
+    //    We need to work on a COPY of the base, not the shared base.
+    //    So we create a new "build artifact" (a raw ext4 file).
+    
+    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+    let build_root = home.join(".ignite").join("builds");
+    std::fs::create_dir_all(&build_root).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    let build_id = uuid::Uuid::new_v4().to_string();
+    let current_image_path = build_root.join(format!("{}.ext4", build_id));
+    
+    // Track if we have a base
+    let mut has_base = false;
+    
+    for instr in ignite_file.instructions {
+        match instr {
+            Instruction::From(image) => {
+                info!("Building FROM {}", image);
+                //Reuse logic from run_vm to pull and create base, but we copy it to our build path
+                 // 1. Ensure local cache
+                let images_root = home.join(".ignite").join("images"); // Duplicated logic, cleanup later
+                let safe_image_name = image.replace('/', "_").replace(':', "_");
+                let image_store_path = images_root.join(&safe_image_name);
+                let base_cache = image_store_path.join("base.ext4");
+
+                if !base_cache.exists() {
+                    // Pull logic... (Duplicated from run_vm, should be shared in OciManager or ImageStore trait)
+                    // Call internal helper or duplicate for now
+                     return Err((StatusCode::NOT_IMPLEMENTED, "Image must be pulled first via 'ign run' or 'ign pull' for now.".to_string()));
+                }
+                
+                // Copy base cache to current_image_path
+                std::fs::copy(&base_cache, &current_image_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to copy base: {}", e)))?;
+                has_base = true;
+            }
+            Instruction::Run(cmd) => {
+                if !has_base { return Err((StatusCode::BAD_REQUEST, "RUN before FROM".to_string())); }
+                info!("RUN: {}", cmd);
+                
+                // Mount image
+                let loop_device = StorageManager::setup_loop_device(&current_image_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                
+                // Mount the loop device to a temp dir
+                let mount_point = tempfile::tempdir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                let mount_status = Command::new("sudo")
+                    .args(&["mount", &loop_device, mount_point.path().to_str().unwrap()])
+                    .status()
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                    
+                if !mount_status.success() {
+                     let _ = StorageManager::detach_loop_device(&loop_device);
+                     return Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to mount for RUN".to_string()));
+                }
+                
+                // Prepare resolv.conf for networking in chroot
+                // COPY host resolv.conf to chroot
+                let _ = std::fs::copy("/etc/resolv.conf", mount_point.path().join("etc/resolv.conf"));
+                
+                // Execute chroot
+                // cmd string might need splitting or sh -c
+                let chroot_status = Command::new("sudo")
+                    .args(&["chroot", mount_point.path().to_str().unwrap(), "/bin/sh", "-c", &cmd])
+                    .status()
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                
+                // Unmount
+                 let umount_status = Command::new("sudo")
+                    .args(&["umount", mount_point.path().to_str().unwrap()])
+                    .status()
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                    
+                 let _ = StorageManager::detach_loop_device(&loop_device);
+                 
+                 if !chroot_status.success() {
+                     return Err((StatusCode::BAD_REQUEST, format!("RUN command failed: {}", cmd)));
+                 }
+            }
+            Instruction::Copy { src, dest } => {
+                if !has_base { return Err((StatusCode::BAD_REQUEST, "COPY before FROM".to_string())); }
+                 info!("COPY {} -> {}", src, dest);
+                 
+                // Mount
+                let loop_device = StorageManager::setup_loop_device(&current_image_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                let mount_point = tempfile::tempdir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                let mount_status = Command::new("sudo")
+                    .args(&["mount", &loop_device, mount_point.path().to_str().unwrap()])
+                    .status()
+                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                
+                 if !mount_status.success() {
+                     let _ = StorageManager::detach_loop_device(&loop_device);
+                     return Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to mount for COPY".to_string()));
+                }
+                
+                // Perform Copy
+                // src is relative to context_dir
+                let src_path = context_dir.join(&src);
+                // dest is relative to mount_point
+                // handle absolute dest paths by stripping leading /
+                let safe_dest = dest.trim_start_matches('/');
+                let dest_path = mount_point.path().join(safe_dest);
+                
+                // Ensure parent dir exists
+                if let Some(parent) = dest_path.parent() {
+                    let _ = std::fs::create_dir_all(parent); // Ignore error (might need sudo?)
+                }
+                
+                // Use sudo cp to preserve permissions if simple copy fails?
+                // Or just fs::copy since we are running as root (daemon)
+                // Daemon runs as root?
+                // Yes, per prerequisites.
+                if src_path.is_dir() {
+                    // Recursive copy not implemented in std::fs
+                    // Use Command cp -r
+                   let cp_status = Command::new("cp")
+                        .arg("-r")
+                        .arg(&src_path)
+                        .arg(&dest_path)
+                        .status()
+                        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                    if !cp_status.success() {
+                          let _ = Command::new("sudo").args(&["umount", mount_point.path().to_str().unwrap()]).status();
+                           let _ = StorageManager::detach_loop_device(&loop_device);
+                         return Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to copy dir".to_string()));
+                    }
+                } else {
+                     match std::fs::copy(&src_path, &dest_path) {
+                         Ok(_) => {},
+                         Err(e) => {
+                             // clean up
+                             let _ = Command::new("sudo").args(&["umount", mount_point.path().to_str().unwrap()]).status();
+                             let _ = StorageManager::detach_loop_device(&loop_device);
+                             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed copy file: {}", e)));
+                         }
+                     }
+                }
+
+                 // Unmount
+                 let _ = Command::new("sudo").args(&["umount", mount_point.path().to_str().unwrap()]).status();
+                 let _ = StorageManager::detach_loop_device(&loop_device);
+            }
+        }
+    }
+    
+    // Done. The `current_image_path` is the result.
+    // Move it to images dir? Or return ID?
+    // For now return path.
+    Ok(format!("Build successful. Image at: {:?}", current_image_path))
+}
+
