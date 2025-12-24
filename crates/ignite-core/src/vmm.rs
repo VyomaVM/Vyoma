@@ -1,10 +1,13 @@
 use anyhow::{anyhow, Result};
 use serde::{Serialize, Deserialize};
 use std::path::Path;
-use std::process::{Command, Child};
+use std::process::{Command, Child, Stdio};
 use std::time::Duration;
 use std::fmt;
-use tracing::info;
+use std::thread;
+use std::io::{BufRead, BufReader};
+use tracing::{info, error};
+use tokio::sync::broadcast;
 
 impl fmt::Debug for VmmManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -40,13 +43,16 @@ pub struct MachineConfig {
 pub struct VmmManager {
     socket_path: String,
     process: Option<Child>,
+    log_sender: broadcast::Sender<String>,
 }
 
 impl VmmManager {
     pub fn new(socket_path: &str) -> Self {
+        let (tx, _) = broadcast::channel(100);
         Self {
             socket_path: socket_path.to_string(),
             process: None,
+            log_sender: tx,
         }
     }
 
@@ -59,11 +65,37 @@ impl VmmManager {
             std::fs::remove_file(&self.socket_path)?;
         }
 
-        let child = Command::new(binary_path)
+        let mut child = Command::new(binary_path)
             .arg("--api-sock")
             .arg(&self.socket_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| anyhow!("Failed to spawn firecracker: {}", e))?;
+
+        // Capture logs
+        let stdout = child.stdout.take().ok_or(anyhow!("Failed to capture stdout"))?;
+        let stderr = child.stderr.take().ok_or(anyhow!("Failed to capture stderr"))?;
+        let tx_out = self.log_sender.clone();
+        let tx_err = self.log_sender.clone();
+
+        thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                if let Ok(l) = line {
+                    let _ = tx_out.send(format!("[STDOUT] {}", l));
+                }
+            }
+        });
+
+        thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                 if let Ok(l) = line {
+                    let _ = tx_err.send(format!("[STDERR] {}", l));
+                }
+            }
+        });
 
         self.process = Some(child);
         
@@ -243,6 +275,9 @@ impl VmmManager {
            let _ = std::fs::remove_file(&self.socket_path);
         }
         Ok(())
+    }
+    pub fn subscribe_logs(&self) -> broadcast::Receiver<String> {
+        self.log_sender.subscribe()
     }
 }
 

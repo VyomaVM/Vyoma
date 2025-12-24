@@ -17,5 +17,7 @@ tempfile.workspace = true
 uuid = { version = "1.7", features = ["v4"] }
 rand = "0.8"
 dirs = "5.0"
+futures.workspace = true
+tokio-stream = { version = "0.1.17", features = ["sync"] }
 
 

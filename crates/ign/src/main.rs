@@ -9,6 +9,7 @@ use flate2::write::GzEncoder;
 use flate2::read::GzDecoder;
 use flate2::Compression;
 use tar::Archive; // Removed Builder since we will use tar::Builder inline
+use futures::stream::StreamExt;
 
 use ignite_core::api::PortMapping;
 
@@ -74,6 +75,14 @@ enum Commands {
     Import {
         /// Input file path (e.g. my-vm.tar.gz)
         input: String,
+    },
+    /// Stream logs from a VM
+    Logs {
+        /// VM ID
+        id: String,
+        /// Follow log output
+        #[arg(short = 'f', long)]
+        follow: bool,
     },
 }
 
@@ -204,6 +213,34 @@ async fn main() -> Result<()> {
         Commands::Import { input } => {
             info!("Importing VM from {}", input);
             import_vm(&input, daemon_url).await?;
+        }
+        Commands::Logs { id, follow: _ } => {
+             let resp = client.get(format!("{}/logs/{}", daemon_url, id))
+                .send()
+                .await?;
+             
+             if !resp.status().is_success() {
+                 error!("Failed to get logs: {}", resp.status());
+                 return Ok(());
+             }
+
+             let mut stream = resp.bytes_stream();
+             let mut buffer = String::new();
+             
+             while let Some(item) = stream.next().await {
+                 let bytes = item?;
+                 let chunk = String::from_utf8_lossy(&bytes);
+                 buffer.push_str(&chunk);
+                 
+                 while let Some(idx) = buffer.find('\n') {
+                     let line = buffer[..idx].to_string();
+                     buffer = buffer[idx+1..].to_string();
+                     
+                     if line.starts_with("data: ") {
+                         println!("{}", &line[6..]);
+                     }
+                 }
+             }
         }
     }
 

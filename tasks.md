@@ -98,9 +98,9 @@
     - [x] Implement `ign run -p <host>:<vm>` parsing.
     - [x] Build TCP Proxy (forward host port to VM IP).
     - [x] **Verification**: Access web server in VM via `localhost:8080`. (Verified via curl)
-- [ ] **Log Streaming**
-    - [ ] Implement `ign logs -f <id>`.
-    - [ ] Stream stdout/stderr from Firecracker to CLI.
+- [x] **Log Streaming**
+    - [x] Implement `ign logs -f <id>`.
+    - [x] Stream stdout/stderr from Firecracker to CLI.
 
 ## Phase 9: Persistence & Data (The "Hot Reload" Gap)
 - [ ] **Volume Mounts**

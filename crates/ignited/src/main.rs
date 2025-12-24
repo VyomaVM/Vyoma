@@ -4,7 +4,12 @@ use axum::{
     Json,
     extract::{State, Path},
     http::StatusCode,
+    response::sse::{Event, Sse},
 };
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
+use futures::stream::Stream;
+use std::convert::Infallible;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::collections::HashMap;
@@ -100,6 +105,7 @@ async fn main() {
         .route("/ps", get(list_vms))
         .route("/snapshot/:id", post(snapshot_vm))
         .route("/restore", post(restore_vm))
+        .route("/logs/:id", get(stream_logs))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
@@ -615,4 +621,34 @@ fn git_commit(path: &std::path::Path, message: &str) -> std::io::Result<()> {
         .current_dir(path)
         .output()?;
     Ok(())
+}
+
+async fn stream_logs(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
+    info!("Request to stream logs for VM: {}", id);
+    
+    let vm_arc = {
+        let vms = state.vms.lock().unwrap();
+        vms.get(&id).cloned()
+    };
+    
+    if let Some(vm_mutex) = vm_arc {
+        let vm = vm_mutex.lock().await;
+        let rx = vm.vmm.subscribe_logs();
+        
+        // Transform broadcast receiver into SSE stream
+        let stream = BroadcastStream::new(rx)
+            .filter_map(|try_msg| {
+                match try_msg {
+                    Ok(msg) => Some(Ok(Event::default().data(msg))),
+                    Err(_) => None, // Skip missed messages
+                }
+            });
+            
+        Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
+    } else {
+        Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
+    }
 }

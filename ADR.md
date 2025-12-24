@@ -94,3 +94,15 @@ This document tracks significant architectural decisions, their context, consequ
     *   Spawn a `tokio::task` for each mapped port.
     *   Bind `0.0.0.0:HOST_PORT`.
     *   Accept connections and pump bytes to `VM_IP:VM_PORT`.
+
+## 010. Log Streaming Strategy
+*   **Date**: 2025-12-24
+*   **Decision**: Use `tokio::sync::broadcast` + Server-Sent Events (SSE) for log streaming.
+*   **Reasoning**:
+    *   `broadcast` generic channel allows multiple consumers (though we currently use one main one, it allows future expansion like "ign logs" + "dashboard" simultaneously).
+    *   Firecracker logs (stdout/stderr) are captured via pipes and immediately pushed to the broadcast channel.
+    *   SSE (`text/event-stream`) is a standard HTTP protocol for streaming updates, supported natively by browsers and easy to consume in CLI via `reqwest`.
+    *   Avoids complex WebSocket setup just for read-only logs.
+*   **Consequences**:
+    *   Clients must handle SSE parsing (implemented in CLI).
+    *   Logs are transient in memory (buffer size 100). If no one is listening, logs are dropped. (Acceptable for "streaming" logs, but means we don't have "history" unless we implement persistent logging).
