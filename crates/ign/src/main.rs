@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use tracing::{info, error};
+use colored::Colorize;
 use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -93,8 +94,11 @@ enum Commands {
     Build {
         /// Path to build context (directory containing Ignitefile)
         #[arg(default_value = ".")]
+        #[arg(default_value = ".")]
         path: String,
     },
+    /// Check system dependencies and environment health
+    Doctor,
 }
 
 #[derive(Serialize)]
@@ -270,11 +274,108 @@ async fn main() -> Result<()> {
         }
         Commands::Build { path } => {
             info!("Building image from context: {}", path);
+            info!("Building image from context: {}", path);
             build_image(&path, daemon_url).await?;
+        }
+        Commands::Doctor => {
+             run_doctor().await?;
         }
     }
 
     Ok(())
+}
+
+async fn run_doctor() -> Result<()> {
+    println!("{}", "Ignite Doctor - System Health Check".bold().underline());
+    println!();
+    
+    let mut all_passed = true;
+    
+    // Helper to print status
+    let check = |name: &str, result: Result<bool>, required: bool| -> bool {
+        match result {
+            Ok(true) => {
+                println!("{} {}", "[OK]".green().bold(), name);
+                true
+            },
+            Ok(false) => {
+                if required {
+                    println!("{} {}", "[FAIL]".red().bold(), name);
+                    false
+                } else {
+                    println!("{} {}", "[WARN]".yellow().bold(), name);
+                    true // Warn doesn't fail overall
+                }
+            },
+            Err(e) => {
+                 if required {
+                    println!("{} {} ({})", "[FAIL]".red().bold(), name, e);
+                    false
+                 } else {
+                     println!("{} {} ({})", "[WARN]".yellow().bold(), name, e);
+                     true
+                 }
+            }
+        }
+    };
+    
+    // 1. KVM Access
+    if !check("KVM Device Access (/dev/kvm)", check_kvm(), true) { all_passed = false; }
+    
+    // 2. Cgroups
+    if !check("Cgroups v2 (/sys/fs/cgroup)", check_cgroups(), true) { all_passed = false; }
+    
+    // 3. Binaries
+    if !check("Firecracker Binary", check_binary("firecracker"), true) { all_passed = false; }
+    if !check("Virtiofsd Binary", check_binary("virtiofsd"), true) { all_passed = false; }
+    
+    // 4. Networking
+    if !check("Ignite Bridge (ign0)", check_bridge(), false) { } // Warn only
+    
+    println!();
+    if all_passed {
+        println!("{}", "Your system is ready for Ignite!".green().bold());
+    } else {
+        println!("{}", "Some checks failed. Please review the errors above.".red().bold());
+    }
+    
+    Ok(())
+}
+
+fn check_kvm() -> Result<bool> {
+    use std::fs::OpenOptions;
+    let path = Path::new("/dev/kvm");
+    if !path.exists() { return Ok(false); }
+    // Try to open R/W
+    OpenOptions::new().read(true).write(true).open(path)?;
+    Ok(true)
+}
+
+fn check_cgroups() -> Result<bool> {
+    // Just check if mount point exists and is cgroup2
+    // Simple check: /sys/fs/cgroup/cgroup.controllers should exist
+    let path = Path::new("/sys/fs/cgroup/cgroup.controllers");
+    Ok(path.exists())
+}
+
+fn check_binary(name: &str) -> Result<bool> {
+    // Check PATH or .ignite/bin??
+    // Currently daemon assumes local relative path 'bin/firecracker', 
+    // but users might run 'ign' from anywhere.
+    // Ideally 'ignited' should find them. 
+    // 'ign doctor' runs as user.
+    // Let's check `which <name>` first.
+    let status = std::process::Command::new("which").arg(name).output()?.status;
+    if status.success() { return Ok(true); }
+    
+    // Check local bin?
+    // We haven't defined a global install path yet.
+    Ok(false)
+}
+
+fn check_bridge() -> Result<bool> {
+    let output = std::process::Command::new("ip").arg("link").arg("show").arg("ign0").output()?;
+    Ok(output.status.success())
 }
 
 async fn build_image(context_path: &str, daemon_url: &str) -> Result<()> {
