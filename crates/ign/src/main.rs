@@ -90,11 +90,41 @@ async fn main() -> Result<()> {
              handle_simple_response(resp, daemon_url).await?;
         }
         Commands::Ps => {
-            info!("ps command not yet implemented on daemon.");
+            let resp = client.get(format!("{}/ps", daemon_url))
+                .send()
+                .await;
+            
+            match resp {
+                Ok(response) => {
+                     if response.status().is_success() {
+                         let body: ListResponse = response.json().await?;
+                         println!("{:<40} {:<20} {:<10}", "VM ID", "IP ADDRESS", "STATUS");
+                         for vm in body.vms {
+                             println!("{:<40} {:<20} {:<10}", vm.id, vm.ip_address, "Running");
+                         }
+                     } else {
+                         error!("Daemon returned error: {}", response.status());
+                     }
+                }
+                Err(e) => {
+                    error!("Failed to connect to daemon at {}: {}", daemon_url, e);
+                }
+            }
         }
     }
 
     Ok(())
+}
+
+#[derive(Deserialize, Debug)]
+struct VmSummary {
+    id: String,
+    ip_address: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct ListResponse {
+    vms: Vec<VmSummary>,
 }
 
 async fn handle_response(resp: Result<reqwest::Response, reqwest::Error>, url: &str) -> Result<()> {

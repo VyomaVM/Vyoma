@@ -28,6 +28,7 @@ struct VmInstance {
     dm_name: String,
     loop_devices: Vec<String>,
     cow_file_path: String,
+    ip_address: String,
 }
 
 impl VmInstance {
@@ -86,6 +87,7 @@ async fn main() {
         .route("/stop/:id", post(stop_vm))
         .route("/pause/:id", post(pause_vm))
         .route("/resume/:id", post(resume_vm))
+        .route("/ps", get(list_vms))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
@@ -266,6 +268,7 @@ async fn run_vm(
         dm_name: dm_name.clone(),
         loop_devices: vec![base_loop, cow_loop],
         cow_file_path: cow_file.to_string_lossy().to_string(),
+        ip_address: vm_ip.clone(),
     };
     
     {
@@ -338,4 +341,33 @@ async fn resume_vm(
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
     }
+}
+
+#[derive(Serialize)]
+struct VmSummary {
+    id: String,
+    ip_address: String,
+}
+
+#[derive(Serialize)]
+struct ListResponse {
+    vms: Vec<VmSummary>,
+}
+
+async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {
+    let instances: Vec<Arc<TokioMutex<VmInstance>>> = {
+        let vms_map = state.vms.lock().unwrap();
+        vms_map.values().cloned().collect()
+    };
+    
+    let mut summaries = Vec::new();
+    for arc_inst in instances {
+        let inst = arc_inst.lock().await;
+        summaries.push(VmSummary {
+            id: inst.id.clone(),
+            ip_address: inst.ip_address.clone(),
+        });
+    }
+    
+    Json(ListResponse { vms: summaries })
 }
