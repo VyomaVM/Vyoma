@@ -12,6 +12,7 @@ use tracing::{info, error};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
 use ignite_core::vmm::VmmManager;
+use std::process::Command;
 
 #[derive(Clone)]
 struct AppState {
@@ -182,6 +183,11 @@ async fn run_vm(
     let vm_id = uuid::Uuid::new_v4().to_string();
     let vm_dir = vms_root.join(&vm_id);
     std::fs::create_dir_all(&vm_dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // Initialize Git Repo for Time Travel
+    if let Err(e) = git_init(&vm_dir) {
+        error!("Failed to init git repo in {:?}: {}", vm_dir, e);
+    }
     
     // COW File
     let cow_file = vm_dir.join("diff.cow");
@@ -370,6 +376,11 @@ async fn snapshot_vm(
             mem_path.to_string_lossy().as_ref()
         ).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         
+        // Commit snapshot to Git
+        if let Err(e) = git_commit(&vm_dir, &format!("Snapshot {}", id)) {
+            error!("Failed to git commit snapshot: {}", e);
+        }
+        
         Ok(format!("Snapshot created for VM {}", id))
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
@@ -534,4 +545,30 @@ async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {
     }
     
     Json(ListResponse { vms: summaries })
+}
+
+// Git Helper Functions
+fn git_init(path: &std::path::Path) -> std::io::Result<()> {
+    Command::new("git")
+        .arg("init")
+        .current_dir(path)
+        .output()?;
+    Ok(())
+}
+
+fn git_commit(path: &std::path::Path, message: &str) -> std::io::Result<()> {
+    Command::new("git")
+        .arg("add")
+        .arg(".")
+        .current_dir(path)
+        .output()?;
+        
+    Command::new("git")
+        .arg("commit")
+        .arg("--allow-empty")
+        .arg("-m")
+        .arg(message)
+        .current_dir(path)
+        .output()?;
+    Ok(())
 }
