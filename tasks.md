@@ -134,5 +134,4 @@
     - [ ] Define CNI configuration location (`~/.ignite/cni/net.d`).
     - [ ] Implement `ADD` command (Setup network).
     - [ ] Implement `DEL` command (Teardown network).
-    - [ ] Implement `DEL` command (Teardown network).
     - [ ] Integrate into `run_vm` lifecycle.
