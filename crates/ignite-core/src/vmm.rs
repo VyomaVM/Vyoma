@@ -6,7 +6,7 @@ use std::time::Duration;
 use std::fmt;
 use std::thread;
 use std::io::{BufRead, BufReader};
-use tracing::{info, error};
+use tracing::info;
 use tokio::sync::broadcast;
 
 impl fmt::Debug for VmmManager {
