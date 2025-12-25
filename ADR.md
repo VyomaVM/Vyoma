@@ -139,3 +139,51 @@ This document tracks significant architectural decisions, their context, consequ
     *   **Modern Standard**: Cgroups v2 is the standard on modern Linux (Ubuntu 22.04+).
     *   **Firecracker Integration**: Firecracker supports running inside a Cgroup. We will create a parent cgroup `ignite.slice` and sub-cgroups for each VM `ignite-<id>.scope`.
     *   **Implementation**: We will use direct file system manipulation of `/sys/fs/cgroup/ignite.slice/` for simplicity and control, rather than `systemd-run` for now, unless `systemd` integration is strictly required. Direct FS manipulation is more educational and portable for a "from scratch" project build.
+
+## 014. Rootless Strategy (Future)
+*   **Date**: 2025-12-25
+*   **Status**: Proposed / In Progress
+*   **Context**: Running  as root is a security risk.
+*   **Decision**: We will transition to "Rootless" capability using **Slirp4netns** or **Passt** for unprivileged networking.
+*   **Challenges**:
+    1.  **Networking**: Creating TAP/Bridge requires root. Usage: slirp4netns [OPTION]... PID|PATH [TAPNAME]
+User-mode networking for unprivileged network namespaces.
+
+-c, --configure          bring up the interface
+-e, --exit-fd=FD         specify the FD for terminating slirp4netns
+-r, --ready-fd=FD        specify the FD to write to when the network is configured
+-m, --mtu=MTU            specify MTU (default=1500, max=65521)
+-6, --enable-ipv6        enable IPv6 (experimental)
+-a, --api-socket=PATH    specify API socket path
+--cidr=CIDR              specify network address CIDR (default=10.0.2.0/24)
+--disable-host-loopback  prohibit connecting to 127.0.0.1:* on the host namespace
+--netns-type=TYPE 	 specify network namespace type ([path|pid], default=pid)
+--userns-path=PATH	 specify user namespace path
+--enable-sandbox         create a new mount namespace (and drop all caps except CAP_NET_BIND_SERVICE if running as the root)
+--enable-seccomp         enable seccomp to limit syscalls (experimental)
+--outbound-addr=IPv4     sets outbound ipv4 address to bound to (experimental)
+--outbound-addr6=IPv6    sets outbound ipv6 address to bound to (experimental)
+--disable-dns            disables 10.0.2.3 (or configured internal ip) to host dns redirect (experimental)
+--macaddress=MAC         specify the MAC address of the TAP (only valid with -c)
+--target-type=TYPE       specify the target type ([netns|bess], default=netns)
+-h, --help               show this help and exit
+-v, --version            show version and exit runs in userspace.
+    2.  **Storage**:  requires root. We must move to user-space mounting (FUSE) or rely on direct file usage (Firecracker supports raw files without mounting).
+    3.  **KVM**: Requires user to be in  group.
+*   **Phasing**:
+    *   Phase 1 is establishing the Rootless Architecture.
+    *   Currently, we will focus on investigating these requirements in a separate branch .
+
+## 014. Rootless Strategy (Future)
+*   **Date**: 2025-12-25
+*   **Status**: Proposed / In Progress
+*   **Context**: Running `ignited` as root is a security risk.
+*   **Decision**: We will transition to "Rootless" capability using **Slirp4netns** or **Passt** for unprivileged networking.
+*   **Challenges**:
+    1.  **Networking**: Creating TAP/Bridge requires root. `slirp4netns` runs in userspace.
+    2.  **Storage**: `mount -o loop` requires root. We must move to user-space mounting (FUSE) or rely on direct file usage (Firecracker supports raw files without mounting).
+    3.  **KVM**: Requires user to be in `kvm` group.
+*   **Phasing**:
+    *   Phase 1 is establishing the Rootless Architecture.
+    *   Currently, we will focus on investigating these requirements in a separate branch `feat/rootless`.
+
