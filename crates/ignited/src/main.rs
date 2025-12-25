@@ -112,6 +112,19 @@ impl VmInstance {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+    
+    // Rootless Checks
+    if ignite_core::rootless::RootlessManager::is_root() {
+        info!("Running as ROOT (Privileged Mode)");
+    } else {
+        info!("Running as USER (Rootless Mode)");
+        // Verify KVM Access
+        if let Err(e) = ignite_core::rootless::RootlessManager::check_kvm_permissions() {
+             error!("Rootless Mode Error: {}", e);
+             error!("Please add your user to the 'kvm' group: sudo usermod -aG kvm $USER");
+             std::process::exit(1);
+        }
+    }
 
     info!("ignited (Ignite Daemon) starting up...");
 
