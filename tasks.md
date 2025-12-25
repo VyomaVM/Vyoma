@@ -124,4 +124,5 @@
 - [ ] **Rootless Mode**
     - [x] Investigate User Namespaces to remove sudo requirement (ADR 014).
     - [x] Implement Daemon privilege checks (Root vs User, KVM Group check).
+    - [x] Investigate Rootless Storage (Blocked: ext4-rs needs nightly, stable ext4 is RO. Deferred to future FUSE impl).
     - [ ] Implement Slirp4netns/Passt for rootless networking.
