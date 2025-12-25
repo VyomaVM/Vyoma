@@ -137,3 +137,31 @@
     - [x] Implement `ADD` command (Setup network).
     - [x] Implement `DEL` command (Teardown network).
     - [x] Integrate into `run_vm` lifecycle (Fully replace legacy bridge with CNI-created TAP).
+
+## Future Roadmap (v0.2.0+)
+
+### Phase 13: Networking Maturity ("The Cluster Ready")
+- [ ] **Service Discovery & DNS**
+    - [ ] Implement internal DNS resolver in `ignited` (or utilizing CNI DNS plugins).
+    - [ ] Allow VMs to resolve each other by name within a shared network.
+- [ ] **Advanced CNI Support**
+    - [ ] Validate Overlay Network support (e.g., Flannel, Calico) for multi-host communication.
+    - [ ] Implement `ign network create/ls/rm` CLI commands to manage CNI configs dynamically.
+
+### Phase 14: Robustness & Reliability ("The Production Grade")
+- [ ] **Daemon Recovery**
+    - [ ] Implement "Adoption" logic: On startup, `ignited` should verify and reconnect to existing running Firecracker processes.
+    - [ ] Handle `virtiofsd` crashes gracefully (auto-restart or fail-fast with clear errors).
+- [ ] **Edge Case Handling**
+    - [ ] Implement OOM (Out Of Memory) event listener from Cgroups to report "OOM Killed" status.
+    - [ ] Implement Zombie process reaping (reaping completed child processes reliably).
+- [ ] **Architecture Support**
+    - [ ] Add support for `aarch64` (ARM64) builds (Apple Silicon, AWS Graviton).
+    - [ ] Abstract `vmlinux` kernel path to support multi-arch kernel selection.
+
+### Phase 15: True Rootless Mode ("The Security Grail")
+- [ ] **User Namespaces**
+    - [ ] Fully implement `unshare` logic to map specific UIDs.
+    - [ ] Integrate `slirp4netns` or `passt` for completely unprivileged networking (replacing CNI bridge requirement).
+- [ ] **Rootless Storage**
+    - [ ] Remove `sudo` requirement for loop/dm setup (User-space block device implementation or FUSE-based images).
