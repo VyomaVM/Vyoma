@@ -113,8 +113,8 @@
 - [x] **Core**: Define `Ignitefile` syntax (FROM, RUN, COPY).
 - [x] **CLI**: Implement `ign build` command (context tarball + POST).
 - [x] **Daemon**: Implement `POST /build` (Unpack -> Parse -> Execute).
-- [ ] **Daemon**: Implement `RUN` via `chroot` (Verified implementation).
-- [ ] **Daemon**: Implement `FROM` caching logic (Basic copy implemented).
+- [x] **Daemon**: Implement `RUN` via `chroot` (Verified implementation).
+- [x] **Daemon**: Implement `FROM` caching logic (Refactored to support auto-pull).
 
 ## Phase 11: Production Hardening
 - [ ] **Resource Limits**
