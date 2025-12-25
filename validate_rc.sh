@@ -67,3 +67,37 @@ echo ">>> Final PS (Should be empty or stopped)..."
 $CLI_BIN ps
 
 echo ">>> Validation Passed!"
+
+echo ">>> Testing Volume Mounts (Phase 9 Verification)..."
+mkdir -p test_vol
+echo "Hello from Host" > test_vol/hello.txt
+
+# Run VM with volume
+echo "Running VM with -v $(pwd)/test_vol:/mnt"
+$CLI_BIN run alpine:latest --volumes "$(pwd)/test_vol:/mnt" > run_vol.out
+cat run_vol.out
+VM_ID_VOL=$(grep "VM ID:" run_vol.out | awk '{print $3}')
+
+if [ -z "$VM_ID_VOL" ]; then
+    echo "Volume run failed. Check run_vol.out"
+    exit 1
+fi
+
+echo "Waiting for VM $VM_ID_VOL to stabilize..."
+sleep 3
+
+# Check if virtiofsd is running
+if pgrep -f "virtiofsd" > /dev/null; then
+    echo "SUCCESS: VirtioFS Daemon is running!"
+else
+    echo "FAILURE: VirtioFS Daemon NOT found!"
+    $CLI_BIN stop $VM_ID_VOL
+    exit 1
+fi
+
+# Cleanup Volume VM
+echo "Stopping Volume VM..."
+$CLI_BIN stop $VM_ID_VOL
+rm -rf test_vol run_vol.out
+
+echo ">>> All Verification Checks Completed Successfully!"
