@@ -121,4 +121,7 @@
     - [x] Implement Cgroups v2 integration (ADR 013, Core logic).
     - [x] Support `--cpus` and `--memory` flags (Implemented in API/CLI, enforced via Cgroups).
 - [ ] **Rootless Mode**
-    - [ ] Investigate User Namespaces to remove sudo requirement.
+- [ ] **Rootless Mode**
+    - [x] Investigate User Namespaces to remove sudo requirement (ADR 014).
+    - [x] Implement Daemon privilege checks (Root vs User, KVM Group check).
+    - [ ] Implement Slirp4netns/Passt for rootless networking.
