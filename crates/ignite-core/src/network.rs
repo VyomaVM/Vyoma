@@ -193,4 +193,40 @@ impl NetworkManager {
 
         Ok(())
     }
+
+    /// Sets up Traffic Control (tc) redirection between an interface (e.g. eth0) and a TAP (e.g. vmtap0).
+    /// Used inside the network namespace to connect CNI veth to Firecracker TAP.
+    pub fn setup_tc_redirect(if_ingress: &str, if_egress: &str) -> Result<()> {
+        info!("Setting up TC redirect: {} <-> {}", if_ingress, if_egress);
+
+        // Function helper for tc commands
+        let run_tc = |args: &[&str]| -> Result<()> {
+            let out = Command::new("sudo")
+                .arg("tc")
+                .args(args)
+                .output()?;
+            if !out.status.success() {
+                 let stderr = String::from_utf8_lossy(&out.stderr);
+                 // Ignore "File exists" if re-running
+                 if !stderr.contains("File exists") {
+                     return Err(anyhow!("TC failed ({:?}): {}", args, stderr));
+                 }
+            }
+            Ok(())
+        };
+
+        // 1. Ingress -> Egress
+        // tc qdisc add dev <ingress> ingress
+        run_tc(&["qdisc", "add", "dev", if_ingress, "ingress"])?;
+        
+        // tc filter add dev <ingress> parent ffff: protocol all u32 match u32 0 0 action mirred egress redirect dev <egress>
+        run_tc(&["filter", "add", "dev", if_ingress, "parent", "ffff:", "protocol", "all", "u32", "match", "u32", "0", "0", "action", "mirred", "egress", "redirect", "dev", if_egress])?;
+
+        // 2. Egress -> Ingress (Wait, we need bidirectional)
+        // Repeat for the other direction
+        run_tc(&["qdisc", "add", "dev", if_egress, "ingress"])?;
+        run_tc(&["filter", "add", "dev", if_egress, "parent", "ffff:", "protocol", "all", "u32", "match", "u32", "0", "0", "action", "mirred", "egress", "redirect", "dev", if_ingress])?;
+
+        Ok(())
+    }
 }

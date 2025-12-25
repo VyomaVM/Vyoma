@@ -333,10 +333,19 @@ async fn run_vm(
     });
     info!("CNI assigned IP: {}", vm_ip);
 
-    let tap_name = "unknown".to_string(); // CNI manages this, we might not know the TAP name or it might be veth pair.
-    // NOTE: Ignite's logging/cleanup currently relies on TAP name. 
-    // If we use 'bridge' plugin, it creates a veth pair.
-    // We need to support 'veth' cleanup or trust CNI DEL.
+    // 3. Setup TC Redirect (for CNI integration)
+    // In Full Integration:
+    // 1. Create TAP in netns: `ip netns exec vm-id ip tuntap add dev vmtap0 mode tap`
+    // 2. Up TAP: `ip netns exec vm-id ip link set vmtap0 up`
+    // 3. TC Redirect: `ip netns exec vm-id tc ...` (Mirror eth0 <-> vmtap0)
+    // 4. Firecracker uses vmtap0
+    
+    // For Hybrid Mode: We skip this and use Host TAP below.
+    // The CNI 'eth0' is currently unused by Firecracker, but verifying IPAM works. (Phase 12 Complete, Part 1)
+    
+    // Legacy Tap Setup (Host Namespace)
+    // We reuse logic from before, but this time it runs alongside CNI.
+    let tap_name = format!("tap{}", &vm_id[0..8]);
 
     // 3.5 Cgroups
     let cgroup_path = match state.cgroups.create_vm_cgroup(&vm_id) {
