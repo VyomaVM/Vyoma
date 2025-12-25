@@ -198,41 +198,8 @@ async fn run_vm(
     std::fs::create_dir_all(&vms_root).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // 2. Pull Image & Prepare Base
-    // Strategy: 
-    // - Check if image dir exists (simple caching).
-    // - If not, pull and unpack.
-    // - Create base.ext4.
-    
-    // Sanitize image name for path (replace / and : with _)
-    let safe_image_name = payload.image.replace('/', "_").replace(':', "_");
-    let image_store_path = images_root.join(&safe_image_name);
-    let base_image_file = image_store_path.join("base.ext4");
-    
-    if !base_image_file.exists() {
-        info!("Image {} not found locally. Pulling...", payload.image);
-        std::fs::create_dir_all(&image_store_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        
-        let mut oci = OciManager::new();
-        let manifest_json = oci.pull_manifest(&payload.image).await.map_err(|e| (StatusCode::BAD_REQUEST, format!("Pull failed: {}", e)))?;
-        
-        let layers = oci.parse_layers(&manifest_json).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        
-        let temp_unpack_dir = tempfile::tempdir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        
-        for digest in layers {
-             let layer_data = oci.pull_layer(&payload.image, &digest).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed layer {}: {}", digest, e)))?;
-             LayerManager::unpack_layer(&layer_data, temp_unpack_dir.path()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Unpack failed: {}", e)))?;
-        }
-        
-        // Create base Ext4
-        // Default 2GB for base
-        let size_mb = 2048;
-        StorageManager::create_empty_file(&base_image_file, size_mb).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        StorageManager::format_ext4(&base_image_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        StorageManager::populate_image(&base_image_file, temp_unpack_dir.path()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Populate failed: {}", e)))?;
-    } else {
-        info!("Image found locally at {:?}", base_image_file);
-    }
+    let base_image_file = ensure_image_locally(&payload.image).await?;
+    info!("Using base image at {:?}", base_image_file);
 
     // 3. VM Specific Setup
     let vm_id = uuid::Uuid::new_v4().to_string();
@@ -803,18 +770,8 @@ async fn build_image(
         match instr {
             Instruction::From(image) => {
                 info!("Building FROM {}", image);
-                //Reuse logic from run_vm to pull and create base, but we copy it to our build path
-                 // 1. Ensure local cache
-                let images_root = home.join(".ignite").join("images"); // Duplicated logic, cleanup later
-                let safe_image_name = image.replace('/', "_").replace(':', "_");
-                let image_store_path = images_root.join(&safe_image_name);
-                let base_cache = image_store_path.join("base.ext4");
-
-                if !base_cache.exists() {
-                    // Pull logic... (Duplicated from run_vm, should be shared in OciManager or ImageStore trait)
-                    // Call internal helper or duplicate for now
-                     return Err((StatusCode::NOT_IMPLEMENTED, "Image must be pulled first via 'ign run' or 'ign pull' for now.".to_string()));
-                }
+                
+                let base_cache = ensure_image_locally(&image).await?;
                 
                 // Copy base cache to current_image_path
                 std::fs::copy(&base_cache, &current_image_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to copy base: {}", e)))?;
@@ -935,3 +892,39 @@ async fn build_image(
     Ok(format!("Build successful. Image at: {:?}", current_image_path))
 }
 
+
+async fn ensure_image_locally(image_name: &str) -> Result<std::path::PathBuf, (StatusCode, String)> {
+    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+    let images_root = home.join(".ignite").join("images");
+    std::fs::create_dir_all(&images_root).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let safe_image_name = image_name.replace('/', "_").replace(':', "_");
+    let image_store_path = images_root.join(&safe_image_name);
+    let base_image_file = image_store_path.join("base.ext4");
+
+    if !base_image_file.exists() {
+        info!("Image {} not found locally. Pulling...", image_name);
+        std::fs::create_dir_all(&image_store_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let mut oci = OciManager::new();
+        let manifest_json = oci.pull_manifest(image_name).await.map_err(|e| (StatusCode::BAD_REQUEST, format!("Pull failed: {}", e)))?;
+
+        let layers = oci.parse_layers(&manifest_json).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let temp_unpack_dir = tempfile::tempdir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        for digest in layers {
+             let layer_data = oci.pull_layer(image_name, &digest).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed layer {}: {}", digest, e)))?;
+             LayerManager::unpack_layer(&layer_data, temp_unpack_dir.path()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Unpack failed: {}", e)))?;
+        }
+
+        let size_mb = 2048;
+        StorageManager::create_empty_file(&base_image_file, size_mb).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        StorageManager::format_ext4(&base_image_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        StorageManager::populate_image(&base_image_file, temp_unpack_dir.path()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Populate failed: {}", e)))?;
+    } else {
+        info!("Image found locally at {:?}", base_image_file);
+    }
+    
+    Ok(base_image_file)
+}
