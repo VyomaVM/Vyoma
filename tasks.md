@@ -136,4 +136,4 @@
     - [x] Define CNI configuration location (`~/.ignite/cni/net.d`).
     - [x] Implement `ADD` command (Setup network).
     - [x] Implement `DEL` command (Teardown network).
-    - [ ] Integrate into `run_vm` lifecycle (Fully replace legacy bridge with CNI-created TAP).
+    - [x] Integrate into `run_vm` lifecycle (Fully replace legacy bridge with CNI-created TAP).
