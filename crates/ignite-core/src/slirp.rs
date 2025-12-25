@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use std::process::{Command, Child};
+use std::process::Command;
 
 pub struct SlirpManager;
 
