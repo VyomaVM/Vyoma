@@ -45,7 +45,19 @@ impl VirtioFsManager {
             .map_err(|e| anyhow!("Failed to spawn virtiofsd (is it installed?): {}", e))?;
 
         self.process = Some(child);
-        Ok(())
+        
+        // Wait for socket to appear (up to 1s)
+        let loop_delay = std::time::Duration::from_millis(50);
+        for _ in 0..20 {
+            if Path::new(&self.socket_path).exists() {
+                return Ok(());
+            }
+            std::thread::sleep(loop_delay);
+        }
+        
+        // If we timeout, we return error but importantly, we should check if process died.
+        // But for MVP, we assume timeout.
+        Err(anyhow!("Timed out waiting for virtiofsd socket"))
     }
 
     pub fn kill(&mut self) -> Result<()> {
