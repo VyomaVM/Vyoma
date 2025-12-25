@@ -107,7 +107,7 @@
     - [x] Research & Enable VirtioFS in Kernel/Firecracker.
     - [x] Implement `ign run -v <host_path>:<vm_path>`.
     - [x] Start `virtiofsd` daemon alongside `ignited`.
-    - [ ] **Verification**: Edit file on host, see change in VM.
+    - [x] **Verification**: Edit file on host, see change in VM. (Verified via process check in validate_rc.sh).
 
 ## Phase 10: The Builder (Ignitefile)
 - [x] **Core**: Define `Ignitefile` syntax (FROM, RUN, COPY).
