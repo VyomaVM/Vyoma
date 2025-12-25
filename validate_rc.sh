@@ -26,10 +26,16 @@ trap cleanup EXIT
 # Add local bin to PATH for doctor
 export PATH="$PATH:$PWD/bin"
 
-echo ">>> Starting Daemon (sudo required)..."
-sudo $DAEMON_BIN > daemon.log 2>&1 &
-echo $! > "$PID_FILE"
-sleep 2 # Wait for startup
+echo ">>> Starting Daemon Check..."
+# Check if port 3000 is open
+if nc -z localhost 3000; then
+    echo ">>> Daemon appears to be running on port 3000. Skipping autostart."
+else
+    echo ">>> Daemon NOT running. Starting with sudo..."
+    sudo $DAEMON_BIN > daemon.log 2>&1 &
+    echo $! > "$PID_FILE"
+    sleep 2 # Wait for startup
+fi
 
 echo ">>> Checking Doctor..."
 $CLI_BIN doctor

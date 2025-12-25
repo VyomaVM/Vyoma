@@ -7,6 +7,7 @@ use tracing::{info, debug};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CniConfig {
+    #[serde(rename = "cniVersion")]
     pub cni_version: String,
     pub name: String,
     #[serde(rename = "type")]
