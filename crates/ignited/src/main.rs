@@ -144,6 +144,7 @@ async fn main() {
         .route("/health", get(health_check))
         // VM Management
         .route("/run", post(run_vm))
+        .route("/pull", post(pull_image_handler))
         .route("/stop/:id", post(stop_vm))
         .route("/pause/:id", post(pause_vm))
         .route("/resume/:id", post(resume_vm))
@@ -299,7 +300,13 @@ async fn run_vm(
          return Err((StatusCode::INTERNAL_SERVER_ERROR, "Kernel binary (bin/vmlinux) not found".into()));
     }
 
-    if let Err(e) = vmm.start_daemon("bin/firecracker") {
+    // For CNI (Phase 12):
+    // 1. Create NetNS: /var/run/netns/vm-{id}
+    // 2. cni_manager.add(id, netns_path, "eth0")
+    // 3. pass Some(netns_path) to start_daemon
+    
+    // For now (RC1): Run in host namespace
+    if let Err(e) = vmm.start_daemon("bin/firecracker", None) {
          return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start FC: {}", e)));
     }
     
@@ -566,7 +573,7 @@ async fn restore_vm(
     let socket_path = format!("/tmp/firecracker_{}.socket", vm_id);
     let mut vmm = VmmManager::new(&socket_path);
     
-    if let Err(e) = vmm.start_daemon("bin/firecracker") {
+    if let Err(e) = vmm.start_daemon("bin/firecracker", None) {
          return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start FC: {}", e)));
     }
     
@@ -635,6 +642,30 @@ struct VmSummary {
 #[derive(Serialize)]
 struct ListResponse {
     vms: Vec<VmSummary>,
+}
+
+#[derive(Serialize)]
+struct PullResponse {
+    status: String,
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct PullRequest {
+    image: String,
+}
+
+async fn pull_image_handler(
+    Json(payload): Json<PullRequest>,
+) ->  Result<Json<PullResponse>, (StatusCode, String)> {
+    info!("Handling Pull request for {}", payload.image);
+    
+    let path = ensure_image_locally(&payload.image).await?;
+    
+    Ok(Json(PullResponse {
+        status: "Image pulled successfully".to_string(),
+        path: path.to_string_lossy().to_string(),
+    }))
 }
 
 async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {

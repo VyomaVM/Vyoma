@@ -130,7 +130,9 @@
 ## Phase 12: Networking Hardening (CNI)
 - [ ] **CNI Integration**
     - [x] Create `CniManager` in `ignite-core` to invoke plugins.
+    - [x] Wire CNI logic into Daemon (Scaffolding present in `run_vm`, wired to `start_daemon`).
     - [ ] Define CNI configuration location (`~/.ignite/cni/net.d`).
     - [ ] Implement `ADD` command (Setup network).
+    - [ ] Implement `DEL` command (Teardown network).
     - [ ] Implement `DEL` command (Teardown network).
     - [ ] Integrate into `run_vm` lifecycle.

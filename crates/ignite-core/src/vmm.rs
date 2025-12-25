@@ -61,21 +61,37 @@ impl VmmManager {
     }
 
     /// Spawns the Firecracker process in a background thread/process.
-    pub fn start_daemon(&mut self, binary_path: &str) -> Result<()> {
-        info!("Starting Firecracker daemon at {} using socket {}", binary_path, self.socket_path);
+    /// Optionally runs inside a network namespace.
+    pub fn start_daemon(&mut self, binary_path: &str, netns: Option<&str>) -> Result<()> {
+        info!("Starting Firecracker at {} (Socket: {}, NetNS: {:?})", binary_path, self.socket_path, netns);
         
         // Ensure socket doesn't exist
         if Path::new(&self.socket_path).exists() {
             std::fs::remove_file(&self.socket_path)?;
         }
 
-        let mut child = Command::new(binary_path)
-            .arg("--api-sock")
-            .arg(&self.socket_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| anyhow!("Failed to spawn firecracker: {}", e))?;
+        let mut child = if let Some(ns) = netns {
+             Command::new("sudo") // sudo is needed for ip netns exec usually
+                .arg("ip")
+                .arg("netns")
+                .arg("exec")
+                .arg(ns)
+                .arg(binary_path)
+                .arg("--api-sock")
+                .arg(&self.socket_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| anyhow!("Failed to spawn firecracker in netns: {}", e))?
+        } else {
+             Command::new(binary_path)
+                .arg("--api-sock")
+                .arg(&self.socket_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| anyhow!("Failed to spawn firecracker: {}", e))?
+        };
 
         // Capture logs
         let stdout = child.stdout.take().ok_or(anyhow!("Failed to capture stdout"))?;

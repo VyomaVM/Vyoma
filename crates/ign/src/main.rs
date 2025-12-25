@@ -25,11 +25,23 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Pull an image from Docker Hub
+    Pull {
+        /// Image to pull (e.g. ubuntu:latest)
+        image: String,
+    },
     /// Run a new VM
     Run {
         /// Image to run (e.g. ubuntu:latest)
-        /// Image to run (e.g. ubuntu:latest)
         image: String,
+
+        /// vCPUs (default: 1)
+        #[arg(long, default_value = "1")]
+        vcpu: u32,
+        
+        /// Memory in MiB (default: 512)
+        #[arg(long, default_value = "512")]
+        memory: u32,
         
         /// Port mappings (e.g. -p 8080:80)
         #[arg(short, long)]
@@ -104,6 +116,8 @@ enum Commands {
 #[derive(Serialize)]
 struct RunRequest {
     image: String,
+    vcpu: u32,
+    mem_size_mib: u32,
     ports: Vec<PortMapping>,
     volumes: Vec<VolumeMount>,
 }
@@ -130,7 +144,15 @@ async fn main() -> Result<()> {
     let daemon_url = "http://127.0.0.1:3000";
 
     match cli.command {
-        Commands::Run { image, ports, volumes } => {
+        Commands::Pull { image } => {
+            info!("Requesting to pull image: {}", image);
+             let resp = client.post(format!("{}/pull", daemon_url))
+                .json(&serde_json::json!({ "image": image }))
+                .send()
+                .await;
+             handle_simple_response(resp, daemon_url).await?;
+        }
+        Commands::Run { image, vcpu, memory, ports, volumes } => {
             info!("Requesting to run image: {}", image);
             
             let mut port_mappings = Vec::new();
@@ -161,7 +183,13 @@ async fn main() -> Result<()> {
                 });
             }
             
-            let payload = RunRequest { image, ports: port_mappings, volumes: volume_mounts };
+            let payload = RunRequest { 
+                image, 
+                vcpu,
+                mem_size_mib: memory,
+                ports: port_mappings, 
+                volumes: volume_mounts 
+            };
             
             let resp = client.post(format!("{}/run", daemon_url))
                 .json(&payload)

@@ -28,23 +28,26 @@ impl CniManager {
         }
     }
 
-    /// Executed CNI ADD command.
+
     /// 
     /// # Arguments
     /// * `container_id`: Unique ID of the VM/Container
     /// * `netns`: Path to the network namespace (e.g. /var/run/netns/vm-123)
     /// * `ifname`: Interface name inside the container (e.g. eth0)
-    pub fn add(&self, container_id: &str, netns: &str, ifname: &str) -> Result<()> {
-        self.exec("ADD", container_id, netns, ifname)
+    pub fn add(&self, container_id: &str, netns: &str, ifname: &str) -> Result<serde_json::Value> {
+        let res = self.exec("ADD", container_id, netns, ifname)?;
+        res.ok_or_else(|| anyhow!("CNI Plugin returned no output for ADD"))
     }
+
+
 
     /// Executed CNI DEL command.
     pub fn del(&self, container_id: &str, netns: &str, ifname: &str) -> Result<()> {
         // CNI DEL should be best-effort, but we return error if it fails hard.
-        self.exec("DEL", container_id, netns, ifname)
+        self.exec("DEL", container_id, netns, ifname).map(|_| ())
     }
 
-    fn exec(&self, command: &str, container_id: &str, netns: &str, ifname: &str) -> Result<()> {
+    fn exec(&self, command: &str, container_id: &str, netns: &str, ifname: &str) -> Result<Option<serde_json::Value>> {
         // 1. Find config file (lexicographically first in config_dir)
         let config_file = self.find_config()?;
         let config_bytes = std::fs::read(&config_file).context("Failed to read CNI config")?;
@@ -90,11 +93,13 @@ impl CniManager {
         }
 
         if command == "ADD" {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            debug!("CNI ADD Output: {}", stdout);
+            let stdout_str = String::from_utf8_lossy(&output.stdout);
+            debug!("CNI ADD Output: {}", stdout_str);
+            let res: serde_json::Value = serde_json::from_slice(&output.stdout).context("Failed to parse CNI output")?;
+            return Ok(Some(res));
         }
 
-        Ok(())
+        Ok(None)
     }
 
     fn find_config(&self) -> Result<PathBuf> {
