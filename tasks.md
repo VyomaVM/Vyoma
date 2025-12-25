@@ -126,3 +126,11 @@
     - [x] Implement Daemon privilege checks (Root vs User, KVM Group check).
     - [x] Investigate Rootless Storage (Blocked: ext4-rs needs nightly, stable ext4 is RO. Deferred to future FUSE impl).
     - [x] Implement Slirp4netns/Passt for rootless networking (Module created, integration pending detailed process orchestration).
+
+## Phase 12: Networking Hardening (CNI)
+- [ ] **CNI Integration**
+    - [ ] Create `CniManager` in `ignite-core` to invoke plugins.
+    - [ ] Define CNI configuration location (`~/.ignite/cni/net.d`).
+    - [ ] Implement `ADD` command (Setup network).
+    - [ ] Implement `DEL` command (Teardown network).
+    - [ ] Integrate into `run_vm` lifecycle.
