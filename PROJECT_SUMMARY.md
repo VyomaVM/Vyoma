@@ -111,7 +111,9 @@ micro-vm-ecosystem/
     ./target/release/ign export <vm-id> backup.tar.gz
     ```
 
-## Future Work
-*   **Secure Networking**: Add CNI plugin support.
-*   **Rootless Mode**: Investigate running Daemon without root privileges (User Namespaces).
+## Future Work (Post v0.1.0)
+*   **CNI (Container Network Interface) Support**:
+    *   *What it does*: Delegates networking to standard plugins (used by Kubernetes).
+    *   *Benefit*: Allows advanced setups like Overlay Networks (VXLAN) , Policy enforcement, and easier integration with existing infrastructure, replacing our hardcoded Bridge/NAT logic.
+*   **Rootless Mode**: Complete the `slirp4netns` and FUSE storage implementation to allow running without sudo.
 *   **Registry Auth**: Support private Docker registries.
