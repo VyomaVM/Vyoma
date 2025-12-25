@@ -104,6 +104,13 @@ impl StorageManager {
 
         Ok(())
     }
+
+    /// Populates an image without root privileges.
+    /// Currently invalid as we lack a stable pure-Rust ext4 writer.
+    /// Future work: Use `guestfish` or `debugfs` (if available without root) or a FUSE mount.
+    pub fn populate_image_rootless(_image_path: &Path, _source_dir: &Path) -> Result<()> {
+         Err(anyhow!("Rootless image population is not yet implemented. We need a userspace ext4 writer."))
+    }
     /// Attaches the file to a loop device. Returns the loop device path (e.g., /dev/loop0).
     /// Requires sudo.
     pub fn setup_loop_device(path: &Path) -> Result<String> {
