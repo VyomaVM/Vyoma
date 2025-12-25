@@ -129,7 +129,7 @@
 
 ## Phase 12: Networking Hardening (CNI)
 - [ ] **CNI Integration**
-    - [ ] Create `CniManager` in `ignite-core` to invoke plugins.
+    - [x] Create `CniManager` in `ignite-core` to invoke plugins.
     - [ ] Define CNI configuration location (`~/.ignite/cni/net.d`).
     - [ ] Implement `ADD` command (Setup network).
     - [ ] Implement `DEL` command (Teardown network).
