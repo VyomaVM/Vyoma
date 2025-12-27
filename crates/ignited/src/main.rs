@@ -37,6 +37,7 @@ struct AppState {
     vms: Arc<StdMutex<HashMap<String, Arc<TokioMutex<VmInstance>>>>>,
     cgroups: Arc<CgroupManager>,
     cni_manager: Arc<ignite_core::cni::CniManager>,
+    rootless: bool,
 }
 
 #[derive(Debug)]
@@ -52,6 +53,8 @@ struct VmInstance {
     proxy_tasks: Vec<JoinHandle<()>>,
 
     fs_managers: Vec<VirtioFsManager>,
+    #[allow(dead_code)]
+    slirp: Option<ignite_core::slirp::SlirpManager>,
     cgroup_path: Option<String>,
     netns_path: Option<String>,
     
@@ -235,10 +238,21 @@ async fn main() {
     
     let cni_manager = Arc::new(ignite_core::cni::CniManager::new(cni_plugin_dir, cni_config_dir));
 
+    let rootless = !ignite_core::rootless::RootlessManager::is_root();
+    
+    // Slirp Check
+    if rootless {
+        if let Err(e) = ignite_core::slirp::SlirpManager::check_available() {
+             error!("Rootless Error: {}", e);
+             std::process::exit(1);
+        }
+    }
+
     let state = AppState {
         vms: Arc::new(StdMutex::new(HashMap::new())),
         cgroups,
         cni_manager,
+        rootless,
     };
 
     // Recovery Phase
@@ -404,60 +418,70 @@ async fn run_vm(
         error!("Failed to init git repo in {:?}: {}", vm_dir, e);
     }
     
-    // COW File
-    let cow_file = vm_dir.join("diff.cow");
-    let size_mb = 2048; // Same as base for simplicity, or larger?
-    StorageManager::create_cow_file(&cow_file, size_mb).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    
-    // Loop Devices
-    let base_loop = StorageManager::setup_loop_device(&base_image_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Loop base: {}", e)))?;
-    let cow_loop = StorageManager::setup_loop_device(&cow_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Loop cow: {}", e)))?;
-    
-    // DM Snapshot
-    let dm_name = format!("ign-{}", vm_id);
-    // Size in sectors: 2048MB * 1024 * 1024 / 512 = 4,194,304
-    let size_sectors = size_mb * 1024 * 1024 / 512;
-    let dm_path = StorageManager::create_dm_snapshot(&dm_name, &base_loop, &cow_loop, size_sectors).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DM create: {}", e)))?;
-    
-    // Network (CNI Integration)
-    // 1. Create NetNS
-    let netns_name = format!("vm-{}", vm_id);
-    let netns_path = format!("/var/run/netns/{}", netns_name);
-    
-    // Ensure /var/run/netns exists
-    std::fs::create_dir_all("/var/run/netns").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    
-    // Create netns: ip netns add <name> (Requires root, which we have)
-    let _ = Command::new("ip").args(&["netns", "add", &netns_name]).output()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create netns: {}", e)))?;
+    // Storage Setup
+    let (dm_path, loop_devices, cow_file_str) = if state.rootless {
+        // Rootless: Simple Copy (No DM/Loop)
+        let vm_disk = vm_dir.join("disk.ext4");
+        info!("Rootless: Copying base image to {:?}", vm_disk);
+        std::fs::copy(&base_image_file, &vm_disk).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Rootless copy: {}", e)))?;
         
-    // 2. Call CNI ADD
-    let ifname = "eth0";
-    let cni_result = state.cni_manager.add(&vm_id, &netns_path, ifname)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("CNI ADD failed: {}", e)))?;
+        // We use the disk file as the "dm_path" (Firecracker treats it as root block device)
+        (vm_disk.to_string_lossy().to_string(), Vec::new(), vm_disk.to_string_lossy().to_string())
+    } else {
+        // Privileged: DM Snapshot (COW)
+        let cow_file = vm_dir.join("diff.cow");
+        let size_mb = 2048; 
+        StorageManager::create_cow_file(&cow_file, size_mb).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         
-    // 3. Parse Result to get IP
-    // For now, assuming host-local allocator returns standard JSON Structure
-    // Expected: { "cniVersion": "...", "ips": [ { "version": "4", "address": "172.16.0.X/24" } ], ... }
-    let vm_ip = parse_cni_ip(&cni_result).unwrap_or_else(|e| {
-         error!("Failed to parse CNI IP: {}", e);
-         "172.16.0.0".to_string() // Fallback? Or fail?
-    });
-    info!("CNI assigned IP: {}", vm_ip);
-
-    // 3. Setup TC Redirect (for CNI integration)
-    // In Full Integration:
-    // 1. Create TAP in netns: `ip netns exec vm-id ip tuntap add dev vmtap0 mode tap`
-    // 2. Up TAP: `ip netns exec vm-id ip link set vmtap0 up`
-    // 3. TC Redirect: `ip netns exec vm-id tc ...` (Mirror eth0 <-> vmtap0)
-    // 4. Firecracker uses vmtap0
+        let base_loop = StorageManager::setup_loop_device(&base_image_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Loop base: {}", e)))?;
+        let cow_loop = StorageManager::setup_loop_device(&cow_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Loop cow: {}", e)))?;
+        
+        let dm_name = format!("ign-{}", vm_id);
+        let size_sectors = size_mb * 1024 * 1024 / 512;
+        let dm_path = StorageManager::create_dm_snapshot(&dm_name, &base_loop, &cow_loop, size_sectors).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DM create: {}", e)))?;
+        
+        (dm_path, vec![base_loop, cow_loop], cow_file.to_string_lossy().to_string())
+    };
     
-    // For Hybrid Mode: We skip this and use Host TAP below.
-    // The CNI 'eth0' is currently unused by Firecracker, but verifying IPAM works. (Phase 12 Complete, Part 1)
+    // Legacy bindings for compilation compatibility if needed
+    let dm_name = if state.rootless { "rootless".to_string() } else { format!("ign-{}", vm_id) };
     
-    // Legacy Tap Setup (Host Namespace)
-    // We reuse logic from before, but this time it runs alongside CNI.
-    let tap_name = format!("tap{}", &vm_id[0..8]);
+    // Network Setup
+    let (vm_ip, tap_name, netns_path_final) = if state.rootless {
+        // Rootless (Slirp4netns)
+        // IP is handled by Slirp (usually 10.0.2.15)
+        // TAP name is just a label for VmInstance, inside NetNS it is "tap0"
+        ("10.0.2.15".to_string(), "tap0".to_string(), None)
+    } else {
+        // Network (CNI Integration)
+        // 1. Create NetNS
+        let netns_name = format!("vm-{}", vm_id);
+        let netns_path = format!("/var/run/netns/{}", netns_name);
+        
+        // Ensure /var/run/netns exists
+        std::fs::create_dir_all("/var/run/netns").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        
+        // Create netns: ip netns add <name> (Requires root, which we have)
+        let _ = Command::new("ip").args(&["netns", "add", &netns_name]).output()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create netns: {}", e)))?;
+            
+        // 2. Call CNI ADD
+        let ifname = "eth0";
+        let cni_result = state.cni_manager.add(&vm_id, &netns_path, ifname)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("CNI ADD failed: {}", e)))?;
+            
+        // 3. Parse Result to get IP
+        let ip = parse_cni_ip(&cni_result).unwrap_or_else(|e| {
+             error!("Failed to parse CNI IP: {}", e);
+             "172.16.0.0".to_string() 
+        });
+        info!("CNI assigned IP: {}", ip);
+        
+        // Legacy Tap Name (Host Side for Hybrid)
+        let tap_legacy = format!("tap{}", &vm_id[0..8]);
+        
+        (ip, tap_legacy, Some(netns_path))
+    };
 
     // 3.5 Cgroups
     let cgroup_path = match state.cgroups.create_vm_cgroup(&vm_id) {
@@ -504,72 +528,66 @@ async fn run_vm(
          return Err((StatusCode::INTERNAL_SERVER_ERROR, "Kernel binary (bin/vmlinux) not found".into()));
     }
 
-    // For now (RC1): Run in host namespace until we implement tc-redirect or TAP CNI plugin.
-    if let Err(e) = vmm.start_daemon("bin/firecracker", None) {
-         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start FC: {}", e)));
-    }
-    
-    // Config
-    if let Err(e) = vmm.set_boot_source(kernel_path, &boot_args).await {
-        let _ = vmm.kill();
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Boot source: {}", e)));
-    }
-    
-    if let Err(e) = vmm.add_drive("rootfs", &dm_path, true).await {
-         let _ = vmm.kill();
-         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add drive: {}", e)));
-    }
-    
-    // Add network
-    // CNI has already set up the interface inside the netns as "eth0".
-    // We tell Firecracker to use that "eth0" which is now visible to it inside the netns.
-    // WAIT: Firecracker might need a TAP device. CNI Bridge creates a veth pair.
-    // If we run Firecracker in the netns, it sees one end of the veth as "eth0".
-    // But Firecracker expects a TAP device to attach to the guest.
-    // CONUNDRUM: Firecracker usually connects to a TAP on the host.
-    // 
-    // SOLUTION: Use the `tc-redirect-tap` CNI plugin or manual wrapping?
-    // OR: Use CNI to create a bridge, and we manually create a TAP in the netns?
-    //
-    // For now, let's assume valid setup.
-    // Actually, Firecracker inside NetNS works if we have a TAP inside that NetNS.
-    // CNI `bridge` creates `veth`. We can't attach `veth` to Firecracker directly.
-    //
-    // We need to use `macvtap` or creating a tap and bridging it?
-    // 
-    // SIMPLIFICATION for Demo:
-    // CNI is complex with Firecracker.
-    // Strategy: 
-    // 1. CNI creates interface (e.g. eth0) in NetNS.
-    // 2. We can't use eth0 as TAP.
-    //
-    // Let's stick to scaffolding and revert run logic for now if we can't solve this immediately.
-    // BUT user asked to "Wire CNI logic".
-    //
-    // The "standard" way with FC + CNI involves `tc` redirecting from the CNI-created veth to the TAP device used by FC.
-    // That is a lot of code.
-    //
-    // ALTERNATIVE: Use CNI `ptp` or similar? No.
-    //
-    // Let's implement the TAP creation in NetNS *after* CNI runs.
-    
-    // We tell Firecracker to look for "eth0" -- assuming we map it? No.
-    // Firecracker API: `network-interfaces` -> `host_dev_name`.
-    // It must be a TAP.
-    
-    // For now, we will revert the Start Daemon change but keep the CNI ADD call as "Pre-Flight" check to ensure CNI works,
-    // even if we don't use it for the actual traffic yet (Double Network?).
-    //
-    // ACTUALLY, let's stop here and think. 
-    // If I break `run`, I break the project.
-    // I will keep the CNI `ADD` call but NOT use the NetNS for Firecracker yet, 
-    // effectively verifying CNI works alongside.
-    //
-    // Correction: I must pass None to start_daemon to keep it working for validation.
-    // But I will leave the code block there.
-    if let Err(e) = vmm.add_network_interface("eth0", &tap_name, None).await {
-         let _ = vmm.kill();
-         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add net: {}", e)));
+    let mut slirp_mgr = None;
+
+    if state.rootless {
+        // Rootless Start
+        info!("Spawning Firecracker in Rootless Mode (unshare -r -n)...");
+        if let Err(e) = vmm.start_daemon("bin/firecracker", None, true) {
+             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start FC (Rootless): {}", e)));
+        }
+        
+        // Get PID for Slirp
+        let pid = vmm.get_pid().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "FC PID not found".into()))?;
+        
+        // Spawn Slirp
+        let socket_path = vm_dir.join("slirp.sock");
+        let mut slirp = ignite_core::slirp::SlirpManager::new(socket_path.to_string_lossy().as_ref());
+        if let Err(e) = slirp.spawn(pid, "tap0") {
+             let _ = vmm.kill();
+             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start slirp: {}", e)));
+        }
+        slirp_mgr = Some(slirp);
+        
+        // Config FC
+        if let Err(e) = vmm.set_boot_source(kernel_path, &boot_args).await {
+            let _ = vmm.kill();
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Boot source: {}", e)));
+        }
+        
+        if let Err(e) = vmm.add_drive("rootfs", &dm_path, true).await {
+             let _ = vmm.kill();
+             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add drive: {}", e)));
+        }
+        
+        // Network: Interface inside NetNS is "tap0" created by Slirp
+        if let Err(e) = vmm.add_network_interface("eth0", "tap0", None).await {
+             let _ = vmm.kill();
+             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add net (rootless): {}", e)));
+        }
+        
+    } else {
+        // Root/CNI Start (Hybrid Mode)
+        if let Err(e) = vmm.start_daemon("bin/firecracker", None, false) {
+             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start FC: {}", e)));
+        }
+        
+        // Config
+        if let Err(e) = vmm.set_boot_source(kernel_path, &boot_args).await {
+            let _ = vmm.kill();
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Boot source: {}", e)));
+        }
+        
+        if let Err(e) = vmm.add_drive("rootfs", &dm_path, true).await {
+             let _ = vmm.kill();
+             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add drive: {}", e)));
+        }
+        
+        // Network: Interface on Host is `tap_name`
+        if let Err(e) = vmm.add_network_interface("eth0", &tap_name, None).await {
+             let _ = vmm.kill();
+             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add net: {}", e)));
+        }
     }
 
     // Add Volumes
@@ -612,14 +630,15 @@ async fn run_vm(
         id: vm_id.clone(),
         tap_name: tap_name.clone(),
         dm_name: dm_name.clone(),
-        loop_devices: vec![base_loop, cow_loop],
-        cow_file_path: cow_file.to_string_lossy().to_string(),
+        loop_devices,
+        cow_file_path: cow_file_str,
         ip_address: vm_ip.clone(),
         proxy_tasks,
         fs_managers,
-
+        slirp: slirp_mgr,
+        
         cgroup_path,
-        netns_path: Some(netns_path),
+        netns_path: netns_path_final,
         config_ports: payload.ports.clone(),
         config_volumes: payload.volumes.clone(),
     };
@@ -751,6 +770,7 @@ struct RestoreRequest {
     mem_path: String,
     cow_path: String, // Path to the existing COW file to restore from
     // For MVP, we presume the disk state (COW) is already in a known location or passed here.
+    #[allow(dead_code)]
     original_vm_id: String, // To find the original disk resources
 }
 
@@ -823,7 +843,7 @@ async fn restore_vm(
     let socket_path = format!("/tmp/firecracker_{}.socket", vm_id);
     let mut vmm = VmmManager::new(&socket_path);
     
-    if let Err(e) = vmm.start_daemon("bin/firecracker", None) {
+    if let Err(e) = vmm.start_daemon("bin/firecracker", None, state.rootless) {
          return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start FC: {}", e)));
     }
     
@@ -860,6 +880,7 @@ async fn restore_vm(
         id: vm_id.clone(),
         tap_name: tap_name.clone(),
         dm_name: dm_name.clone(),
+        slirp: None,
         loop_devices: vec![base_loop, cow_loop],
         cow_file_path: cow_file.to_string_lossy().to_string(),
         ip_address: vm_ip.clone(),
@@ -1294,6 +1315,7 @@ async fn initialize_state(state: &AppState) {
                  ip_address: vm_state.ip_address,
                  proxy_tasks,
                  fs_managers,
+                 slirp: None,
                  cgroup_path: vm_state.cgroup_path,
                  netns_path: vm_state.netns_path,
                  config_ports: vm_state.ports,
@@ -1314,7 +1336,8 @@ async fn initialize_state(state: &AppState) {
                  cow_file_path: vm_state.cow_file_path,
                  ip_address: vm_state.ip_address,
                  proxy_tasks: vec![],
-                 fs_managers: vec![], 
+                 fs_managers: vec![],
+                 slirp: None,
                  cgroup_path: vm_state.cgroup_path,
                  netns_path: vm_state.netns_path,
                  config_ports: vec![], 

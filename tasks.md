@@ -162,7 +162,8 @@
 
 ### Phase 15: True Rootless Mode ("The Security Grail")
 - [ ] **User Namespaces**
-    - [ ] Fully implement `unshare` logic to map specific UIDs.
-    - [ ] Integrate `slirp4netns` or `passt` for completely unprivileged networking (replacing CNI bridge requirement).
+    - [x] Integrate `slirp4netns` for completely unprivileged networking.
+    - [x] Run `firecracker` with `unshare -r -n`.
 - [ ] **Rootless Storage**
-    - [ ] Remove `sudo` requirement for loop/dm setup (User-space block device implementation or FUSE-based images).
+    - [x] Remove `sudo` requirement for runtime (using file copy instead of DM).
+    - [ ] Remove `sudo` requirement for build/pull (replace `mount` with `debugfs` or similar).

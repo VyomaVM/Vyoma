@@ -70,15 +70,27 @@ impl VmmManager {
 
     /// Spawns the Firecracker process in a background thread/process.
     /// Optionally runs inside a network namespace.
-    pub fn start_daemon(&mut self, binary_path: &str, netns: Option<&str>) -> Result<()> {
-        info!("Starting Firecracker at {} (Socket: {}, NetNS: {:?})", binary_path, self.socket_path, netns);
+    pub fn start_daemon(&mut self, binary_path: &str, netns: Option<&str>, rootless: bool) -> Result<()> {
+        info!("Starting Firecracker at {} (Socket: {}, NetNS: {:?}, Rootless: {})", binary_path, self.socket_path, netns, rootless);
         
         // Ensure socket doesn't exist
         if Path::new(&self.socket_path).exists() {
             std::fs::remove_file(&self.socket_path)?;
         }
 
-        let mut child = if let Some(ns) = netns {
+        let mut child = if rootless {
+             // Rootless: Run in new User(+Root map) and Net namespace
+             Command::new("unshare")
+                .arg("-r") // map current user to root inside NS
+                .arg("-n") // new network namespace
+                .arg(binary_path)
+                .arg("--api-sock")
+                .arg(&self.socket_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| anyhow!("Failed to spawn firecracker with unshare: {}", e))?
+        } else if let Some(ns) = netns {
              Command::new("sudo") // sudo is needed for ip netns exec usually
                 .arg("ip")
                 .arg("netns")
