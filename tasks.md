@@ -142,8 +142,8 @@
 
 ### Phase 13: Networking Maturity ("The Cluster Ready")
 - [ ] **Service Discovery & DNS**
-    - [ ] Implement internal DNS resolver in `ignited` (or utilizing CNI DNS plugins).
-    - [ ] Allow VMs to resolve each other by name within a shared network.
+    - [x] Implement internal DNS resolver in `ignited` (or utilizing CNI DNS plugins).
+    - [x] Allow VMs to resolve each other by name within a shared network.
 - [ ] **Advanced CNI Support**
     - [ ] Validate Overlay Network support (e.g., Flannel, Calico) for multi-host communication.
     - [ ] Implement `ign network create/ls/rm` CLI commands to manage CNI configs dynamically.
