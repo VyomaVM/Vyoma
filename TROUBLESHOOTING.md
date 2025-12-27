@@ -30,4 +30,7 @@ This will:
 - Ignite currently requires root privileges for KVM, Networking, and Storage management.
 **Resolution:**
 - Ensure you run `ignited` with `sudo`.
-- Future versions (Roadmap Phase 15) aim to support Rootless mode.
+- **Rootless Mode (v0.3+):** You can run `ignited` as a standard user.
+  - Requires `slirp4netns` and `debugfs` (e2fsprogs) installed.
+  - Sudo is NOT required for basic runtime and image pulling.
+  - Note: Rootless mode uses User Networking (slirp), so VMs are not directly addressable from the host. Use port forwarding.
