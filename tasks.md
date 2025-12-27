@@ -150,7 +150,7 @@
 
 ### Phase 14: Robustness & Reliability ("The Production Grade")
 - [ ] **Daemon Recovery**
-    - [ ] Implement "Adoption" logic: On startup, `ignited` should verify and reconnect to existing running Firecracker processes.
+    - [x] Implement "Adoption" logic: On startup, `ignited` should verify and reconnect to existing running Firecracker processes.
     - [x] Implement "Graceful Shutdown": Handle SIGINT/SIGTERM to stop all VMs and clean up resources before exiting.
     - [ ] Handle `virtiofsd` crashes gracefully (auto-restart or fail-fast with clear errors).
 - [ ] **Edge Case Handling**
