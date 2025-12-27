@@ -32,7 +32,6 @@ use ignite_core::builder::{IgniteFile, Instruction};
 
 #[derive(Clone)]
 struct AppState {
-    // Map<VmId, Arc<TokioMutex<VmInstance>>>
     vms: Arc<StdMutex<HashMap<String, Arc<TokioMutex<VmInstance>>>>>,
     cgroups: Arc<CgroupManager>,
     cni_manager: Arc<ignite_core::cni::CniManager>,
@@ -198,6 +197,8 @@ async fn main() {
         cni_manager,
     };
 
+    let shutdown_state = state.clone();
+
     // build our application with a route
     let app = Router::new()
         // Health check
@@ -218,7 +219,63 @@ async fn main() {
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
     info!("Daemon listening on {}", listener.local_addr().unwrap());
     
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(shutdown_state))
+        .await
+        .unwrap();
+}
+
+async fn shutdown_signal(state: AppState) {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    info!("Signal received, starting graceful shutdown...");
+
+    // Collect IDs first to avoid holding lock while cleaning up (cleanup takes time)
+    let ids: Vec<String> = {
+        let map = state.vms.lock().unwrap();
+        map.keys().cloned().collect()
+    };
+
+    if ids.is_empty() {
+        info!("No active VMs to clean up.");
+    } else {
+        info!("Cleaning up {} active VMs...", ids.len());
+        for id in ids {
+            let vm_arc = {
+                let mut map = state.vms.lock().unwrap();
+                map.remove(&id)
+            };
+            
+            if let Some(vm_mutex) = vm_arc {
+                info!("Stopping VM: {}", id);
+                let mut vm = vm_mutex.lock().await;
+                // VmInstance::cleanup handles the logic
+                vm.cleanup(&state.cni_manager).await;
+            }
+        }
+    }
+    
+    info!("Graceful shutdown complete. Bye!");
 }
 
 async fn health_check() -> &'static str {
