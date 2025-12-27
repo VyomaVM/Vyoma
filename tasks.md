@@ -154,7 +154,7 @@
     - [x] Implement "Graceful Shutdown": Handle SIGINT/SIGTERM to stop all VMs and clean up resources before exiting.
     - [ ] Handle `virtiofsd` crashes gracefully (auto-restart or fail-fast with clear errors).
 - [ ] **Edge Case Handling**
-    - [ ] Implement OOM (Out Of Memory) event listener from Cgroups to report "OOM Killed" status.
+    - [x] Implement OOM (Out Of Memory) event listener from Cgroups to report "OOM Killed" status.
     - [x] Implement Zombie process reaping (reaping completed child processes reliably).
 - [ ] **Architecture Support**
     - [ ] Add support for `aarch64` (ARM64) builds (Apple Silicon, AWS Graviton).
