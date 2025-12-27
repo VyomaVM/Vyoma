@@ -13,7 +13,7 @@ use std::convert::Infallible;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::collections::HashMap;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
 use ignite_core::vmm::VmmManager;
@@ -1372,14 +1372,38 @@ async fn start_process_monitor(state: AppState) {
                     }
                     
                     // 2. Check VirtioFS
-                    for fs in &mut vm.fs_managers {
-                         match fs.try_wait() {
-                            Ok(Some(status)) => {
-                                error!("Monitor: VM {} VirtioFS process EXITED (Reaped): {}", id, status);
-                            },
-                             Err(e) => error!("Monitor Check Error for FS {}: {}", id, e),
-                             Ok(None) => {}
-                         }
+                    let fs_count = vm.fs_managers.len();
+                    for idx in 0..fs_count {
+                        // Check status with scoped mutable borrow
+                        let exit_status = {
+                             let fs = &mut vm.fs_managers[idx];
+                             match fs.try_wait() {
+                                 Ok(Some(s)) => Some(s),
+                                 Err(e) => {
+                                      error!("Monitor Check Error for FS {}: {}", id, e);
+                                      None
+                                 },
+                                 Ok(None) => None,
+                             }
+                        };
+                        
+                        if let Some(status) = exit_status {
+                             warn!("Monitor: VM {} VirtioFS (vol{}) EXITED with {}. Restarting...", id, idx, status);
+                             
+                             // Get Config (Immutable borrow OK now)
+                             let host_path = vm.config_volumes.get(idx).map(|v| v.host_path.clone());
+                             
+                             if let Some(path) = host_path {
+                                  let fs = &mut vm.fs_managers[idx]; // Re-borrow mutably
+                                  if let Err(e) = fs.start(&path) {
+                                       error!("Monitor: FAILED to auto-restart VirtioFS for VM {}: {}", id, e);
+                                  } else {
+                                       info!("Monitor: RESTARTED VirtioFS for VM {} (vol{})", id, idx);
+                                  }
+                             } else {
+                                  error!("Monitor: Cannot restart VirtioFS (vol{}), config not found.", idx);
+                             }
+                        }
                     }
                 }
             }
