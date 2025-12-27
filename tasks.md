@@ -155,7 +155,7 @@
     - [ ] Handle `virtiofsd` crashes gracefully (auto-restart or fail-fast with clear errors).
 - [ ] **Edge Case Handling**
     - [ ] Implement OOM (Out Of Memory) event listener from Cgroups to report "OOM Killed" status.
-    - [ ] Implement Zombie process reaping (reaping completed child processes reliably).
+    - [x] Implement Zombie process reaping (reaping completed child processes reliably).
 - [ ] **Architecture Support**
     - [ ] Add support for `aarch64` (ARM64) builds (Apple Silicon, AWS Graviton).
     - [ ] Abstract `vmlinux` kernel path to support multi-arch kernel selection.
