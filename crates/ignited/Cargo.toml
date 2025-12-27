@@ -22,5 +22,6 @@ tokio-stream = { version = "0.1.17", features = ["sync"] }
 tar.workspace = true
 flate2.workspace = true
 tokio-util = { version = "0.7.17", features = ["io"] }
+simple-dns = "0.11.0"
 
 

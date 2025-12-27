@@ -215,3 +215,30 @@ We currently have a "Zombie Reaper" that polls the process status. We need to ex
 - **Pros**: Simple verification, minimal dependencies, reuses existing monitor loop.
 - **Cons**: Detection is not instant (up to loop interval delay).
 - **Future**: Can upgrade to  polling with  for instant reaction in Phase 16+.
+
+## 016. Internal DNS for Service Discovery
+
+Date: 2025-12-27
+
+### Status
+
+Accepted
+
+### Context
+
+Users need VMs to communicate with each other by hostname (e.g.,  resolving to ) and access the internet (resolving public domains). Since  assigns static IPs and manages the network namespace, we control the network environment.
+
+Existing CNI plugins like  exist but add external dependencies (dnsmasq).
+
+### Decision
+
+1.  **Embedded DNS Server**:  will run a lightweight UDP DNS server (using  or  crate) on the bridge gateway IP (e.g., ).
+2.  **Zone Management**: This server will be authoritative for the  TLD (e.g., ).
+3.  **Forwarding**: Requests for other domains will be forwarded to the host's system resolver (e.g.,  or ).
+4.  **Guest Configuration**: The guest VM will be configured to use the gateway IP as its nameserver via Kernel Boot Args ( parameter support for DNS).
+
+### Consequences
+
+- **Pros**: Zero external dependencies, automatic registration of VMs, instant updates.
+- **Cons**: Adds complexity to  (UDP handling). requires  if binding port 53 (but inside private netns or on high port? No, must be 53 for guest /etc/resolv.conf usually implies 53).
+    - Actually, we bind to  which is an interface we created.

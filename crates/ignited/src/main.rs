@@ -21,6 +21,8 @@ use ignite_core::api::{PortMapping, VolumeMount};
 use ignite_core::proxy::ProxyManager;
 use ignite_core::fs::VirtioFsManager;
 use ignite_core::cgroups::CgroupManager;
+
+mod dns;
 use tokio::task::JoinHandle;
 use std::process::Command;
 use axum::body::Body;
@@ -244,6 +246,9 @@ async fn main() {
     
     // Start Process Monitor (Zombie Reaper)
     start_process_monitor(state.clone()).await;
+    
+    // Start DNS Server
+    dns::start_dns_server(state.clone()).await;
 
     let shutdown_state = state.clone();
 
@@ -484,9 +489,10 @@ async fn run_vm(
         proxy_tasks.push(handle);
     }
 
-    let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0::eth0:off init=/bin/sh", vm_ip, "172.16.0.1");
-    // "ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>"
-    // Correct kernel format: ip=172.16.0.X::172.16.0.1:255.255.255.0::eth0:off
+    let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0:{}:eth0:off:{} init=/bin/sh", 
+        vm_ip, "172.16.0.1", vm_id, "172.16.0.1");
+    // "ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>:<dns0-ip>"
+    // Correct kernel format: ip=172.16.0.X::172.16.0.1:255.255.255.0:myvm:eth0:off:172.16.0.1
     
     // 4. Firecracker VMM
     let socket_path = format!("/tmp/firecracker_{}.socket", vm_id);
