@@ -1357,8 +1357,15 @@ async fn start_process_monitor(state: AppState) {
                     // 1. Check Firecracker
                     match vm.vmm.try_wait() {
                         Ok(Some(status)) => {
-                            error!("Monitor: VM {} Firecracker process EXITED (Reaped): {}", id, status);
-                            // TODO: Trigger cleanup/removal from map?
+                            let mut msg = format!("Monitor: VM {} Firecracker process EXITED (Reaped): {}", id, status);
+                            
+                            // Check for OOM
+                            if let Ok(count) = state.cgroups.get_oom_kill_count(&id) {
+                                if count > 0 {
+                                    msg.push_str(&format!(" [WARNING: OOM Kill Detected: {}]", count));
+                                }
+                            }
+                            error!("{}", msg);
                         },
                         Err(e) => error!("Monitor Check Error for VMM {}: {}", id, e),
                         Ok(None) => {} 

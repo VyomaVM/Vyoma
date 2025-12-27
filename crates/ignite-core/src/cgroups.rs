@@ -90,4 +90,20 @@ impl CgroupManager {
          }
          Ok(())
     }
+
+    pub fn get_oom_kill_count(&self, vm_id: &str) -> Result<u64> {
+        let path = Path::new(&self.root_path).join(format!("ignite-{}", vm_id)).join("memory.events");
+        if !path.exists() {
+             return Ok(0);
+        }
+        let content = fs::read_to_string(path)?;
+        for line in content.lines() {
+            if line.starts_with("oom_kill ") {
+                 if let Some(val_str) = line.split_whitespace().nth(1) {
+                     return Ok(val_str.parse().unwrap_or(0));
+                 }
+            }
+        }
+        Ok(0)
+    }
 }

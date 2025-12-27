@@ -187,3 +187,31 @@ User-mode networking for unprivileged network namespaces.
     *   Phase 1 is establishing the Rootless Architecture.
     *   Currently, we will focus on investigating these requirements in a separate branch `feat/rootless`.
 
+
+## 015. Monitor VM Health and OOM Events
+
+Date: 2025-12-27
+
+### Status
+
+Accepted
+
+### Context
+
+To provide a production-grade experience,  needs to detect not just when a VM fully stops, but *why* it stopped or if it is under stress. A common failure mode for micro-VMs is running out of memory, leading to the host kernel killing the Firecracker process (OOM Kill) via Cgroups.
+
+We currently have a "Zombie Reaper" that polls the process status. We need to extend this to monitor Cgroup events.
+
+### Decision
+
+1. **Unified Monitor Loop**: We will assume the existing global "Process Monitor" task is the central place for health checks. It runs periodically (e.g., every 5 seconds).
+2. **Polling over Notifications**: For Cgroup OOM events (), we will read the file and parse the  counter. While  or  file descriptors offer push-based notifications, implementing them asynchronously in Rust adds significant complexity (handling file descriptors effectively in Tokio). Given the non-critical real-time nature of restart logic (seconds are fine), polling is sufficient and much simpler to implement and debug.
+3. **Stateless Logic**: The monitor will read the current value. If it's non-zero (and we haven't seen it before? or just if the process is gone?), we infer OOM.
+    - actually,  is a counter. We should track the previous value?
+    - Simplification: If the process is DEAD and , we report "Killed by OOM". If monitoring a running VM, we can just log warnings if  increments.
+
+### Consequences
+
+- **Pros**: Simple verification, minimal dependencies, reuses existing monitor loop.
+- **Cons**: Detection is not instant (up to loop interval delay).
+- **Future**: Can upgrade to  polling with  for instant reaction in Phase 16+.
