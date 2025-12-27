@@ -360,6 +360,9 @@ async fn run_doctor() -> Result<()> {
     // 4. Networking
     if !check("Ignite Bridge (ign0)", check_bridge(), false) { } // Warn only
     
+    // 5. Rootless Tools
+    if !check("debugfs (e2fsprogs)", check_binary("debugfs"), false) { } // Needed for rootless build
+    
     println!();
     if all_passed {
         println!("{}", "Your system is ready for Ignite!".green().bold());
