@@ -28,14 +28,22 @@ impl SlirpManager {
 
     /// Spawns slirp4netns attached to the target PID.
     /// Creates interface `tapName` (default tap0) inside the netns.
-    pub fn spawn(&mut self, target_pid: u32, interface_name: &str) -> Result<()> {
-        info!("Starting slirp4netns for PID {}", target_pid);
+    pub fn spawn(&mut self, target_pid: u32, interface_name: &str, ports: &[crate::api::PortMapping]) -> Result<()> {
+        info!("Starting slirp4netns for PID {} with {} ports", target_pid, ports.len());
         
-        let child = Command::new("slirp4netns")
-            .arg("--configure")
-            .arg("--mtu=65520")
-            .arg("--disable-host-loopback")
-            .arg("--api-socket").arg(&self.socket_path)
+        let mut cmd = Command::new("slirp4netns");
+        cmd.arg("--configure")
+           .arg("--mtu=65520")
+           .arg("--disable-host-loopback")
+           .arg("--api-socket").arg(&self.socket_path);
+           
+        for port in ports {
+            // "host_port:guest_port"
+            // Note: slirp4netns binds to 0.0.0.0 (or ::) by default.
+            cmd.arg(format!("--publish={}:{}", port.host_port, port.vm_port));
+        }
+            
+        let child = cmd
             .arg(target_pid.to_string())
             .arg(interface_name)
             .spawn()

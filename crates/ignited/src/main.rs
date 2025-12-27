@@ -508,9 +508,13 @@ async fn run_vm(
     
     // 3.6 Start Port Proxies
     let mut proxy_tasks = Vec::new();
-    for mapping in &payload.ports {
-        let handle = ProxyManager::start_proxy(mapping.host_port, vm_ip.clone(), mapping.vm_port);
-        proxy_tasks.push(handle);
+    if !state.rootless {
+        for mapping in &payload.ports {
+            let handle = ProxyManager::start_proxy(mapping.host_port, vm_ip.clone(), mapping.vm_port);
+            proxy_tasks.push(handle);
+        }
+    } else {
+        info!("Rootless: Skipping ProxyManager. Ports are mapped by slirp4netns.");
     }
 
     let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0:{}:eth0:off:{} init=/bin/sh", 
@@ -543,7 +547,7 @@ async fn run_vm(
         // Spawn Slirp
         let socket_path = vm_dir.join("slirp.sock");
         let mut slirp = ignite_core::slirp::SlirpManager::new(socket_path.to_string_lossy().as_ref());
-        if let Err(e) = slirp.spawn(pid, "tap0") {
+        if let Err(e) = slirp.spawn(pid, "tap0", &payload.ports) {
              let _ = vmm.kill();
              return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start slirp: {}", e)));
         }
