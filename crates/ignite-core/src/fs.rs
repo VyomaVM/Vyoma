@@ -71,6 +71,14 @@ impl VirtioFsManager {
         }
         Ok(())
     }
+
+    pub fn try_wait(&mut self) -> Result<Option<std::process::ExitStatus>> {
+        if let Some(child) = self.process.as_mut() {
+             child.try_wait().map_err(|e| anyhow!("Failed to wait on child: {}", e))
+        } else {
+             Ok(None)
+        }
+    }
 }
 
 impl Drop for VirtioFsManager {

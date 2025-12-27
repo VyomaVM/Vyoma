@@ -241,6 +241,9 @@ async fn main() {
 
     // Recovery Phase
     initialize_state(&state).await;
+    
+    // Start Process Monitor (Zombie Reaper)
+    start_process_monitor(state.clone()).await;
 
     let shutdown_state = state.clone();
 
@@ -1326,4 +1329,53 @@ async fn initialize_state(state: &AppState) {
              let _ = std::fs::remove_dir_all(entry.path());
         }
     }
+}
+
+async fn start_process_monitor(state: AppState) {
+    tokio::spawn(async move {
+        // Check every 5 seconds
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        
+        loop {
+            interval.tick().await;
+            
+            let ids: Vec<String> = {
+                let map = state.vms.lock().unwrap();
+                map.keys().cloned().collect()
+            };
+            
+            for id in ids {
+                // Get VM Arc
+                let vm_arc = {
+                    let map = state.vms.lock().unwrap();
+                    map.get(&id).cloned()
+                };
+                
+                if let Some(vm_mutex) = vm_arc {
+                    let mut vm = vm_mutex.lock().await;
+
+                    // 1. Check Firecracker
+                    match vm.vmm.try_wait() {
+                        Ok(Some(status)) => {
+                            error!("Monitor: VM {} Firecracker process EXITED (Reaped): {}", id, status);
+                            // TODO: Trigger cleanup/removal from map?
+                        },
+                        Err(e) => error!("Monitor Check Error for VMM {}: {}", id, e),
+                        Ok(None) => {} 
+                    }
+                    
+                    // 2. Check VirtioFS
+                    for fs in &mut vm.fs_managers {
+                         match fs.try_wait() {
+                            Ok(Some(status)) => {
+                                error!("Monitor: VM {} VirtioFS process EXITED (Reaped): {}", id, status);
+                            },
+                             Err(e) => error!("Monitor Check Error for FS {}: {}", id, e),
+                             Ok(None) => {}
+                         }
+                    }
+                }
+            }
+        }
+    });
 }

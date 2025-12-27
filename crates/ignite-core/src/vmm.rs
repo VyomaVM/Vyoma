@@ -60,6 +60,14 @@ impl VmmManager {
         self.process.as_ref().map(|p| p.id())
     }
 
+    pub fn try_wait(&mut self) -> Result<Option<std::process::ExitStatus>> {
+        if let Some(child) = self.process.as_mut() {
+            child.try_wait().map_err(|e| anyhow!("Failed to wait on child: {}", e))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Spawns the Firecracker process in a background thread/process.
     /// Optionally runs inside a network namespace.
     pub fn start_daemon(&mut self, binary_path: &str, netns: Option<&str>) -> Result<()> {
