@@ -52,9 +52,51 @@ struct VmInstance {
     fs_managers: Vec<VirtioFsManager>,
     cgroup_path: Option<String>,
     netns_path: Option<String>,
+    
+    // Metadata for Recovery
+    config_ports: Vec<PortMapping>,
+    config_volumes: Vec<VolumeMount>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct VmState {
+    id: String,
+    tap_name: String,
+    dm_name: String,
+    loop_devices: Vec<String>,
+    cow_file_path: String,
+    ip_address: String,
+    cgroup_path: Option<String>,
+    netns_path: Option<String>,
+    ports: Vec<PortMapping>,
+    volumes: Vec<VolumeMount>,
 }
 
 impl VmInstance {
+    pub fn save_state(&self) -> anyhow::Result<()> {
+        let state = VmState {
+            id: self.id.clone(),
+            tap_name: self.tap_name.clone(),
+            dm_name: self.dm_name.clone(),
+            loop_devices: self.loop_devices.clone(),
+            cow_file_path: self.cow_file_path.clone(),
+            ip_address: self.ip_address.clone(),
+            cgroup_path: self.cgroup_path.clone(),
+            netns_path: self.netns_path.clone(),
+            ports: self.config_ports.clone(),
+            volumes: self.config_volumes.clone(),
+        };
+
+        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home dir"))?;
+        let vm_dir = home.join(".ignite").join("vms").join(&self.id);
+        if !vm_dir.exists() {
+             std::fs::create_dir_all(&vm_dir)?;
+        }
+        let state_path = vm_dir.join("state.json");
+        let f = std::fs::File::create(state_path)?;
+        serde_json::to_writer_pretty(f, &state)?;
+        Ok(())
+    }
     pub async fn cleanup(&mut self, cni_manager: &ignite_core::cni::CniManager) {
         info!("Cleaning up VM resources for {}", self.id);
         
@@ -197,6 +239,9 @@ async fn main() {
         cni_manager,
     };
 
+    // Recovery Phase
+    initialize_state(&state).await;
+
     let shutdown_state = state.clone();
 
     // build our application with a route
@@ -219,6 +264,8 @@ async fn main() {
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
     info!("Daemon listening on {}", listener.local_addr().unwrap());
     
+
+
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(shutdown_state))
         .await
@@ -564,8 +611,12 @@ async fn run_vm(
 
         cgroup_path,
         netns_path: Some(netns_path),
+        config_ports: payload.ports.clone(),
+        config_volumes: payload.volumes.clone(),
     };
     
+    instance.save_state().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save state: {}", e)))?;
+
     {
         let mut vms = state.vms.lock().unwrap();
         vms.insert(vm_id.clone(), Arc::new(TokioMutex::new(instance)));
@@ -810,6 +861,8 @@ async fn restore_vm(
         // For MVP, simplistic restore skips cgroup enforcement or needs logic duplication.
         // TODO: Isolate create_resources logic.
         netns_path: None, // Simplified restore lacks CNI for now
+        config_ports: vec![],
+        config_volumes: vec![],
     };
     
     {
@@ -1159,4 +1212,118 @@ async fn ensure_image_locally(image_name: &str) -> Result<std::path::PathBuf, (S
     }
     
     Ok(base_image_file)
+}
+
+async fn initialize_state(state: &AppState) {
+    info!("Recovery: Scanning for existing VMs...");
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+    let vms_dir = home.join(".ignite").join("vms");
+    if !vms_dir.exists() { return; }
+
+    let entries = match std::fs::read_dir(vms_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        if !entry.path().is_dir() { continue; }
+        
+        // Check for state.json
+        let state_path = entry.path().join("state.json");
+        if !state_path.exists() { continue; } // Not a managed VM or incomplete
+        
+        // Load State
+        let content = match std::fs::read_to_string(&state_path) {
+             Ok(c) => c,
+             Err(e) => {
+                 error!("Failed to read state for {:?}: {}", entry.path(), e);
+                 continue;
+             }
+        };
+        
+        let vm_state: VmState = match serde_json::from_str(&content) {
+             Ok(s) => s,
+             Err(e) => {
+                 error!("Failed to parse state for {:?}: {}", entry.path(), e);
+                 continue;
+             }
+        };
+        
+        // Reconstruct VmmManager
+        let socket_path = format!("/tmp/firecracker_{}.socket", vm_state.id);
+        let vmm = VmmManager::new(&socket_path);
+        
+        // Check Alive
+        if vmm.check_alive().await {
+             info!("Recovery: VM {} is ALIVE. Adopting...", vm_state.id);
+             
+             // Reconstruct Proxy Tasks - Restart them
+             let mut proxy_tasks = Vec::new();
+             for p in &vm_state.ports {
+                 let t = ProxyManager::start_proxy(p.host_port, vm_state.ip_address.clone(), p.vm_port);
+                 proxy_tasks.push(t);
+             }
+             
+             // Reconstruct FS Managers (Stateless)
+             let mut fs_managers = Vec::new();
+             for (idx, _vol) in vm_state.volumes.iter().enumerate() {
+                 let tag = format!("vol{}", idx);
+                 let path = entry.path().join(format!("fs_{}.sock", idx));
+                 fs_managers.push(VirtioFsManager::new(&tag, path.to_string_lossy().as_ref()));
+             }
+
+             let instance = VmInstance {
+                 vmm,
+                 id: vm_state.id.clone(),
+                 tap_name: vm_state.tap_name,
+                 dm_name: vm_state.dm_name,
+                 loop_devices: vm_state.loop_devices,
+                 cow_file_path: vm_state.cow_file_path,
+                 ip_address: vm_state.ip_address,
+                 proxy_tasks,
+                 fs_managers,
+                 cgroup_path: vm_state.cgroup_path,
+                 netns_path: vm_state.netns_path,
+                 config_ports: vm_state.ports,
+                 config_volumes: vm_state.volumes,
+             };
+             
+             state.vms.lock().unwrap().insert(vm_state.id, Arc::new(TokioMutex::new(instance)));
+             
+        } else {
+             info!("Recovery: VM {} found but DEAD. cleaning up artifacts...", vm_state.id);
+             // Cleanup dead VM
+             let mut instance = VmInstance {
+                 vmm,
+                 id: vm_state.id.clone(),
+                 tap_name: vm_state.tap_name,
+                 dm_name: vm_state.dm_name,
+                 loop_devices: vm_state.loop_devices,
+                 cow_file_path: vm_state.cow_file_path,
+                 ip_address: vm_state.ip_address,
+                 proxy_tasks: vec![],
+                 fs_managers: vec![], 
+                 cgroup_path: vm_state.cgroup_path,
+                 netns_path: vm_state.netns_path,
+                 config_ports: vec![], 
+                 config_volumes: vec![],
+             };
+             // We await cleanup
+             instance.cleanup(&state.cni_manager).await;
+             
+             // Also delete the state file so we don't loop on it next time?
+             // cleanup() removes the VM dir? 
+             // VM dir is in ~/.ignite/vms/<id>. cleanup usually removes things but maybe not the dir itself?
+             // ignite_core::storage/vmm doesn't remove the VM home dir automatically?
+             // Let's check  logic.
+             // It calls remove_dm_device, detach loop, etc.
+             // But it doesn't remove the state.json or the ID directory.
+             
+             // Let's remove the directory to be clean.
+             let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }

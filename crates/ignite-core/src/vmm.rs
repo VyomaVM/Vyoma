@@ -136,6 +136,39 @@ impl VmmManager {
         Err(anyhow!("Timed out waiting for Firecracker socket"))
     }
 
+    /// Checks if the Firecracker process is responsive via the API socket.
+    pub async fn check_alive(&self) -> bool {
+        // Just try to get machine config or version info.
+        // GET /machine-config should work if configured, or just GET / (FC returns info usually).
+        // Let's try GET /
+        // curl --unix-socket ... http://localhost/
+        // Actually FC might return 404 for /, but that means it IS alive.
+        // We just check if curl connects.
+        
+        let mut cmd = Command::new("curl");
+        cmd.arg("--unix-socket").arg(&self.socket_path)
+           .arg("--head") // Just HEAD request
+           .arg("--silent")
+           .arg("--fail") // Fail on server errors? well 404 is fine.
+           .arg("http://localhost/");
+           
+        // If curl returns 0, it connected and got 200-299.
+        // If it returns exit code 7 (Failed to connect), it's dead.
+        // If it returns 22 (HTTP Error) but connected, it's alive.
+        
+        match cmd.status() {
+            Ok(status) => {
+                // If it's exit code 7 (CURLE_COULDNT_CONNECT), then it is dead.
+                // Otherwise (even if 404/400), the socket is there.
+                if let Some(code) = status.code() {
+                     return code != 7;
+                }
+                false // No exit code?
+            },
+            Err(_) => false,
+        }
+    }
+
     /// Sends a configuration request to the Firecracker API via curl.
     async fn api_request<T: Serialize>(&self, endpoint: &str, method: &str, body: Option<&T>) -> Result<()> {
         let url = format!("http://localhost{}", endpoint);
