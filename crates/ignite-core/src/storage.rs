@@ -54,6 +54,10 @@ impl StorageManager {
     /// Mounts the image file, copies contents from source_dir, and unmounts.
     /// WARNING: This requires sudo/root access.
     pub fn populate_image(image_path: &Path, source_dir: &Path) -> Result<()> {
+        if !crate::rootless::RootlessManager::is_root() {
+            return Self::populate_image_rootless(image_path, source_dir);
+        }
+        
         let mount_point = tempfile::tempdir()?;
         let mount_path = mount_point.path();
         
@@ -105,11 +109,77 @@ impl StorageManager {
         Ok(())
     }
 
-    /// Populates an image without root privileges.
-    /// Currently invalid as we lack a stable pure-Rust ext4 writer.
-    /// Future work: Use `guestfish` or `debugfs` (if available without root) or a FUSE mount.
-    pub fn populate_image_rootless(_image_path: &Path, _source_dir: &Path) -> Result<()> {
-         Err(anyhow!("Rootless image population is not yet implemented. We need a userspace ext4 writer."))
+    /// Populates an image without root privileges using `debugfs`.
+    pub fn populate_image_rootless(image_path: &Path, source_dir: &Path) -> Result<()> {
+         info!("Populating {:?} using debugfs (rootless)", image_path);
+        
+        let mut script = String::new();
+        // Traverse source_dir
+        // Use a stack for recursion
+        let mut stack = vec![source_dir.to_path_buf()];
+        
+        // debugfs script format:
+        // mkdir /path
+        // write host_path vm_path
+        // symlink vm_path target
+        
+        // Problem: read_dir sends us deep without strict ordering?
+        // DFS Stack: 
+        // 1. Pop DIR.
+        // 2. Read entries.
+        // 3. For each entry:
+        //    If DIR -> Emit mkdir, Push to Stack.
+        //    If FILE/Symlink -> Emit command.
+        // This ensures DIR is created before its children are processed in future iterations (since we push to stack).
+        
+        while let Some(current_path) = stack.pop() {
+            for entry in std::fs::read_dir(&current_path)? {
+                 let entry = entry?;
+                 let path = entry.path();
+                 let rel_path = path.strip_prefix(source_dir)?.to_string_lossy().into_owned();
+                 // Debugfs paths must start with /
+                 let vm_path = format!("/{}", rel_path);
+                 
+                 let file_type = entry.file_type()?;
+                 if file_type.is_dir() {
+                     // create dir explicitly
+                     // Handle spaces via quoting? debugfs might be picky.
+                     script.push_str(&format!("mkdir \"{}\"\n", vm_path));
+                     stack.push(path);
+                 } else if file_type.is_file() {
+                     script.push_str(&format!("write \"{}\" \"{}\"\n", path.to_string_lossy(), vm_path));
+                 } else if file_type.is_symlink() {
+                      let target = std::fs::read_link(&path)?;
+                      script.push_str(&format!("symlink \"{}\" \"{}\"\n", vm_path, target.to_string_lossy()));
+                 }
+            }
+        }
+        
+        // Write script to temp file
+        // To avoid lifetime issues with tempfile, we let it persist until End of Function
+        // Using Builder to create it?
+        use std::io::Write;
+        let mut temp_script = tempfile::Builder::new().suffix(".debugfs").tempfile()?;
+        write!(temp_script, "{}", script)?;
+        
+        let script_path = temp_script.path().to_owned(); // Keep for command arg
+        
+        // Execute debugfs
+        let status = Command::new("debugfs")
+            .arg("-w") // Read-Write
+            .arg("-f") // Script file
+            .arg(&script_path)
+            .arg(image_path)
+            .stdout(std::process::Stdio::null()) // Suppress noisy output?
+            //.stderr(std::process::Stdio::null()) 
+            .status()
+            .map_err(|e| anyhow!("Failed to execute debugfs: {}", e))?;
+
+        if !status.success() {
+             return Err(anyhow!("debugfs failed with status: {}", status));
+        }
+        // temp_script is dropped here, file deleted.
+        Ok(())
     }
     /// Attaches the file to a loop device. Returns the loop device path (e.g., /dev/loop0).
     /// Requires sudo.

@@ -166,4 +166,4 @@
     - [x] Run `firecracker` with `unshare -r -n`.
 - [ ] **Rootless Storage**
     - [x] Remove `sudo` requirement for runtime (using file copy instead of DM).
-    - [ ] Remove `sudo` requirement for build/pull (replace `mount` with `debugfs` or similar).
+    - [x] Remove `sudo` requirement for build/pull (replace `mount` with `debugfs` or similar).

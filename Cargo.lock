@@ -771,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "ign"
-version = "0.2.0-rc1"
+version = "0.3.0-dev"
 dependencies = [
  "anyhow",
  "clap",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-core"
-version = "0.2.0-rc1"
+version = "0.3.0-dev"
 dependencies = [
  "anyhow",
  "flate2",
@@ -810,7 +810,7 @@ dependencies = [
 
 [[package]]
 name = "ignited"
-version = "0.2.0-rc1"
+version = "0.3.0-dev"
 dependencies = [
  "anyhow",
  "axum",
