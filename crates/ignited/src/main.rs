@@ -136,8 +136,10 @@ impl VmInstance {
              let _ = Command::new("ip").args(&["netns", "delete", &netns_name]).output();
         }
         
-        if let Err(e) = NetworkManager::remove_interface(&self.tap_name) {
-             error!("Failed to remove TAP {}: {}", self.tap_name, e);
+        if !self.tap_name.is_empty() {
+            if let Err(e) = NetworkManager::remove_interface(&self.tap_name) {
+                 error!("Failed to remove TAP {}: {}", self.tap_name, e);
+            }
         }
         
         // 3. Remove DM Device
@@ -632,7 +634,7 @@ async fn run_vm(
     let instance = VmInstance {
         vmm,
         id: vm_id.clone(),
-        tap_name: tap_name.clone(),
+        tap_name: if state.rootless { String::new() } else { tap_name.clone() },
         dm_name: dm_name.clone(),
         loop_devices,
         cow_file_path: cow_file_str,
