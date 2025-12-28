@@ -146,7 +146,7 @@
     - [x] Allow VMs to resolve each other by name within a shared network.
 - [ ] **Advanced CNI Support**
     - [ ] Validate Overlay Network support (e.g., Flannel, Calico) for multi-host communication.
-    - [ ] Implement `ign network create/ls/rm` CLI commands to manage CNI configs dynamically.
+    - [x] Implement `ign network create/ls/rm` CLI commands to manage CNI configs dynamically.
 
 ### Phase 14: Robustness & Reliability ("The Production Grade")
 - [ ] **Daemon Recovery**

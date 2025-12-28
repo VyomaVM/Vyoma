@@ -32,25 +32,20 @@ impl CniManager {
 
     /// 
     /// # Arguments
-    /// * `container_id`: Unique ID of the VM/Container
-    /// * `netns`: Path to the network namespace (e.g. /var/run/netns/vm-123)
-    /// * `ifname`: Interface name inside the container (e.g. eth0)
-    pub fn add(&self, container_id: &str, netns: &str, ifname: &str) -> Result<serde_json::Value> {
-        let res = self.exec("ADD", container_id, netns, ifname)?;
+    /// * `network_name`: Optional specific network to use. If None, uses first found.
+    pub fn add(&self, network_name: Option<&str>, container_id: &str, netns: &str, ifname: &str) -> Result<serde_json::Value> {
+        let res = self.exec("ADD", network_name, container_id, netns, ifname)?;
         res.ok_or_else(|| anyhow!("CNI Plugin returned no output for ADD"))
     }
 
-
-
     /// Executed CNI DEL command.
-    pub fn del(&self, container_id: &str, netns: &str, ifname: &str) -> Result<()> {
-        // CNI DEL should be best-effort, but we return error if it fails hard.
-        self.exec("DEL", container_id, netns, ifname).map(|_| ())
+    pub fn del(&self, network_name: Option<&str>, container_id: &str, netns: &str, ifname: &str) -> Result<()> {
+        self.exec("DEL", network_name, container_id, netns, ifname).map(|_| ())
     }
 
-    fn exec(&self, command: &str, container_id: &str, netns: &str, ifname: &str) -> Result<Option<serde_json::Value>> {
-        // 1. Find config file (lexicographically first in config_dir)
-        let config_file = self.find_config()?;
+    fn exec(&self, command: &str, network_name: Option<&str>, container_id: &str, netns: &str, ifname: &str) -> Result<Option<serde_json::Value>> {
+        // 1. Find config file
+        let config_file = self.find_config(network_name)?;
         let config_bytes = std::fs::read(&config_file).context("Failed to read CNI config")?;
         let config: CniConfig = serde_json::from_slice(&config_bytes).context("Failed to parse CNI config")?;
         
@@ -60,7 +55,7 @@ impl CniManager {
             return Err(anyhow!("CNI plugin not found: {:?}", plugin_binary));
         }
 
-        info!("CNI {}: Invoking plugin {:?} for {}", command, config.plugin_type, container_id);
+        info!("CNI {}: Invoking plugin {:?} for {} (Net: {})", command, config.plugin_type, container_id, config.name);
 
         // 3. Prepare Environment
         let envs = vec![
@@ -103,7 +98,7 @@ impl CniManager {
         Ok(None)
     }
 
-    fn find_config(&self) -> Result<PathBuf> {
+    fn find_config(&self, name_filter: Option<&str>) -> Result<PathBuf> {
         let mut entries: Vec<_> = std::fs::read_dir(&self.config_dir)?
             .filter_map(|e| e.ok())
             .map(|e| e.path())
@@ -112,7 +107,79 @@ impl CniManager {
             
         entries.sort();
         
-        entries.first().cloned().ok_or_else(|| anyhow!("No CNI config found in {:?}", self.config_dir))
+        if let Some(target_name) = name_filter {
+             // We need to parse content to find name
+             for path in &entries {
+                  if let Ok(content) = std::fs::read(path) {
+                      if let Ok(config) = serde_json::from_slice::<CniConfig>(&content) {
+                          if config.name == target_name {
+                              return Ok(path.clone());
+                          }
+                      }
+                  }
+             }
+             Err(anyhow!("Network config named '{}' not found", target_name))
+        } else {
+             entries.first().cloned().ok_or_else(|| anyhow!("No CNI config found in {:?}", self.config_dir))
+        }
+    }
+
+    pub fn list_networks(&self) -> Result<Vec<String>> {
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(&self.config_dir)? {
+             let entry = entry?;
+             let path = entry.path();
+             if path.extension().map_or(false, |e| e == "conf" || e == "json") {
+                 let content = std::fs::read(&path)?;
+                 if let Ok(config) = serde_json::from_slice::<CniConfig>(&content) {
+                     names.push(config.name);
+                 }
+             }
+        }
+        Ok(names)
+    }
+
+    pub fn create_network(&self, name: &str, subnet: &str) -> Result<()> {
+        let bridge_name = format!("ign-{}", name); 
+        let config = serde_json::json!({
+            "cniVersion": "0.3.1",
+            "name": name,
+            "type": "bridge",
+            "bridge": bridge_name,
+            "isGateway": true,
+            "ipMasq": true,
+            "ipam": {
+                "type": "host-local",
+                "subnet": subnet,
+                "routes": [{ "dst": "0.0.0.0/0" }]
+            }
+        });
+        
+        let path = self.config_dir.join(format!("{}.conf", name));
+        if path.exists() {
+             return Err(anyhow!("Network config file exists"));
+        }
+        
+        let f = std::fs::File::create(&path)?;
+        serde_json::to_writer_pretty(f, &config)?;
+        Ok(())
+    }
+    
+    pub fn delete_network(&self, name: &str) -> Result<()> {
+        for entry in std::fs::read_dir(&self.config_dir)? {
+             let entry = entry?;
+             let path = entry.path();
+             if path.extension().map_or(false, |e| e == "conf" || e == "json") {
+                 let content = std::fs::read(&path)?;
+                 if let Ok(config) = serde_json::from_slice::<CniConfig>(&content) {
+                     if config.name == name {
+                         std::fs::remove_file(path)?;
+                         return Ok(());
+                     }
+                 }
+             }
+        }
+        Err(anyhow!("Network not found"))
     }
 }
 

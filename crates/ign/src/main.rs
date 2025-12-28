@@ -111,6 +111,30 @@ enum Commands {
     },
     /// Check system dependencies and environment health
     Doctor,
+    /// Manage networks
+    Network {
+        #[command(subcommand)]
+        command: NetworkCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum NetworkCommands {
+    /// List available networks
+    Ls,
+    /// Create a new bridge network
+    Create {
+        /// Network name
+        name: String,
+        /// Subnet CIDR (e.g. 10.244.0.0/16)
+        #[arg(long)]
+        subnet: String,
+    },
+    /// Remove a network
+    Rm {
+        /// Network name
+        name: String,
+    },
 }
 
 #[derive(Serialize)]
@@ -307,6 +331,44 @@ async fn main() -> Result<()> {
         }
         Commands::Doctor => {
              run_doctor().await?;
+        }
+        Commands::Network { command } => {
+            match command {
+                NetworkCommands::Ls => {
+                    let resp = client.get(format!("{}/networks", daemon_url)).send().await;
+                    match resp {
+                        Ok(response) => {
+                             if response.status().is_success() {
+                                 let networks: Vec<String> = response.json().await?;
+                                 println!("NETWORKS:");
+                                 for net in networks {
+                                     println!("{}", net);
+                                 }
+                             } else {
+                                 error!("Daemon returned error: {}", response.status());
+                             }
+                        }
+                        Err(e) => error!("Failed to list networks: {}", e),
+                    }
+                }
+                NetworkCommands::Create { name, subnet } => {
+                    let payload = serde_json::json!({
+                        "name": name,
+                        "subnet": subnet
+                    });
+                    let resp = client.post(format!("{}/networks", daemon_url))
+                        .json(&payload)
+                        .send()
+                        .await;
+                    handle_simple_response(resp, daemon_url).await?;
+                }
+                NetworkCommands::Rm { name } => {
+                     let resp = client.delete(format!("{}/networks/{}", daemon_url, name))
+                        .send()
+                        .await;
+                     handle_simple_response(resp, daemon_url).await?;
+                }
+            }
         }
     }
 

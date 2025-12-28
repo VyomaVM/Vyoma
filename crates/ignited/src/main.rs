@@ -125,7 +125,7 @@ impl VmInstance {
 
         // 2. Remove Network Interface / CNI
         if let Some(netns) = &self.netns_path {
-             if let Err(e) = cni_manager.del(&self.id, netns, "eth0") {
+             if let Err(e) = cni_manager.del(None, &self.id, netns, "eth0") {
                   error!("CNI DEL failed: {}", e);
              }
              // Remove netns file
@@ -283,6 +283,8 @@ async fn main() {
         .route("/restore", post(restore_vm))
         .route("/logs/:id", get(stream_logs))
         .route("/build", post(build_image))
+        .route("/networks", get(list_networks_handler).post(create_network_handler))
+        .route("/networks/:name", axum::routing::delete(delete_network_handler))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
@@ -469,7 +471,7 @@ async fn run_vm(
             
         // 2. Call CNI ADD
         let ifname = "eth0";
-        let cni_result = state.cni_manager.add(&vm_id, &netns_path, ifname)
+        let cni_result = state.cni_manager.add(None, &vm_id, &netns_path, ifname)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("CNI ADD failed: {}", e)))?;
             
         // 3. Parse Result to get IP
@@ -1444,4 +1446,32 @@ async fn start_process_monitor(state: AppState) {
             }
         }
     });
+}
+
+#[derive(Deserialize)]
+struct CreateNetworkRequest {
+    name: String,
+    subnet: String,
+}
+
+async fn list_networks_handler(State(state): State<AppState>) -> Result<Json<Vec<String>>, (StatusCode, String)> {
+    state.cni_manager.list_networks().map(Json).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn create_network_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateNetworkRequest>
+) -> Result<String, (StatusCode, String)> {
+    state.cni_manager.create_network(&payload.name, &payload.subnet)
+        .map(|_| format!("Network {} created", payload.name))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn delete_network_handler(
+    State(state): State<AppState>,
+    Path(name): Path<String>
+) -> Result<String, (StatusCode, String)> {
+    state.cni_manager.delete_network(&name)
+        .map(|_| format!("Network {} deleted", name))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
