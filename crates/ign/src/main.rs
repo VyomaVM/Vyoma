@@ -142,6 +142,19 @@ enum Commands {
         #[arg(short, long, default_value = "ignite-compose.yml")]
         file: String,
     },
+    /// Execute a command in a VM (via SSH)
+    Exec {
+        /// VM ID or Name
+        id: String,
+        /// Command to run
+        #[arg(trailing_var_arg = true)]
+        cmd: Vec<String>,
+    },
+    /// Restart a VM (Replaces it)
+    Restart {
+        /// VM ID or Name
+        id: String,
+    },
     /// Scale services (e.g. web=3)
     Scale {
          /// Scaling arguments (service=count)
@@ -291,6 +304,88 @@ async fn main() -> Result<()> {
                 .await;
              handle_simple_response(resp, daemon_url).await?;
         }
+        Commands::Exec { id, cmd } => {
+             // 1. Resolve IP
+             let mut target_ip = String::new();
+             let resp = client.get(format!("{}/ps", daemon_url)).send().await;
+             if let Ok(r) = resp { 
+                 if let Ok(list) = r.json::<ListResponse>().await {
+                     for vm in list.vms {
+                         if vm.id == id || vm.hostname.as_deref() == Some(id.as_str()) || 
+                            vm.labels.get("ignite.service").map(|s| s.as_str()) == Some(id.as_str()) {
+                             target_ip = vm.ip_address.split('/').next().unwrap_or(&vm.ip_address).to_string();
+                             break;
+                         }
+                     }
+                 }
+             }
+             if target_ip.is_empty() { 
+                 error!("VM '{}' not found or has no IP.", id); 
+                 return Ok(()); 
+             }
+             
+             info!("Executing command via SSH on {}...", target_ip);
+             let _ = std::process::Command::new("ssh")
+                .arg("-o").arg("StrictHostKeyChecking=no")
+                .arg("-o").arg("UserKnownHostsFile=/dev/null")
+                .arg(format!("root@{}", target_ip))
+                .args(cmd)
+                .status(); // Interactive if cmd is empty?
+        }
+        Commands::Restart { id } => {
+             // 1. Resolve ID (if Name provided)
+             let mut target_id = id.clone();
+             let resp = client.get(format!("{}/ps", daemon_url)).send().await;
+             if let Ok(r) = resp { 
+                 if let Ok(list) = r.json::<ListResponse>().await {
+                     for vm in list.vms {
+                         if vm.id == id || vm.hostname.as_deref() == Some(id.as_str()) || 
+                            vm.labels.get("ignite.service").map(|s| s.as_str()) == Some(id.as_str()) {
+                             target_id = vm.id;
+                             break;
+                         }
+                     }
+                 }
+             }
+
+             // 2. Inspect (to get config)
+             info!("Restarting VM {} (Fetching config...)", target_id);
+             let resp = client.get(format!("{}/vms/{}", daemon_url, target_id)).send().await;
+             
+             match resp {
+                 Ok(r) => {
+                     if !r.status().is_success() {
+                         error!("Failed to inspect VM {}: {}", target_id, r.status());
+                         return Ok(());
+                     }
+                     let vm_state: VmState = r.json().await?;
+                     
+                     // 3. Stop
+                     info!("Stopping VM {}...", target_id);
+                     let _ = client.post(format!("{}/stop/{}", daemon_url, target_id)).send().await;
+                     
+                     // 4. Run (New)
+                     info!("Starting replacement VM...");
+                     
+                     let payload = RunRequest {
+                         image: vm_state.base_image_path, // Pass resolved path
+                         vcpu: vm_state.vcpu,
+                         mem_size_mib: vm_state.mem_size_mib,
+                         ports: vm_state.ports,
+                         volumes: vm_state.volumes,
+                         hostname: vm_state.hostname,
+                         labels: vm_state.labels,
+                     };
+                     
+                     let resp = client.post(format!("{}/run", daemon_url))
+                        .json(&payload)
+                        .send()
+                        .await;
+                     handle_simple_response(resp, daemon_url).await?;
+                 },
+                 Err(e) => error!("Failed to connect to daemon: {}", e),
+             }
+        }
         Commands::Ps => {
             let resp = client.get(format!("{}/ps", daemon_url))
                 .send()
@@ -351,7 +446,22 @@ async fn main() -> Result<()> {
             import_vm(&input, daemon_url).await?;
         }
         Commands::Logs { id, follow: _ } => {
-             let resp = client.get(format!("{}/logs/{}", daemon_url, id))
+             // 1. Resolve ID (if Name provided)
+             let mut target_id = id.clone();
+             let resp = client.get(format!("{}/ps", daemon_url)).send().await;
+             if let Ok(r) = resp { 
+                 if let Ok(list) = r.json::<ListResponse>().await {
+                     for vm in list.vms {
+                         if vm.id == id || vm.hostname.as_deref() == Some(id.as_str()) || 
+                            vm.labels.get("ignite.service").map(|s| s.as_str()) == Some(id.as_str()) {
+                             target_id = vm.id;
+                             break;
+                         }
+                     }
+                 }
+             }
+
+             let resp = client.get(format!("{}/logs/{}", daemon_url, target_id))
                 .send()
                 .await?;
              
@@ -960,6 +1070,23 @@ struct VmSummary {
 #[derive(Deserialize, Debug)]
 struct ListResponse {
     vms: Vec<VmSummary>,
+}
+
+#[derive(Deserialize, Debug)]
+struct VmState {
+    #[allow(dead_code)]
+    id: String,
+    ports: Vec<PortMapping>,
+    volumes: Vec<VolumeMount>,
+    hostname: Option<String>,
+    #[serde(default)]
+    labels: HashMap<String, String>,
+    #[serde(default)]
+    base_image_path: String,
+    #[serde(default)]
+    vcpu: u32,
+    #[serde(default)]
+    mem_size_mib: u32,
 }
 
 async fn handle_response(resp: Result<reqwest::Response, reqwest::Error>, url: &str) -> Result<()> {
