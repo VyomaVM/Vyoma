@@ -135,9 +135,8 @@
     - [x] Implement `DEL` command (Teardown network).
     - [x] Integrate into `run_vm` lifecycle (Fully replace legacy bridge with CNI-created TAP).
 
-## Future Roadmap (v0.2.0+)
 
-### Phase 13: Networking Maturity ("The Cluster Ready")
+## Phase 13: Networking Maturity
 - [x] **Service Discovery & DNS**
     - [x] Implement internal DNS resolver in `ignited` (or utilizing CNI DNS plugins).
     - [x] Allow VMs to resolve each other by name within a shared network.
@@ -145,7 +144,7 @@
     - [ ] Validate Overlay Network support (e.g., Flannel, Calico) for multi-host communication.
     - [x] Implement `ign network create/ls/rm` CLI commands to manage CNI configs dynamically.
 
-### Phase 14: Robustness & Reliability ("The Production Grade")
+## Phase 14: Robustness & Reliability
 - [x] **Daemon Recovery**
     - [x] Implement "Adoption" logic: On startup, `ignited` should verify and reconnect to existing running Firecracker processes.
     - [x] Implement "Graceful Shutdown": Handle SIGINT/SIGTERM to stop all VMs and clean up resources before exiting.
@@ -157,10 +156,31 @@
     - [ ] Add support for `aarch64` (ARM64) builds (Apple Silicon, AWS Graviton).
     - [ ] Abstract `vmlinux` kernel path to support multi-arch kernel selection.
 
-### Phase 15: True Rootless Mode ("The Security Grail")
+## Phase 15: True Rootless Mode
 - [x] **User Namespaces**
     - [x] Integrate `slirp4netns` for completely unprivileged networking.
     - [x] Run `firecracker` with `unshare -r -n`.
 - [x] **Rootless Storage**
     - [x] Remove `sudo` requirement for runtime (using file copy instead of DM).
     - [x] Remove `sudo` requirement for build/pull (replace `mount` with `debugfs` or similar).
+
+## Phase 16: The Composer Edition (v0.4.0)
+- [x] **Private Registry Support**
+    - [x] `core`: Add `base64` dependency.
+    - [x] `oci`: Parse `~/.docker/config.json` for auth credentials.
+    - [x] `oci`: Implement `Www-Authenticate` header parsing for dynamic Token Realms.
+    - [x] `oci`: Support Basic Auth in Token exchange.
+- [ ] **Ignite Compose**
+    - [ ] `cli`: Define `IgniteCompose` struct (YAML schema).
+    - [ ] `cli`: Implement `ign up -f <file>` parsing.
+    - [ ] `ignited`: Add `POST /groups` API to manage VM groups (stacks).
+    - [ ] `cli`: Implement Dependency Graph resolution (start order).
+    - [ ] `cli`: Implement `ign down` (parallel stop & remove).
+
+## Phase 17: The Cluster Edition (v0.5.0)
+- [ ] **Overlay Networking**
+    - [ ] Integrate `flannel` CNI.
+    - [ ] Implement subnet allocation logic.
+- [ ] **Ignite Swarm**
+    - [ ] Node Discovery mechanism.
+    - [ ] Remote API Client.

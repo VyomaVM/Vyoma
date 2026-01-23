@@ -1,35 +1,61 @@
-# Ignite: Road to v1.0 (The "Docker Killer" Roadmap)
+# Ignite Roadmap 🚀
 
-To bridge the gap between "Cool Prototype" and "Daily Driver", we need to address specific developer workflows that Docker handles seamlessly.
+This document outlines the development path for Ignite, tracking completed milestones and future goals.
 
-## 1. Networking (Critical for Web Devs) 🌐
-*   **Port Mapping (`-p 8080:80`)**: currently, VMs get their own IP. Developers are used to `localhost:8080`. We need a proxy (like `socat` or a custom Rust proxy) to forward host ports to the VM IP.
-*   **DNS Resolution**: VMs currently struggle to resolve hostnames if not configured. We need a proper DNS forwarder.
-*   **CNI Support**: To play nice with Kubernetes eventually, we should implement the Container Network Interface (CNI) instead of our custom `ip` commands.
+## ✅ Completed Milestones
 
-## 2. Storage & Filesystem (Critical for Persistence) 💾
-*   **Volume Mounts (`-v ./code:/app`)**: This is the #1 feature for developers. They want to edit code on their host (VS Code) and see it update in the VM instantly.
-    *   *Tech*: Implement **VirtioFS** support in Ignite. Firecracker supports it! This allows sharing host directories into the VM.
-*   **Rootless Execution**: demanding `sudo` for `ignited` is a security risk and friction point. We should explore User Namespaces or rely on `sudo` wrapper helpers only for specific operations.
+### v0.1.0: The Foundation ("Hello World")
+- **Core Engine**: OCI Pull, Layer Flattening, Firecracker VMM integration.
+- **Storage**: Device Mapper snapshots (Instant Clones).
+- **Basic CLI**: `ign run`, `ign ps`, `ign stop`.
 
-## 3. Developer Experience (DX) 🚀
-*   **`Ignitefile` (Build System)**: We currently *pull* images. We need to *build* them.
-    *   Need a DSL (like Dockerfile) that allows running commands to install packages, creating a new snapshot as the base for future VMs.
-*   **`ign logs -f`**: Real-time log streaming from the VM console. Currently, we just dump stdout.
-*   **`ign exec -it`**: Interactive shell access *into* a running VM without SSH. (Firecracker enables this via vsock console or serial console anchoring).
+### v0.2.0: The Developer Experience ("Localhost Gap")
+- **Volume Mounts**: VirtioFS support (`-v /host:/vm`) for hot-reloading code.
+- **Port Mapping**: Userspace TCP proxy (`-p 8080:80`).
+- **Telemetry**: Log streaming (`ign logs -f`) and OOM Monitoring.
+- **Building**: `Ignitefile` support (`ign build`) and `ign import/export` (Teleportation).
 
-## 4. Security & Performance 🔒
-*   **Cgroups (Resource Limits)**: Allow `ign run --cpus 2 --memory 4g`. We need to wire this up to the Linux Cgroup v2 API.
-*   **Seccomp Profiles**: Harden the process syscalls.
+### v0.3.0: The Maturity Update (Current)
+- **Rootless Mode**: Running `ign` without `sudo` (via `slirp4netns` and `debugfs`).
+- **Networking APIs**: `ign network create/ls` for managing CNI bridges.
+- **Reliability**: Daemon recovery, graceful shutdown, and robust error handling.
 
-## 5. The "Killer Feature" Expansions ⚡
-*   **Time Travel UI**: A visual graph (TUI or Web) of the Git history of a VM. "Revert to 10 minutes ago" with one click.
-*   **Instant Resume**: "Hibernate" a VM to disk and wake it up in 50ms on incoming network traffic (Serverless style).
+---
 
-## Impact Matrix
-| Feature | Complexity | Value | Next Step |
-| :--- | :---: | :---: | :--- |
-| **Port Mapping** | Medium | High | Implement user-space proxy |
-| **Volume Mounts** | High | Critical | Research VirtioFS |
-| **Ignitefile** | Very High | High | Design Spec |
-| **Resource Limits** | Low | Medium | Add Cgroups |
+## 🚧 Upcoming Roadmap
+
+### v0.4.0: The Composer Edition ("Ignite Stack")
+**Focus**: Multi-VM orchestration and private registry support.
+
+#### 1. Private Registry Authentication
+- **Goal**: Support `ign pull` from authenticated registries (GHCR, ECR, Docker Hub Private).
+- **Strategy**: Parse `~/.docker/config.json` for credentials. Implement Dynamic Realm Auth (Handling `Www-Authenticate` headers).
+
+#### 2. Ignite Compose (`ign up`)
+- **Goal**: Define and manage multi-VM applications.
+- **Spec**: `ignite-compose.yml` (subset of Docker Compose).
+- **Features**:
+    - Dependency management (`depends_on`).
+    - Service Discovery (Auto-DNS for service names).
+    - Lifecycle: `ign up`, `ign down`, `ign scale`.
+
+### v0.5.0: The Cluster Edition ("Ignite Swarm")
+**Focus**: Multi-host networking and node orchestration.
+
+#### 1. Overlay Networking
+- **Goal**: Seamless L3 connectivity between VMs on different hosts.
+- **Strategy**: Integrate `flannel` CNI (VXLAN backend).
+- **Requirements**: Simple node discovery mechanism.
+
+#### 2. Basic Federation
+- **Goal**: Schedule VMs across multiple nodes.
+- **Strategy**: Simple round-robin scheduler via CLI remote control.
+
+---
+
+## v1.0.0: The Stable Release
+**Focus**: Security auditing, performance optimization, and extensive documentation.
+
+- [ ] **Seccomp Hardening**: Strict syscall filtering.
+- [ ] **Signed Images**: Cosign integration.
+- [ ] **Web UI**: A simple dashboard for managing VMs.

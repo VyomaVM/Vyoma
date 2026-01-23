@@ -16,3 +16,5 @@ flate2.workspace = true
 tar.workspace = true
 tempfile.workspace = true
 libc = "0.2.178"
+base64 = "0.22.1"
+dirs = "6.0.0"
