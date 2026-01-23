@@ -6,6 +6,6 @@ authors.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-ignite-core = { version = "0.4.0", path = "../ignite-core" }
+ignite-core = { version = "0.5.0", path = "../ignite-core" }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "0.9.34"
