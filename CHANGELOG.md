@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0] - 2026-01-23
+
+### Major Feature: True Rootless Mode
+- **Security**: Complete implementation of Rootless Runtime (`ign run` without sudo).
+- **Networking**: Integrated `slirp4netns` for unprivileged user-mode networking.
+- **Build**: Implemented `debugfs`-based image population (replacing mount), allowing `ign build` and `ign pull` to run without root.
+
+### Major Feature: Network Management CLI
+- **Management**: Added `ign network create`, `ign network ls`, and `ign network rm` commands.
+- **Flexibility**: Users can now create isolated CNI bridge networks with custom subnets.
+- **API**: Added Daemon endpoints (`/networks`) for managing CNI configurations dynamically.
+
 ## [0.2.0-rc1] - 2025-12-27
 
 ### Feature: Daemon Robustness

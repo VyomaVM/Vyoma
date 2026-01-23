@@ -2,7 +2,7 @@
 
 **Ignite** is a modern, open-source micro-VM manager that brings the user experience of Docker to Firecracker micro-VMs. It allows you to spin up secure, fast, and lightweight virtual machines in milliseconds, using standard OCI (Docker) images.
 
-> **Status**: v0.1.0-rc1 (Release Candidate)
+> **Status**: v0.3.0 (Released)
 
 ## 🚀 Features
 
