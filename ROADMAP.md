@@ -22,7 +22,7 @@ This document outlines the development path for Ignite, tracking completed miles
 
 ---
 
-## 🚧 Upcoming Roadmap
+
 
 ### v0.4.0: The Composer Edition (Completed)
 - **Private Registry Auth**: Support for authenticated pulls (`~/.docker/config.json`).
@@ -31,21 +31,27 @@ This document outlines the development path for Ignite, tracking completed miles
 
 ---
 
+### v0.5.0: The Scale Edition (Completed)
+- **Robust Metadata**: Labels support, stateless `ign down` and `ign up`.
+- **Horizontal Scaling**: `ign scale web=3`.
+- **Load Balancing**: Round-Robin DNS for multiple instances.
+
+---
+
 ## 🚧 Upcoming Roadmap
 
-### v0.5.0: The Scale Edition ("Ignite Scale")
-**Focus**: Robustness, metadata management, and horizontal scaling.
+### v0.6.0: The Polish Update ("Ignite DX")
+**Focus**: Usability refinements and missing CLI commands.
 
-#### 1. Robust Metadata
-- **Goal**: Remove dependency on local state files.
-- **Strategy**: Store VM tags/labels (`com.ignite.stack=myapp`) in the daemon.
+#### 1. Lifecycle Management
+- **Goal**: Implement `ign restart` for standalone and compose services.
+- **Spec**: `ign restart web`.
 
-#### 2. Horizontal Scaling
-- **Goal**: Run multiple instances of a service.
-- **Spec**: `ign scale web=3`.
-- **Requirements**: Round-Robin DNS for Load Balancing.
+#### 2. Enhanced Logging
+- **Goal**: Support service-based logging in compose.
+- **Spec**: `ign logs web` (resolves to VM IDs automatically).
 
-### v0.6.0: The Cluster Edition ("Ignite Swarm")
+### v0.7.0: The Cluster Edition ("Ignite Swarm")
 **Focus**: Multi-host networking and node orchestration.
 
 #### 1. Overlay Networking
