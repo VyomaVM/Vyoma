@@ -394,10 +394,6 @@ struct RunRequest {
     labels: HashMap<String, String>,
     #[serde(default)]
     base_image_path: String,
-    #[serde(default)]
-    vcpu: u32,
-    #[serde(default)]
-    mem_size_mib: u32,
 }
 
 fn default_vcpu() -> u32 { 1 }
@@ -1014,6 +1010,9 @@ async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {
             ip_address: inst.ip_address.clone(),
             hostname: inst.hostname.clone(),
             labels: inst.labels.clone(),
+            base_image_path: inst.base_image_path.clone(),
+            vcpu: inst.vcpu,
+            mem_size_mib: inst.mem_size_mib,
         });
     }
     
@@ -1090,30 +1089,34 @@ async fn stream_logs(
 async fn inspect_vm_handler(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<VmState>, (StatusCode, String)> {
+) -> Result<String, (StatusCode, String)> {
     // 1. Check running
-    {
+    let vm_arc = {
         let vms = state.vms.lock().unwrap();
-        if let Some(vm_arc) = vms.get(&id) {
-            let vm = vm_arc.lock().await;
-            return Ok(Json(VmState {
-                id: vm.id.clone(),
-                tap_name: vm.tap_name.clone(),
-                dm_name: vm.dm_name.clone(),
-                loop_devices: vm.loop_devices.clone(),
-                cow_file_path: vm.cow_file_path.clone(),
-                ip_address: vm.ip_address.clone(),
-                cgroup_path: vm.cgroup_path.clone(),
-                netns_path: vm.netns_path.clone(),
-                ports: vm.config_ports.clone(),
-                volumes: vm.config_volumes.clone(),
-                hostname: vm.hostname.clone(),
-                labels: vm.labels.clone(),
-                base_image_path: vm.base_image_path.clone(),
-                vcpu: vm.vcpu,
-                mem_size_mib: vm.mem_size_mib,
-            }));
-        }
+        vms.get(&id).cloned()
+    };
+
+    if let Some(vm_mutex) = vm_arc {
+        let vm = vm_mutex.lock().await;
+        // ... build json ...
+            let val = serde_json::json!({
+                "id": vm.id,
+                "tap_name": vm.tap_name,
+                "dm_name": vm.dm_name,
+                "loop_devices": vm.loop_devices,
+                "cow_file_path": vm.cow_file_path,
+                "ip_address": vm.ip_address,
+                "cgroup_path": vm.cgroup_path,
+                "netns_path": vm.netns_path,
+                "ports": vm.config_ports,
+                "volumes": vm.config_volumes,
+                "hostname": vm.hostname,
+                "labels": vm.labels,
+                "base_image_path": vm.base_image_path,
+                "vcpu": vm.vcpu,
+                "mem_size_mib": vm.mem_size_mib,
+            });
+            return Ok(val.to_string());
     }
     
     // 2. Check disk (stopped)
@@ -1121,8 +1124,8 @@ async fn inspect_vm_handler(
     let state_file = home.join(".ignite").join("vms").join(&id).join("state.json");
     if state_file.exists() {
          let f = std::fs::File::open(state_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-         let s: VmState = serde_json::from_reader(f).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-         return Ok(Json(s));
+         let s: serde_json::Value = serde_json::from_reader(f).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+         return Ok(s.to_string());
     }
 
     Err((StatusCode::NOT_FOUND, "VM not found".to_string()))

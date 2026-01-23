@@ -10,6 +10,11 @@
 - **Metadata**: Labels support, robust `ign down`/`ps`.
 - **Load Balancing**: Round-Robin DNS.
 
+## [0.4.0] - 2026-01-20 (The Composer Edition)
+- **Ignite Compose**: `ign up`/`ign down` with `ignite-compose.yml`.
+- **Private Registry**: Support for `~/.docker/config.json` auth.
+- **Service Discovery**: Internal DNS name resolution for Stack services.
+
 ## [0.3.0] - 2026-01-23
 
 ### Major Feature: True Rootless Mode
