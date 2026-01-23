@@ -81,26 +81,23 @@ async fn handle_conn(buf: &[u8], state: &AppState) -> anyhow::Result<Vec<u8>> {
              };
              
              // 2. Filter (Async)
-             let mut ip_found = None;
+             let mut ips = Vec::new();
              for vm_arc in candidates {
                  let vm = vm_arc.lock().await;
                  if vm.id == search_name || vm.hostname.as_deref() == Some(search_name.as_str()) {
-                     ip_found = Some(vm_arc.clone());
-                     break;
+                      let ip_str = &vm.ip_address;
+                      let ip_clean = ip_str.split('/').next().unwrap_or(ip_str);
+                      if let Ok(ipv4) = ip_clean.parse::<Ipv4Addr>() {
+                          ips.push(ipv4);
+                      }
                  }
              }
 
-             if let Some(vm_arc) = ip_found {
-                 let vm = vm_arc.lock().await;
-                 let ip_str = &vm.ip_address; // "172.16.0.X/24"
-                 let ip_clean = ip_str.split('/').next().unwrap_or(ip_str);
-                 
-                 if let Ok(ipv4) = ip_clean.parse::<Ipv4Addr>() {
-                     // Construct Answer
-                     let rdata = RData::A(A { address: ipv4.into() });
-                     let rr = ResourceRecord::new(question.qname.clone(), CLASS::IN, 10, rdata);
-                     reply.answers.push(rr);
-                 }
+             // Round-Robin / All IPs
+             for ipv4 in ips {
+                 let rdata = RData::A(A { address: ipv4.into() });
+                 let rr = ResourceRecord::new(question.qname.clone(), CLASS::IN, 10, rdata);
+                 reply.answers.push(rr);
              }
         }
     }

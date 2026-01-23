@@ -142,6 +142,15 @@ enum Commands {
         #[arg(short, long, default_value = "ignite-compose.yml")]
         file: String,
     },
+    /// Scale services (e.g. web=3)
+    Scale {
+         /// Scaling arguments (service=count)
+         replicas: Vec<String>,
+
+         /// Path to compose file (default: ignite-compose.yml)
+         #[arg(short, long, default_value = "ignite-compose.yml")]
+         file: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -605,6 +614,92 @@ async fn main() -> Result<()> {
             let _ = std::fs::remove_file("ignite-compose.state");
             println!("Stack stopped and removed.");
         }
+        Commands::Scale { replicas, file } => {
+            // 1. Load Compose File
+            let compose = match IgniteCompose::from_file(&file) {
+                Ok(c) => c,
+                Err(e) => {
+                     error!("Validation Error: Cannot scale without valid {}: {}", file, e);
+                     return Ok(());
+                }
+            };
+            
+            // 2. Identify Stack Name
+             let stack_name = std::env::current_dir()
+                 .ok()
+                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+                 .unwrap_or_else(|| "default".to_string());
+            
+            // 3. Process scale args
+            let mut scale_map = HashMap::new();
+            for r in replicas {
+                if let Some((svc, count_str)) = r.split_once('=') {
+                    if let Ok(count) = count_str.parse::<usize>() {
+                        if compose.services.contains_key(svc) {
+                             scale_map.insert(svc.to_string(), count);
+                        } else {
+                             error!("Service '{}' not defined in compose file.", svc);
+                        }
+                    } else {
+                        error!("Invalid count format for '{}'. Expected integer.", svc);
+                    }
+                } else {
+                    error!("Invalid format: {}. Expected service=count", r);
+                }
+            }
+
+            if scale_map.is_empty() {
+                println!("No valid scaling instructions provided.");
+                return Ok(());
+            }
+
+            // 4. Get Current State
+            let mut current_state: HashMap<String, Vec<String>> = HashMap::new();
+             let resp = client.get(format!("{}/ps", daemon_url)).send().await;
+              if let Ok(r) = resp {
+                   if let Ok(list) = r.json::<ListResponse>().await {
+                       for vm in list.vms {
+                           if let Some(s) = vm.labels.get("ignite.stack") {
+                               if s == &stack_name {
+                                   if let Some(svc) = vm.labels.get("ignite.service") {
+                                        current_state.entry(svc.clone()).or_default().push(vm.id);
+                                   }
+                               }
+                           }
+                       }
+                   }
+              }
+
+             // 5. Reconcile
+             for (svc_name, target_count) in scale_map {
+                  let running_list = current_state.get(&svc_name).cloned().unwrap_or_default();
+                  let running_count = running_list.len();
+                  info!("Scaling {} from {} to {}", svc_name, running_count, target_count);
+                  
+                  if target_count > running_count {
+                      let needed = target_count - running_count;
+                      let service = compose.services.get(&svc_name).unwrap(); 
+                      
+                      for i in 0..needed {
+                          info!("Starting replica {}/{}", i+1, needed);
+                          start_service_helper(&client, daemon_url, &stack_name, &svc_name, service).await?;
+                      }
+                  } else if running_count > target_count {
+                      let remove_count = running_count - target_count;
+                      
+                      // Stop the LAST N instances
+                      for i in 0..remove_count {
+                           if let Some(id) = running_list.get(running_count - 1 - i) {
+                               info!("Stopping replica {} (VM {})", running_count - i, id);
+                               let resp = client.post(format!("{}/stop/{}", daemon_url, id)).send().await;
+                               handle_simple_response(resp, daemon_url).await?;
+                           }
+                      }
+                  } else {
+                      println!("Service {} is already at target scale ({}).", svc_name, target_count);
+                  }
+             }
+        }
     }
 
     Ok(())
@@ -905,4 +1000,87 @@ async fn handle_simple_response(resp: Result<reqwest::Response, reqwest::Error>,
         }
     }
     Ok(())
+}
+
+async fn start_service_helper(
+    client: &Client,
+    daemon_url: &str,
+    stack_name: &str,
+    name: &str,
+    service: &ignite_compose::Service
+) -> Result<()> {
+     let image_target = if let Some(ref build) = service.build {
+         let context = match build {
+             ignite_compose::BuildSource::Path(p) => p.clone(),
+             ignite_compose::BuildSource::Config(c) => c.context.clone(),
+         };
+         info!("Building service '{}' from {}", name, context);
+         build_image(&context, daemon_url).await?
+     } else if let Some(ref img) = service.image {
+         img.clone()
+     } else {
+         error!("Service '{}' has no image or build context", name);
+         return Ok(());
+     };
+
+     // Prepare Ports
+     let mut port_mappings = Vec::new();
+     if let Some(ref ports) = service.ports {
+         for p in ports {
+             let parts: Vec<&str> = p.split(':').collect();
+             if parts.len() == 2 {
+                 let h = parts[0].parse().unwrap_or(0);
+                 let v = parts[1].parse().unwrap_or(0);
+                 port_mappings.push(PortMapping { host_port: h, vm_port: v });
+             }
+         }
+     }
+
+     // Prepare Volumes
+     let mut volume_mounts = Vec::new();
+     if let Some(ref vols) = service.volumes {
+         for v in vols {
+             let parts: Vec<&str> = v.split(':').collect();
+             if parts.len() == 2 {
+                 volume_mounts.push(VolumeMount {
+                     host_path: parts[0].to_string(),
+                     vm_path: parts[1].to_string(),
+                     read_only: false,
+                 });
+             }
+         }
+     }
+
+     let payload = RunRequest {
+         image: image_target,
+         vcpu: service.cpus.unwrap_or(1),
+         mem_size_mib: service.memory.unwrap_or(512),
+         ports: port_mappings,
+         volumes: volume_mounts,
+         hostname: Some(name.to_string()),
+         labels: {
+             let mut l = HashMap::new();
+             l.insert("ignite.stack".to_string(), stack_name.to_string());
+             l.insert("ignite.service".to_string(), name.to_string());
+             l
+         },
+     };
+
+     let resp = client.post(format!("{}/run", daemon_url))
+        .json(&payload)
+        .send()
+        .await;
+     
+     match resp {
+         Ok(r) => {
+             if r.status().is_success() {
+                 let body: RunResponse = r.json().await?;
+                 info!("Service '{}' started as VM {}", name, body.vm_id);
+             } else {
+                 error!("Failed to start service '{}': {}", name, r.status());
+             }
+         },
+         Err(e) => error!("Failed to request start for '{}': {}", name, e),
+     }
+     Ok(())
 }

@@ -185,9 +185,9 @@
     - [x] `daemon`: Add Label/Tag support to VM State (`com.ignite.stack`, etc.).
     - [x] `cli`: Update `ign up` to use Labels instead of local file.
     - [x] `cli`: Update `ign down` to filter by Labels.
-- [ ] **Horizontal Scaling (`ign scale`)**
-    - [ ] `cli`: Implement `ign scale <service>=<count>`.
-    - [ ] `daemon`: Update DNS to return all IPs (Round Robin).
+- [x] **Horizontal Scaling (`ign scale`)**
+    - [x] `cli`: Implement `ign scale <service>=<count>`.
+    - [x] `daemon`: Update DNS to return all IPs (Round Robin).
 
 ## Phase 18: The Cluster Edition (v0.6.0)
 - [ ] **Overlay Networking**
