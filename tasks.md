@@ -179,9 +179,17 @@
         - [x] `cli/daemon`: Add `hostname` support to `RunRequest` for Service Discovery.
         - [x] `daemon`: Integrate Hostnames with Internal DNS.
         - [x] `cli`: Implement Dependency Order resolution (depends_on).
-        - [ ] `cli`: Implement Metadata/Labels (Stack & Service names) to replace local file state.
 
-## Phase 17: The Cluster Edition (v0.5.0)
+## Phase 17: The Scale Edition (v0.5.0)
+- [ ] **Robust Metadata**
+    - [ ] `daemon`: Add Label/Tag support to VM State (`com.ignite.stack`, etc.).
+    - [ ] `cli`: Update `ign up` to use Labels instead of local file.
+    - [ ] `cli`: Update `ign down` to filter by Labels.
+- [ ] **Horizontal Scaling (`ign scale`)**
+    - [ ] `cli`: Implement `ign scale <service>=<count>`.
+    - [ ] `daemon`: Update DNS to return all IPs (Round Robin).
+
+## Phase 18: The Cluster Edition (v0.6.0)
 - [ ] **Overlay Networking**
     - [ ] Integrate `flannel` CNI.
     - [ ] Implement subnet allocation logic.

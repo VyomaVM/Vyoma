@@ -24,28 +24,33 @@ This document outlines the development path for Ignite, tracking completed miles
 
 ## 🚧 Upcoming Roadmap
 
-### v0.4.0: The Composer Edition ("Ignite Stack")
-**Focus**: Multi-VM orchestration and private registry support.
+### v0.4.0: The Composer Edition (Completed)
+- **Private Registry Auth**: Support for authenticated pulls (`~/.docker/config.json`).
+- **Ignite Compose**: `ign up/down` with dependency resolution (`depends_on`).
+- **Service Discovery**: Hostname-based resolution (e.g., `ping web`) via internal DNS.
 
-#### 1. Private Registry Authentication
-- **Goal**: Support `ign pull` from authenticated registries (GHCR, ECR, Docker Hub Private).
-- **Strategy**: Parse `~/.docker/config.json` for credentials. Implement Dynamic Realm Auth (Handling `Www-Authenticate` headers).
+---
 
-#### 2. Ignite Compose (`ign up`)
-- **Goal**: Define and manage multi-VM applications.
-- **Spec**: `ignite-compose.yml` (subset of Docker Compose).
-- **Features**:
-    - Dependency management (`depends_on`).
-    - Service Discovery (Auto-DNS for service names).
-    - Lifecycle: `ign up`, `ign down`, `ign scale`.
+## 🚧 Upcoming Roadmap
 
-### v0.5.0: The Cluster Edition ("Ignite Swarm")
+### v0.5.0: The Scale Edition ("Ignite Scale")
+**Focus**: Robustness, metadata management, and horizontal scaling.
+
+#### 1. Robust Metadata
+- **Goal**: Remove dependency on local state files.
+- **Strategy**: Store VM tags/labels (`com.ignite.stack=myapp`) in the daemon.
+
+#### 2. Horizontal Scaling
+- **Goal**: Run multiple instances of a service.
+- **Spec**: `ign scale web=3`.
+- **Requirements**: Round-Robin DNS for Load Balancing.
+
+### v0.6.0: The Cluster Edition ("Ignite Swarm")
 **Focus**: Multi-host networking and node orchestration.
 
 #### 1. Overlay Networking
 - **Goal**: Seamless L3 connectivity between VMs on different hosts.
 - **Strategy**: Integrate `flannel` CNI (VXLAN backend).
-- **Requirements**: Simple node discovery mechanism.
 
 #### 2. Basic Federation
 - **Goal**: Schedule VMs across multiple nodes.
