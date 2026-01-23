@@ -61,6 +61,7 @@ struct VmInstance {
     // Metadata for Recovery
     config_ports: Vec<PortMapping>,
     config_volumes: Vec<VolumeMount>,
+    hostname: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -75,6 +76,7 @@ struct VmState {
     netns_path: Option<String>,
     ports: Vec<PortMapping>,
     volumes: Vec<VolumeMount>,
+    hostname: Option<String>,
 }
 
 impl VmInstance {
@@ -90,6 +92,7 @@ impl VmInstance {
             netns_path: self.netns_path.clone(),
             ports: self.config_ports.clone(),
             volumes: self.config_volumes.clone(),
+            hostname: self.hostname.clone(),
         };
 
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home dir"))?;
@@ -366,6 +369,8 @@ struct RunRequest {
     ports: Vec<PortMapping>,
     #[serde(default)]
     volumes: Vec<VolumeMount>,
+    #[serde(default)]
+    hostname: Option<String>,
 }
 
 fn default_vcpu() -> u32 { 1 }
@@ -649,6 +654,7 @@ async fn run_vm(
         netns_path: netns_path_final,
         config_ports: payload.ports.clone(),
         config_volumes: payload.volumes.clone(),
+        hostname: payload.hostname.clone(),
     };
     
     instance.save_state().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save state: {}", e)))?;
@@ -901,6 +907,7 @@ async fn restore_vm(
         netns_path: None, // Simplified restore lacks CNI for now
         config_ports: vec![],
         config_volumes: vec![],
+        hostname: None,
     };
     
     {
@@ -1332,6 +1339,7 @@ async fn initialize_state(state: &AppState) {
                  netns_path: vm_state.netns_path,
                  config_ports: vm_state.ports,
                  config_volumes: vm_state.volumes,
+                 hostname: vm_state.hostname,
              };
              
              state.vms.lock().unwrap().insert(vm_state.id, Arc::new(TokioMutex::new(instance)));
@@ -1354,6 +1362,7 @@ async fn initialize_state(state: &AppState) {
                  netns_path: vm_state.netns_path,
                  config_ports: vec![], 
                  config_volumes: vec![],
+                 hostname: vm_state.hostname,
              };
              // We await cleanup
              instance.cleanup(&state.cni_manager).await;

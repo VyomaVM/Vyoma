@@ -175,6 +175,10 @@
     - [x] `cli`: Refactor `Build` logic into reusable function.
     - [x] `cli`: Implement `ign up` logic (Build + Run loop).
     - [x] `cli`: Implement `ign down` logic (Stop + Remove).
+    - [ ] **Compose Refinements**
+        - [x] `cli/daemon`: Add `hostname` support to `RunRequest` for Service Discovery.
+        - [x] `daemon`: Integrate Hostnames with Internal DNS.
+        - [ ] `cli`: Implement Metadata/Labels (Stack & Service names) to replace local file state.
 
 ## Phase 17: The Cluster Edition (v0.5.0)
 - [ ] **Overlay Networking**

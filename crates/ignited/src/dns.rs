@@ -70,14 +70,25 @@ async fn handle_conn(buf: &[u8], state: &AppState) -> anyhow::Result<Vec<u8>> {
              
              let search_name = name_str.trim_end_matches(".ignite").trim_end_matches('.').to_string();
              
-             let ip_found = {
+             // 1. Get Candidates (Sync)
+             let candidates = {
                  let vms = state.vms.lock().unwrap();
                  if let Some(vm_arc) = vms.get(&search_name) {
-                     Some(vm_arc.clone())
+                     vec![vm_arc.clone()]
                  } else {
-                     None
+                     vms.values().cloned().collect()
                  }
              };
+             
+             // 2. Filter (Async)
+             let mut ip_found = None;
+             for vm_arc in candidates {
+                 let vm = vm_arc.lock().await;
+                 if vm.id == search_name || vm.hostname.as_deref() == Some(search_name.as_str()) {
+                     ip_found = Some(vm_arc.clone());
+                     break;
+                 }
+             }
 
              if let Some(vm_arc) = ip_found {
                  let vm = vm_arc.lock().await;

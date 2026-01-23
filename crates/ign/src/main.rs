@@ -52,6 +52,10 @@ enum Commands {
         /// Volume mounts (e.g. -v /home/user/app:/app)
         #[arg(short, long)]
         volumes: Vec<String>,
+        
+        /// Hostname for the VM
+        #[arg(long)]
+        hostname: Option<String>,
     },
     /// Stop a VM
     Stop {
@@ -162,6 +166,7 @@ struct RunRequest {
     mem_size_mib: u32,
     ports: Vec<PortMapping>,
     volumes: Vec<VolumeMount>,
+    hostname: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -194,7 +199,7 @@ async fn main() -> Result<()> {
                 .await;
              handle_simple_response(resp, daemon_url).await?;
         }
-        Commands::Run { image, vcpu, memory, ports, volumes } => {
+        Commands::Run { image, vcpu, memory, ports, volumes, hostname } => {
             info!("Requesting to run image: {}", image);
             
             let mut port_mappings = Vec::new();
@@ -230,7 +235,8 @@ async fn main() -> Result<()> {
                 vcpu,
                 mem_size_mib: memory,
                 ports: port_mappings, 
-                volumes: volume_mounts 
+                volumes: volume_mounts,
+                hostname,
             };
             
             let resp = client.post(format!("{}/run", daemon_url))
@@ -446,6 +452,7 @@ async fn main() -> Result<()> {
                              mem_size_mib: service.memory.unwrap_or(512),
                              ports: port_mappings,
                              volumes: volume_mounts,
+                             hostname: Some(name.clone()),
                          };
 
                          let resp = client.post(format!("{}/run", daemon_url))
