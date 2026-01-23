@@ -195,7 +195,7 @@
     - [x] `cli`: Implement `ign restart <id>` (Stop/Run replacement).
 - [x] **Logging (`ign logs`)**
     - [x] `cli`: Support service name resolution (`ign logs web`).
-- [ ] **Docker Compatibility**
+- [x] **Docker Compatibility**
     - [x] Labels support in `ign run`.
     - [x] `ign exec` (alias to `ssh`).
 

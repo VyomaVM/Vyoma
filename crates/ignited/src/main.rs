@@ -392,6 +392,12 @@ struct RunRequest {
     hostname: Option<String>,
     #[serde(default)]
     labels: HashMap<String, String>,
+    #[serde(default)]
+    base_image_path: String,
+    #[serde(default)]
+    vcpu: u32,
+    #[serde(default)]
+    mem_size_mib: u32,
 }
 
 fn default_vcpu() -> u32 { 1 }
@@ -958,6 +964,11 @@ struct VmSummary {
     ip_address: String,
     hostname: Option<String>,
     labels: HashMap<String, String>,
+
+    // For restart
+    base_image_path: String,
+    vcpu: u32,
+    mem_size_mib: u32,
 }
 
 #[derive(Serialize)]
