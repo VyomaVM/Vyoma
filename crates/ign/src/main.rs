@@ -399,9 +399,18 @@ async fn main() -> Result<()> {
             match IgniteCompose::from_file(&file) {
                 Ok(compose) => {
                     println!("Ignite Compose v{}", compose.version);
-                    println!("Services found: {}", compose.services.len());
+                    
+                    let service_order = match compose.start_order() {
+                        Ok(o) => o,
+                        Err(e) => {
+                            error!("Dependency resolution failed: {}", e);
+                            return Ok(());
+                        }
+                    };
+                    
+                    println!("Services found: {}", service_order.len());
                     let mut service_ids = HashMap::new();
-                    for (name, service) in compose.services {
+                    for (name, service) in service_order {
                          info!("Starting service: {}", name);
                          
                          let image_target = if let Some(ref build) = service.build {
@@ -488,26 +497,43 @@ async fn main() -> Result<()> {
                 Err(e) => error!("Failed to parse compose file '{}': {}", file, e),
             }
         }
-        Commands::Down { file: _ } => {
+        Commands::Down { file } => {
             let state_file = Path::new("ignite-compose.state");
             if !state_file.exists() {
                  println!("No active state found (ignite-compose.state missing).");
                  return Ok(());
             }
             let f = File::open(state_file)?;
-            let service_ids: HashMap<String, String> = serde_json::from_reader(f)?;
+            let mut service_ids: HashMap<String, String> = serde_json::from_reader(f)?;
             
-            for (name, id) in service_ids {
-                info!("Stopping service '{}' (VM {})", name, id);
-                 let resp = client.post(format!("{}/stop/{}", daemon_url, id))
-                    .send()
-                    .await;
-                 match resp {
-                     Ok(r) => if !r.status().is_success() {
-                         error!("Failed to stop VM {}: {}", id, r.status());
-                     },
-                     Err(e) => error!("Failed to stop VM {}: {}", id, e),
-                 }
+            // Determine order
+            let mut stop_order = Vec::new();
+            if let Ok(compose) = IgniteCompose::from_file(&file) {
+                if let Ok(order) = compose.start_order() {
+                     stop_order = order.into_iter().rev().map(|(n,_)| n).collect();
+                }
+            }
+            
+            // Add any remaining services from state not in stop_order
+            for name in service_ids.keys() {
+                if !stop_order.contains(name) {
+                    stop_order.push(name.clone());
+                }
+            }
+
+            for name in stop_order {
+                if let Some(id) = service_ids.get(&name) {
+                    info!("Stopping service '{}' (VM {})", name, id);
+                     let resp = client.post(format!("{}/stop/{}", daemon_url, id))
+                        .send()
+                        .await;
+                     match resp {
+                         Ok(r) => if !r.status().is_success() {
+                             error!("Failed to stop VM {}: {}", id, r.status());
+                         },
+                         Err(e) => error!("Failed to stop VM {}: {}", id, e),
+                     }
+                }
             }
             std::fs::remove_file(state_file)?;
             println!("Stack stopped and removed.");

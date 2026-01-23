@@ -178,6 +178,7 @@
     - [ ] **Compose Refinements**
         - [x] `cli/daemon`: Add `hostname` support to `RunRequest` for Service Discovery.
         - [x] `daemon`: Integrate Hostnames with Internal DNS.
+        - [x] `cli`: Implement Dependency Order resolution (depends_on).
         - [ ] `cli`: Implement Metadata/Labels (Stack & Service names) to replace local file state.
 
 ## Phase 17: The Cluster Edition (v0.5.0)

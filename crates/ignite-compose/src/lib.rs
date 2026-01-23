@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use anyhow::Result;
@@ -36,6 +36,8 @@ pub struct Service {
     pub depends_on: Option<Vec<String>>,
 }
 
+// ...
+
 impl IgniteCompose {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = fs::read_to_string(path)?;
@@ -46,6 +48,45 @@ impl IgniteCompose {
     pub fn from_str(content: &str) -> Result<Self> {
         let compose: IgniteCompose = serde_yaml::from_str(content)?;
         Ok(compose)
+    }
+
+    pub fn start_order(&self) -> Result<Vec<(String, Service)>> {
+        let mut order = Vec::new();
+        let mut visited = HashSet::new();
+        let mut visiting = HashSet::new();
+
+        // Sort keys for deterministic output on independent nodes
+        let mut keys: Vec<_> = self.services.keys().collect();
+        keys.sort();
+
+        for name in keys {
+            self.visit(name, &mut visited, &mut visiting, &mut order)?;
+        }
+        
+        Ok(order)
+    }
+
+    fn visit(&self, name: &String, visited: &mut HashSet<String>, visiting: &mut HashSet<String>, order: &mut Vec<(String, Service)>) -> Result<()> {
+        if visited.contains(name) { return Ok(()); }
+        if visiting.contains(name) { return Err(anyhow::anyhow!("Circular dependency detected involving {}", name)); }
+
+        visiting.insert(name.clone());
+
+        if let Some(service) = self.services.get(name) {
+            if let Some(deps) = &service.depends_on {
+                for dep in deps {
+                    if !self.services.contains_key(dep) {
+                         return Err(anyhow::anyhow!("Service '{}' depends on undefined service '{}'", name, dep));
+                    }
+                    self.visit(dep, visited, visiting, order)?;
+                }
+            }
+            visiting.remove(name);
+            visited.insert(name.clone());
+            order.push((name.clone(), service.clone()));
+        }
+
+        Ok(())
     }
 }
 
