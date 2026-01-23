@@ -56,6 +56,10 @@ enum Commands {
         /// Hostname for the VM
         #[arg(long)]
         hostname: Option<String>,
+
+        /// Labels (key=value)
+        #[arg(short = 'l', long)]
+        labels: Vec<String>,
     },
     /// Stop a VM
     Stop {
@@ -167,6 +171,7 @@ struct RunRequest {
     ports: Vec<PortMapping>,
     volumes: Vec<VolumeMount>,
     hostname: Option<String>,
+    labels: HashMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -199,7 +204,7 @@ async fn main() -> Result<()> {
                 .await;
              handle_simple_response(resp, daemon_url).await?;
         }
-        Commands::Run { image, vcpu, memory, ports, volumes, hostname } => {
+        Commands::Run { image, vcpu, memory, ports, volumes, hostname, labels } => {
             info!("Requesting to run image: {}", image);
             
             let mut port_mappings = Vec::new();
@@ -229,6 +234,15 @@ async fn main() -> Result<()> {
                     read_only: false, // Default RW for now
                 });
             }
+
+            let mut label_map = HashMap::new();
+            for l in labels {
+                 if let Some((k, v)) = l.split_once('=') {
+                      label_map.insert(k.to_string(), v.to_string());
+                 } else {
+                      label_map.insert(l.clone(), "".to_string());
+                 }
+            }
             
             let payload = RunRequest { 
                 image, 
@@ -237,6 +251,7 @@ async fn main() -> Result<()> {
                 ports: port_mappings, 
                 volumes: volume_mounts,
                 hostname,
+                labels: label_map,
             };
             
             let resp = client.post(format!("{}/run", daemon_url))
@@ -276,9 +291,15 @@ async fn main() -> Result<()> {
                 Ok(response) => {
                      if response.status().is_success() {
                          let body: ListResponse = response.json().await?;
-                         println!("{:<40} {:<20} {:<10}", "VM ID", "IP ADDRESS", "STATUS");
+                         println!("{:<36} {:<15} {:<15} {:<30}", "VM ID", "IP ADDRESS", "HOSTNAME", "LABELS");
                          for vm in body.vms {
-                             println!("{:<40} {:<20} {:<10}", vm.id, vm.ip_address, "Running");
+                             let labels_str = vm.labels.iter()
+                                .map(|(k,v)| if v.is_empty() { k.clone() } else { format!("{}={}", k, v) })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                             let hostname_str = vm.hostname.unwrap_or_else(|| "-".to_string());
+                             
+                             println!("{:<36} {:<15} {:<15} {:<30}", vm.id, vm.ip_address, hostname_str, labels_str);
                          }
                      } else {
                          error!("Daemon returned error: {}", response.status());
@@ -400,6 +421,11 @@ async fn main() -> Result<()> {
                 Ok(compose) => {
                     println!("Ignite Compose v{}", compose.version);
                     
+                    let stack_name = std::env::current_dir()
+                         .ok()
+                         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+                         .unwrap_or_else(|| "default".to_string());
+                    
                     let service_order = match compose.start_order() {
                         Ok(o) => o,
                         Err(e) => {
@@ -409,8 +435,28 @@ async fn main() -> Result<()> {
                     };
                     
                     println!("Services found: {}", service_order.len());
+                    
+                    // Pre-check running services via Daemon
                     let mut service_ids = HashMap::new();
+                    let resp = client.get(format!("{}/ps", daemon_url)).send().await;
+                    if let Ok(r) = resp {
+                         if let Ok(list) = r.json::<ListResponse>().await {
+                             for vm in list.vms {
+                                 if let Some(s) = vm.labels.get("ignite.stack") {
+                                     if s == &stack_name {
+                                         let service_name = vm.labels.get("ignite.service").cloned().unwrap_or(vm.id.clone());
+                                         service_ids.insert(service_name, vm.id);
+                                     }
+                                 }
+                             }
+                         }
+                    }
+
                     for (name, service) in service_order {
+                        if service_ids.contains_key(&name) {
+                            info!("Service '{}' is already running.", name);
+                            continue;
+                        }
                          info!("Starting service: {}", name);
                          
                          let image_target = if let Some(ref build) = service.build {
@@ -462,6 +508,12 @@ async fn main() -> Result<()> {
                              ports: port_mappings,
                              volumes: volume_mounts,
                              hostname: Some(name.clone()),
+                             labels: {
+                                 let mut l = HashMap::new();
+                                 l.insert("ignite.stack".to_string(), stack_name.clone());
+                                 l.insert("ignite.service".to_string(), name.clone());
+                                 l
+                             },
                          };
 
                          let resp = client.post(format!("{}/run", daemon_url))
@@ -482,14 +534,6 @@ async fn main() -> Result<()> {
                              Err(e) => error!("Failed to request start for '{}': {}", name, e),
                          }
                     }
-                    if !service_ids.is_empty() {
-                        let state_file = Path::new("ignite-compose.state");
-                        if let Ok(f) = File::create(state_file) {
-                             if let Err(e) = serde_json::to_writer(f, &service_ids) {
-                                 error!("Failed to save state: {}", e);
-                             }
-                        }
-                    }
                     if detach {
                         println!("(Detached mode selected)");
                     }
@@ -498,15 +542,38 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Down { file } => {
-            let state_file = Path::new("ignite-compose.state");
-            if !state_file.exists() {
-                 println!("No active state found (ignite-compose.state missing).");
-                 return Ok(());
-            }
-            let f = File::open(state_file)?;
-            let mut service_ids: HashMap<String, String> = serde_json::from_reader(f)?;
+            // 1. Identify Stack Name
+             let stack_name = std::env::current_dir()
+                 .ok()
+                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+                 .unwrap_or_else(|| "default".to_string());
             
-            // Determine order
+            info!("Stopping stack: {}", stack_name);
+
+            // 2. Fetch all VMs to find stack members
+            let mut vms_to_stop = HashMap::new(); // name -> id
+            let resp = client.get(format!("{}/ps", daemon_url)).send().await;
+            if let Ok(r) = resp {
+                 if let Ok(list) = r.json::<ListResponse>().await {
+                     for vm in list.vms {
+                         if let Some(s) = vm.labels.get("ignite.stack") {
+                             if s == &stack_name {
+                                 // Found a VM belonging to this stack
+                                 let service_name = vm.labels.get("ignite.service").cloned().unwrap_or(vm.id.clone());
+                                 vms_to_stop.insert(service_name, vm.id);
+                             }
+                         }
+                     }
+                 }
+            }
+            
+            if vms_to_stop.is_empty() {
+                println!("No running services found for stack '{}'.", stack_name);
+                let _ = std::fs::remove_file("ignite-compose.state");
+                return Ok(()); 
+            }
+
+            // 3. Determine Order
             let mut stop_order = Vec::new();
             if let Ok(compose) = IgniteCompose::from_file(&file) {
                 if let Ok(order) = compose.start_order() {
@@ -514,15 +581,15 @@ async fn main() -> Result<()> {
                 }
             }
             
-            // Add any remaining services from state not in stop_order
-            for name in service_ids.keys() {
+            // Add any remaining services from running list not in stop_order
+            for name in vms_to_stop.keys() {
                 if !stop_order.contains(name) {
                     stop_order.push(name.clone());
                 }
             }
 
             for name in stop_order {
-                if let Some(id) = service_ids.get(&name) {
+                if let Some(id) = vms_to_stop.get(&name) {
                     info!("Stopping service '{}' (VM {})", name, id);
                      let resp = client.post(format!("{}/stop/{}", daemon_url, id))
                         .send()
@@ -535,7 +602,7 @@ async fn main() -> Result<()> {
                      }
                 }
             }
-            std::fs::remove_file(state_file)?;
+            let _ = std::fs::remove_file("ignite-compose.state");
             println!("Stack stopped and removed.");
         }
     }
@@ -790,6 +857,9 @@ async fn import_vm(input_path: &str, daemon_url: &str) -> Result<()> {
 struct VmSummary {
     id: String,
     ip_address: String,
+    hostname: Option<String>,
+    #[serde(default)]
+    labels: HashMap<String, String>,
 }
 
 #[derive(Deserialize, Debug)]

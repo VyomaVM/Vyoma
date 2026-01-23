@@ -62,6 +62,7 @@ struct VmInstance {
     config_ports: Vec<PortMapping>,
     config_volumes: Vec<VolumeMount>,
     hostname: Option<String>,
+    labels: HashMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -77,6 +78,8 @@ struct VmState {
     ports: Vec<PortMapping>,
     volumes: Vec<VolumeMount>,
     hostname: Option<String>,
+    #[serde(default)]
+    labels: HashMap<String, String>,
 }
 
 impl VmInstance {
@@ -93,6 +96,7 @@ impl VmInstance {
             ports: self.config_ports.clone(),
             volumes: self.config_volumes.clone(),
             hostname: self.hostname.clone(),
+            labels: self.labels.clone(),
         };
 
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home dir"))?;
@@ -371,6 +375,8 @@ struct RunRequest {
     volumes: Vec<VolumeMount>,
     #[serde(default)]
     hostname: Option<String>,
+    #[serde(default)]
+    labels: HashMap<String, String>,
 }
 
 fn default_vcpu() -> u32 { 1 }
@@ -655,6 +661,7 @@ async fn run_vm(
         config_ports: payload.ports.clone(),
         config_volumes: payload.volumes.clone(),
         hostname: payload.hostname.clone(),
+        labels: payload.labels.clone(),
     };
     
     instance.save_state().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save state: {}", e)))?;
@@ -908,6 +915,7 @@ async fn restore_vm(
         config_ports: vec![],
         config_volumes: vec![],
         hostname: None,
+        labels: HashMap::new(),
     };
     
     {
@@ -926,6 +934,8 @@ async fn restore_vm(
 struct VmSummary {
     id: String,
     ip_address: String,
+    hostname: Option<String>,
+    labels: HashMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -969,6 +979,8 @@ async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {
         summaries.push(VmSummary {
             id: inst.id.clone(),
             ip_address: inst.ip_address.clone(),
+            hostname: inst.hostname.clone(),
+            labels: inst.labels.clone(),
         });
     }
     
@@ -1086,7 +1098,6 @@ async fn build_image(
     //    We need to work on a COPY of the base, not the shared base.
     //    So we create a new "build artifact" (a raw ext4 file).
     
-    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
     let images_root = home.join(".ignite").join("images");
     std::fs::create_dir_all(&images_root).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -1340,6 +1351,7 @@ async fn initialize_state(state: &AppState) {
                  config_ports: vm_state.ports,
                  config_volumes: vm_state.volumes,
                  hostname: vm_state.hostname,
+                 labels: vm_state.labels.clone(),
              };
              
              state.vms.lock().unwrap().insert(vm_state.id, Arc::new(TokioMutex::new(instance)));
@@ -1363,6 +1375,7 @@ async fn initialize_state(state: &AppState) {
                  config_ports: vec![], 
                  config_volumes: vec![],
                  hostname: vm_state.hostname,
+                 labels: vm_state.labels,
              };
              // We await cleanup
              instance.cleanup(&state.cni_manager).await;

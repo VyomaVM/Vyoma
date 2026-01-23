@@ -181,10 +181,10 @@
         - [x] `cli`: Implement Dependency Order resolution (depends_on).
 
 ## Phase 17: The Scale Edition (v0.5.0)
-- [ ] **Robust Metadata**
-    - [ ] `daemon`: Add Label/Tag support to VM State (`com.ignite.stack`, etc.).
-    - [ ] `cli`: Update `ign up` to use Labels instead of local file.
-    - [ ] `cli`: Update `ign down` to filter by Labels.
+- [x] **Robust Metadata**
+    - [x] `daemon`: Add Label/Tag support to VM State (`com.ignite.stack`, etc.).
+    - [x] `cli`: Update `ign up` to use Labels instead of local file.
+    - [x] `cli`: Update `ign down` to filter by Labels.
 - [ ] **Horizontal Scaling (`ign scale`)**
     - [ ] `cli`: Implement `ign scale <service>=<count>`.
     - [ ] `daemon`: Update DNS to return all IPs (Round Robin).
