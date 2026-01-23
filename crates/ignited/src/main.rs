@@ -63,6 +63,11 @@ struct VmInstance {
     config_volumes: Vec<VolumeMount>,
     hostname: Option<String>,
     labels: HashMap<String, String>,
+
+    // For restart
+    base_image_path: String,
+    vcpu: u32,
+    mem_size_mib: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -80,6 +85,12 @@ struct VmState {
     hostname: Option<String>,
     #[serde(default)]
     labels: HashMap<String, String>,
+    #[serde(default)]
+    base_image_path: String,
+    #[serde(default)]
+    vcpu: u32,
+    #[serde(default)]
+    mem_size_mib: u32,
 }
 
 impl VmInstance {
@@ -97,6 +108,9 @@ impl VmInstance {
             volumes: self.config_volumes.clone(),
             hostname: self.hostname.clone(),
             labels: self.labels.clone(),
+            base_image_path: self.base_image_path.clone(),
+            vcpu: self.vcpu,
+            mem_size_mib: self.mem_size_mib,
         };
 
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home dir"))?;
@@ -292,6 +306,7 @@ async fn main() {
         .route("/build", post(build_image))
         .route("/networks", get(list_networks_handler).post(create_network_handler))
         .route("/networks/:name", axum::routing::delete(delete_network_handler))
+        .route("/vms/:id", get(inspect_vm_handler))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
@@ -421,6 +436,7 @@ async fn run_vm(
 
     // 2. Pull Image & Prepare Base
     let base_image_file = ensure_image_locally(&payload.image).await?;
+    let base_image_path_str = base_image_file.to_string_lossy().to_string();
     info!("Using base image at {:?}", base_image_file);
 
     // 3. VM Specific Setup
@@ -662,6 +678,9 @@ async fn run_vm(
         config_volumes: payload.volumes.clone(),
         hostname: payload.hostname.clone(),
         labels: payload.labels.clone(),
+        base_image_path: base_image_path_str,
+        vcpu: payload.vcpu,
+        mem_size_mib: payload.mem_size_mib,
     };
     
     instance.save_state().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save state: {}", e)))?;
@@ -916,6 +935,9 @@ async fn restore_vm(
         config_volumes: vec![],
         hostname: None,
         labels: HashMap::new(),
+        base_image_path: String::new(),
+        vcpu: 1,
+        mem_size_mib: 512,
     };
     
     {
@@ -1052,6 +1074,47 @@ async fn stream_logs(
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
     }
+}
+
+async fn inspect_vm_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<VmState>, (StatusCode, String)> {
+    // 1. Check running
+    {
+        let vms = state.vms.lock().unwrap();
+        if let Some(vm_arc) = vms.get(&id) {
+            let vm = vm_arc.lock().await;
+            return Ok(Json(VmState {
+                id: vm.id.clone(),
+                tap_name: vm.tap_name.clone(),
+                dm_name: vm.dm_name.clone(),
+                loop_devices: vm.loop_devices.clone(),
+                cow_file_path: vm.cow_file_path.clone(),
+                ip_address: vm.ip_address.clone(),
+                cgroup_path: vm.cgroup_path.clone(),
+                netns_path: vm.netns_path.clone(),
+                ports: vm.config_ports.clone(),
+                volumes: vm.config_volumes.clone(),
+                hostname: vm.hostname.clone(),
+                labels: vm.labels.clone(),
+                base_image_path: vm.base_image_path.clone(),
+                vcpu: vm.vcpu,
+                mem_size_mib: vm.mem_size_mib,
+            }));
+        }
+    }
+    
+    // 2. Check disk (stopped)
+    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+    let state_file = home.join(".ignite").join("vms").join(&id).join("state.json");
+    if state_file.exists() {
+         let f = std::fs::File::open(state_file).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+         let s: VmState = serde_json::from_reader(f).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+         return Ok(Json(s));
+    }
+
+    Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
 }
 
 
@@ -1352,6 +1415,9 @@ async fn initialize_state(state: &AppState) {
                  config_volumes: vm_state.volumes,
                  hostname: vm_state.hostname,
                  labels: vm_state.labels.clone(),
+                 base_image_path: vm_state.base_image_path.clone(),
+                 vcpu: vm_state.vcpu,
+                 mem_size_mib: vm_state.mem_size_mib,
              };
              
              state.vms.lock().unwrap().insert(vm_state.id, Arc::new(TokioMutex::new(instance)));
@@ -1376,6 +1442,9 @@ async fn initialize_state(state: &AppState) {
                  config_volumes: vec![],
                  hostname: vm_state.hostname,
                  labels: vm_state.labels,
+                 base_image_path: vm_state.base_image_path,
+                 vcpu: vm_state.vcpu,
+                 mem_size_mib: vm_state.mem_size_mib,
              };
              // We await cleanup
              instance.cleanup(&state.cni_manager).await;

@@ -189,10 +189,17 @@
     - [x] `cli`: Implement `ign scale <service>=<count>`.
     - [x] `daemon`: Update DNS to return all IPs (Round Robin).
 
-## Phase 18: The Cluster Edition (v0.6.0)
-- [ ] **Overlay Networking**
-    - [ ] Integrate `flannel` CNI.
-    - [ ] Implement subnet allocation logic.
+## Phase 18: The Polish Update (v0.6.0)
+- [x] **Lifecycle (`ign restart`)**
+    - [x] `daemon`: Implement `INSPECT` and `START` (stopped) endpoints.
+    - [x] `cli`: Implement `ign restart <id>` (Stop/Run replacement).
+- [x] **Logging (`ign logs`)**
+    - [x] `cli`: Support service name resolution (`ign logs web`).
+- [ ] **Docker Compatibility**
+    - [x] Labels support in `ign run`.
+    - [x] `ign exec` (alias to `ssh`).
+
+## Phase 19: The Cluster Edition (v0.7.0)
 - [ ] **Ignite Swarm**
     - [ ] Node Discovery mechanism.
     - [ ] Remote API Client.
