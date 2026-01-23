@@ -2,7 +2,7 @@
 members = [
     "crates/ignited",
     "crates/ign",
-    "crates/ignite-core",
+    "crates/ignite-core", "crates/ignite-compose",
 ]
 resolver = "2"
 

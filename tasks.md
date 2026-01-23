@@ -171,7 +171,7 @@
     - [x] `oci`: Implement `Www-Authenticate` header parsing for dynamic Token Realms.
     - [x] `oci`: Support Basic Auth in Token exchange.
 - [ ] **Ignite Compose**
-    - [ ] `cli`: Define `IgniteCompose` struct (YAML schema).
+    - [x] `cli`: Define `IgniteCompose` struct (YAML schema).
     - [ ] `cli`: Implement `ign up -f <file>` parsing.
     - [ ] `ignited`: Add `POST /groups` API to manage VM groups (stacks).
     - [ ] `cli`: Implement Dependency Graph resolution (start order).

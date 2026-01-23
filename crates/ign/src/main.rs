@@ -14,6 +14,7 @@ use futures::stream::StreamExt;
 
 use ignite_core::api::PortMapping;
 use ignite_core::api::VolumeMount;
+use ignite_compose::IgniteCompose;
 
 #[derive(Parser)]
 #[command(name = "ign")]
@@ -115,6 +116,22 @@ enum Commands {
     Network {
         #[command(subcommand)]
         command: NetworkCommands,
+    },
+    /// Create and start resources from a compose file
+    Up {
+        /// Path to compose file (default: ignite-compose.yml)
+        #[arg(short, long, default_value = "ignite-compose.yml")]
+        file: String,
+
+        /// Detached mode: Run containers in the background
+        #[arg(short, long)]
+        detach: bool,
+    },
+    /// Stop and remove resources
+    Down {
+         /// Path to compose file (default: ignite-compose.yml)
+        #[arg(short, long, default_value = "ignite-compose.yml")]
+        file: String,
     },
 }
 
@@ -368,7 +385,27 @@ async fn main() -> Result<()> {
                         .await;
                      handle_simple_response(resp, daemon_url).await?;
                 }
+        }
+        }
+        Commands::Up { file, detach } => {
+            info!("Processing compose file: {}", file);
+            match IgniteCompose::from_file(&file) {
+                Ok(compose) => {
+                    println!("Ignite Compose v{}", compose.version);
+                    println!("Services found: {}", compose.services.len());
+                    for (name, service) in compose.services {
+                         println!("- {}: {}", name, service.image);
+                    }
+                    if detach {
+                        println!("(Detached mode selected)");
+                    }
+                    println!("(Full implementation pending in next phase)");
+                },
+                Err(e) => error!("Failed to parse compose file '{}': {}", file, e),
             }
+        }
+        Commands::Down { file: _ } => {
+            println!("'ign down' is not yet implemented.");
         }
     }
 

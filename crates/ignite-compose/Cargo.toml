@@ -1,0 +1,11 @@
+[package]
+name = "ignite-compose"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+ignite-core = { version = "0.3.0", path = "../ignite-core" }
+serde = { workspace = true, features = ["derive"] }
+serde_yaml = "0.9.34"
