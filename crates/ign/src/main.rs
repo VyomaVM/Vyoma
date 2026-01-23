@@ -394,7 +394,17 @@ async fn main() -> Result<()> {
                     println!("Ignite Compose v{}", compose.version);
                     println!("Services found: {}", compose.services.len());
                     for (name, service) in compose.services {
-                         println!("- {}: {}", name, service.image);
+                         let source = if let Some(ref img) = service.image {
+                             format!("Image: {}", img)
+                         } else if let Some(ref build) = service.build {
+                             match build {
+                                 ignite_compose::BuildSource::Path(p) => format!("Build: {}", p),
+                                 ignite_compose::BuildSource::Config(c) => format!("Build: {} (Ignitefile: {:?})", c.context, c.ignitefile),
+                             }
+                         } else {
+                             "Unknown".to_string()
+                         };
+                         println!("- {}: {}", name, source);
                     }
                     if detach {
                         println!("(Detached mode selected)");

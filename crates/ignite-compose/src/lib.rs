@@ -11,8 +11,22 @@ pub struct IgniteCompose {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BuildSource {
+    Path(String),
+    Config(BuildConfig),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildConfig {
+    pub context: String,
+    pub ignitefile: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Service {
-    pub image: String,
+    pub image: Option<String>,
+    pub build: Option<BuildSource>,
     pub cpus: Option<u32>,
     pub memory: Option<u32>, // MB
     pub ports: Option<Vec<String>>, // "8080:80"
@@ -57,10 +71,41 @@ services:
         assert_eq!(compose.services.len(), 2);
         
         let web = compose.services.get("web").unwrap();
-        assert_eq!(web.image, "nginx:latest");
+        assert_eq!(web.image.as_ref().unwrap(), "nginx:latest");
         assert_eq!(web.ports.as_ref().unwrap()[0], "8080:80");
 
         let db = compose.services.get("db").unwrap();
         assert_eq!(db.memory, Some(512));
+    }
+
+    #[test]
+    fn test_parse_build_compose() {
+        let yaml = r#"
+version: "1.0"
+services:
+  app:
+    build: ./app
+    ports:
+      - "3000:3000"
+  worker:
+    build:
+      context: ./worker
+      ignitefile: CustomIgnitefile
+"#;
+        let compose = IgniteCompose::from_str(yaml).unwrap();
+        let app = compose.services.get("app").unwrap();
+        match app.build.as_ref().unwrap() {
+            BuildSource::Path(p) => assert_eq!(p, "./app"),
+            _ => panic!("Expected BuildSource::Path"),
+        }
+
+        let worker = compose.services.get("worker").unwrap();
+        match worker.build.as_ref().unwrap() {
+            BuildSource::Config(c) => {
+                assert_eq!(c.context, "./worker");
+                assert_eq!(c.ignitefile.as_ref().unwrap(), "CustomIgnitefile");
+            }
+            _ => panic!("Expected BuildSource::Config"),
+        }
     }
 }
