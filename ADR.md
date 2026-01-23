@@ -492,3 +492,18 @@ User-mode networking for unprivileged network namespaces.
 --target-type=TYPE       specify the target type ([netns|bess], default=netns)
 -h, --help               show this help and exit
 -v, --version            show version and exit installed on host.
+
+## 018. Ignite Compose Strategy
+*   **Date**: 2026-01-23
+*   **Decision**: Implement `ignite-compose` crate and `ign up` command to support multi-VM orchestration using a Docker Compose-like YAML format.
+*   **Reasoning**:
+    *   **User Experience**: Adopting the familiar Compose spec reduces the learning curve for users migrating from Docker.
+    *   **Separation of Concerns**: The orchestration logic (dependency resolution, config parsing) is separated into a dedicated library (`ignite-compose`), keeping the core primitives (`ignite-core`) focused on single-VM lifecycle.
+    *   **Integrated Workflow**: Supporting `build` contexts allows for a seamless "Source to Running App" workflow, unlike a pure runtime orchestrator.
+*   **Implementation**:
+    *   **Crate**: `crates/ignite-compose` for strong typing of the YAML schema.
+    *   **CLI**: `ign up` acts as the entry point. It orchestrates the `ignite-core` API (or daemon API) to start services.
+    *   **Networking**: Services will eventually share a dedicated CNI network (bridge) to allow name-based resolution (Phase 16).
+*   **Consequences**:
+    *   Introduces `serde_yaml` dependency.
+    *   Requires tracking "Stacks" or "Groups" of VMs (currently implicit via labels or naming conventions).

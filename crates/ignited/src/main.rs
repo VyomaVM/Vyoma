@@ -1080,11 +1080,15 @@ async fn build_image(
     //    So we create a new "build artifact" (a raw ext4 file).
     
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let build_root = home.join(".ignite").join("builds");
-    std::fs::create_dir_all(&build_root).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+    let images_root = home.join(".ignite").join("images");
+    std::fs::create_dir_all(&images_root).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
     let build_id = uuid::Uuid::new_v4().to_string();
-    let current_image_path = build_root.join(format!("{}.ext4", build_id));
+    let image_store_path = images_root.join(&build_id);
+    std::fs::create_dir_all(&image_store_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let current_image_path = image_store_path.join("base.ext4");
     
     // Track if we have a base
     let mut has_base = false;
@@ -1212,7 +1216,7 @@ async fn build_image(
     // Done. The `current_image_path` is the result.
     // Move it to images dir? Or return ID?
     // For now return path.
-    Ok(format!("Build successful. Image at: {:?}", current_image_path))
+    Ok(build_id)
 }
 
 

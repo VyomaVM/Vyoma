@@ -172,10 +172,9 @@
     - [x] `oci`: Support Basic Auth in Token exchange.
 - [ ] **Ignite Compose**
     - [x] `cli`: Define `IgniteCompose` struct (YAML schema).
-    - [ ] `cli`: Implement `ign up -f <file>` parsing.
-    - [ ] `ignited`: Add `POST /groups` API to manage VM groups (stacks).
-    - [ ] `cli`: Implement Dependency Graph resolution (start order).
-    - [ ] `cli`: Implement `ign down` (parallel stop & remove).
+    - [x] `cli`: Refactor `Build` logic into reusable function.
+    - [x] `cli`: Implement `ign up` logic (Build + Run loop).
+    - [x] `cli`: Implement `ign down` logic (Stop + Remove).
 
 ## Phase 17: The Cluster Edition (v0.5.0)
 - [ ] **Overlay Networking**

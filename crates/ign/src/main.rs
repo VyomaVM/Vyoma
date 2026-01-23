@@ -11,6 +11,7 @@ use flate2::read::GzDecoder;
 use flate2::Compression;
 use tar::Archive; // Removed Builder since we will use tar::Builder inline
 use futures::stream::StreamExt;
+use std::collections::HashMap;
 
 use ignite_core::api::PortMapping;
 use ignite_core::api::VolumeMount;
@@ -393,29 +394,116 @@ async fn main() -> Result<()> {
                 Ok(compose) => {
                     println!("Ignite Compose v{}", compose.version);
                     println!("Services found: {}", compose.services.len());
+                    let mut service_ids = HashMap::new();
                     for (name, service) in compose.services {
-                         let source = if let Some(ref img) = service.image {
-                             format!("Image: {}", img)
-                         } else if let Some(ref build) = service.build {
-                             match build {
-                                 ignite_compose::BuildSource::Path(p) => format!("Build: {}", p),
-                                 ignite_compose::BuildSource::Config(c) => format!("Build: {} (Ignitefile: {:?})", c.context, c.ignitefile),
-                             }
+                         info!("Starting service: {}", name);
+                         
+                         let image_target = if let Some(ref build) = service.build {
+                             let context = match build {
+                                 ignite_compose::BuildSource::Path(p) => p.clone(),
+                                 ignite_compose::BuildSource::Config(c) => c.context.clone(),
+                             };
+                             info!("Building service '{}' from {}", name, context);
+                             build_image(&context, daemon_url).await?
+                         } else if let Some(ref img) = service.image {
+                             img.clone()
                          } else {
-                             "Unknown".to_string()
+                             error!("Service '{}' has no image or build context", name);
+                             continue;
                          };
-                         println!("- {}: {}", name, source);
+
+                         // Prepare Ports
+                         let mut port_mappings = Vec::new();
+                         if let Some(ports) = service.ports {
+                             for p in ports {
+                                 let parts: Vec<&str> = p.split(':').collect();
+                                 if parts.len() == 2 {
+                                     let h = parts[0].parse().unwrap_or(0);
+                                     let v = parts[1].parse().unwrap_or(0);
+                                     port_mappings.push(PortMapping { host_port: h, vm_port: v });
+                                 }
+                             }
+                         }
+
+                         // Prepare Volumes
+                         let mut volume_mounts = Vec::new();
+                         if let Some(vols) = service.volumes {
+                             for v in vols {
+                                 let parts: Vec<&str> = v.split(':').collect();
+                                 if parts.len() == 2 {
+                                     volume_mounts.push(VolumeMount {
+                                         host_path: parts[0].to_string(),
+                                         vm_path: parts[1].to_string(),
+                                         read_only: false,
+                                     });
+                                 }
+                             }
+                         }
+
+                         let payload = RunRequest {
+                             image: image_target,
+                             vcpu: service.cpus.unwrap_or(1),
+                             mem_size_mib: service.memory.unwrap_or(512),
+                             ports: port_mappings,
+                             volumes: volume_mounts,
+                         };
+
+                         let resp = client.post(format!("{}/run", daemon_url))
+                             .json(&payload)
+                             .send()
+                             .await;
+                         
+                         match resp {
+                             Ok(r) => {
+                                 if r.status().is_success() {
+                                     let body: RunResponse = r.json().await?;
+                                     info!("Service '{}' started as VM {}", name, body.vm_id);
+                                     service_ids.insert(name.clone(), body.vm_id);
+                                 } else {
+                                     error!("Failed to start service '{}': {}", name, r.status());
+                                 }
+                             },
+                             Err(e) => error!("Failed to request start for '{}': {}", name, e),
+                         }
+                    }
+                    if !service_ids.is_empty() {
+                        let state_file = Path::new("ignite-compose.state");
+                        if let Ok(f) = File::create(state_file) {
+                             if let Err(e) = serde_json::to_writer(f, &service_ids) {
+                                 error!("Failed to save state: {}", e);
+                             }
+                        }
                     }
                     if detach {
                         println!("(Detached mode selected)");
                     }
-                    println!("(Full implementation pending in next phase)");
                 },
                 Err(e) => error!("Failed to parse compose file '{}': {}", file, e),
             }
         }
         Commands::Down { file: _ } => {
-            println!("'ign down' is not yet implemented.");
+            let state_file = Path::new("ignite-compose.state");
+            if !state_file.exists() {
+                 println!("No active state found (ignite-compose.state missing).");
+                 return Ok(());
+            }
+            let f = File::open(state_file)?;
+            let service_ids: HashMap<String, String> = serde_json::from_reader(f)?;
+            
+            for (name, id) in service_ids {
+                info!("Stopping service '{}' (VM {})", name, id);
+                 let resp = client.post(format!("{}/stop/{}", daemon_url, id))
+                    .send()
+                    .await;
+                 match resp {
+                     Ok(r) => if !r.status().is_success() {
+                         error!("Failed to stop VM {}: {}", id, r.status());
+                     },
+                     Err(e) => error!("Failed to stop VM {}: {}", id, e),
+                 }
+            }
+            std::fs::remove_file(state_file)?;
+            println!("Stack stopped and removed.");
         }
     }
 
@@ -518,7 +606,7 @@ fn check_bridge() -> Result<bool> {
     Ok(output.status.success())
 }
 
-async fn build_image(context_path: &str, daemon_url: &str) -> Result<()> {
+async fn build_image(context_path: &str, daemon_url: &str) -> Result<String> {
     let context_path = Path::new(context_path);
     if !context_path.exists() {
         return Err(anyhow::anyhow!("Context path does not exist: {:?}", context_path));
@@ -547,11 +635,17 @@ async fn build_image(context_path: &str, daemon_url: &str) -> Result<()> {
     let resp = client.post(format!("{}/build", daemon_url))
         .body(body)
         .send()
-        .await;
+        .await?; // Removed map_err, standard error propagation
         
-    handle_simple_response(resp, daemon_url).await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!("Build failed ({}): {}", status, text));
+    }
     
-    Ok(())
+    let image_id = resp.text().await?;
+    info!("Build complete. Image ID: {}", image_id);
+    Ok(image_id)
 }
 
 fn export_vm(vm_id: &str, output_path: &str) -> Result<()> {
