@@ -47,16 +47,16 @@ This document outlines the development path for Ignite, tracking completed miles
 
 ## 🚧 Upcoming Roadmap
 
-### v0.7.0: The Cluster Edition ("Ignite Swarm")
+### v0.7.0: The Cluster Edition ("Ignite Swarm") - [ALPHA RELEASED]
 **Focus**: Multi-host networking and node orchestration.
 
 #### 1. Overlay Networking
 - **Goal**: Seamless L3 connectivity between VMs on different hosts.
-- **Strategy**: Integrate `flannel` CNI (VXLAN backend).
+- **Status**: CLI/API Config generation implemented. Data Plane (Flanneld integration) is **Pending**.
 
 #### 2. Basic Federation
 - **Goal**: Schedule VMs across multiple nodes.
-- **Strategy**: Simple round-robin scheduler via CLI remote control.
+- **Status**: Swarm Init/Join Skeleton implemented. Gossip/Sync logic is **Pending**.
 
 ---
 

@@ -199,14 +199,15 @@
     - [x] Labels support in `ign run`.
     - [x] `ign exec` (alias to `ssh`).
 
-## Phase 19: The Cluster Edition (v0.7.0)
+## Phase 19: The Cluster Edition (v0.7.0 - Alpha)
 - [ ] **Overlay Networking (feat/overlay)**
-    - [ ] **Research**: Validate rootless compatibility with VXLAN/Flannel (ADR 017).
+    - [x] `cli`: Update `network create` to support overlay driver.
+    - [x] `daemon`: Generate CNI config for Flannel.
+    - [x] **Research**: Validate rootless compatibility (ADR 017).
+    - [ ] **Data Plane**: Spawn `flanneld` process (Lifecycle).
     - [ ] `core`: Implement VXLAN backend logic (or integrate CNI plugin).
-    - [ ] `daemon`: Add `--cluster-cidr` flag and subnet management.
-    - [ ] `cli`: Update `network create` to support overlay driver.
 - [ ] **Ignite Swarm (feat/cluster)**
-    - [ ] **Discovery**: Implement Gossip protocol or static node list.
-    - [ ] `daemon`: Add `/cluster/join` endpoint.
-    - [ ] `cli`: Add `ign swarm init` and `ign swarm join`.
+    - [x] `daemon`: Add `/cluster/join` endpoint and ClusterManager state.
+    - [x] `cli`: Add `ign swarm init` and `ign swarm join`.
+    - [ ] **Discovery**: Implement Gossip protocol or static node list sync.
     - [ ] **Scheduling**: Basic placement logic (random or round-robin) for `ign run --replicas`.
