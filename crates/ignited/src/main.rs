@@ -21,6 +21,7 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{error, info, warn};
 
+mod cluster;
 mod dns;
 use axum::body::Body;
 use flate2::read::GzDecoder;
@@ -36,6 +37,7 @@ struct AppState {
     vms: Arc<StdMutex<HashMap<String, Arc<TokioMutex<VmInstance>>>>>,
     cgroups: Arc<CgroupManager>,
     cni_manager: Arc<ignite_core::cni::CniManager>,
+    cluster_manager: Arc<cluster::ClusterManager>,
     rootless: bool,
 }
 
@@ -279,6 +281,7 @@ async fn main() {
         vms: Arc::new(StdMutex::new(HashMap::new())),
         cgroups,
         cni_manager,
+        cluster_manager: Arc::new(cluster::ClusterManager::new()),
         rootless,
     };
 
@@ -317,6 +320,9 @@ async fn main() {
             axum::routing::delete(delete_network_handler),
         )
         .route("/vms/:id", get(inspect_vm_handler))
+        .route("/swarm/init", post(swarm_init_handler))
+        .route("/swarm/join", post(swarm_join_handler))
+        .route("/swarm/nodes", get(swarm_nodes_handler))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
@@ -1916,4 +1922,29 @@ async fn delete_network_handler(
         .delete_network(&name)
         .map(|_| format!("Network {} deleted", name))
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+#[derive(Deserialize)]
+struct JoinRequest {
+    seed_ip: String,
+}
+
+async fn swarm_init_handler(State(state): State<AppState>) -> Result<String, (StatusCode, String)> {
+    let id = state.cluster_manager.init();
+    Ok(format!("Initialized Swarm Node: {}", id))
+}
+
+async fn swarm_join_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<JoinRequest>,
+) -> Result<String, (StatusCode, String)> {
+    state
+        .cluster_manager
+        .join(&payload.seed_ip)
+        .map(|_| format!("Joined swarm via seed {}", payload.seed_ip))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn swarm_nodes_handler(State(state): State<AppState>) -> Json<Vec<cluster::NodeInfo>> {
+    Json(state.cluster_manager.list_nodes())
 }

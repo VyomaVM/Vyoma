@@ -164,6 +164,24 @@ enum Commands {
         #[arg(short, long, default_value = "ignite-compose.yml")]
         file: String,
     },
+    /// Manage Swarm/Cluster
+    Swarm {
+        #[command(subcommand)]
+        command: SwarmCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum SwarmCommands {
+    /// Initialize a new swarm
+    Init,
+    /// Join an existing swarm
+    Join {
+        /// IP address of a node in the swarm
+        ip: String,
+    },
+    /// List nodes in the swarm
+    Ls,
 }
 
 #[derive(Subcommand)]
@@ -601,6 +619,34 @@ async fn main() -> Result<()> {
                     .delete(format!("{}/networks/{}", daemon_url, name))
                     .send()
                     .await;
+                handle_simple_response(resp, daemon_url).await?;
+            }
+        },
+        Commands::Swarm { command } => match command {
+            SwarmCommands::Init => {
+                info!("Initializing swarm...");
+                let resp = client
+                    .post(format!("{}/swarm/init", daemon_url))
+                    .send()
+                    .await;
+                handle_simple_response(resp, daemon_url).await?;
+            }
+            SwarmCommands::Join { ip } => {
+                info!("Joining swarm at {}...", ip);
+                let payload = serde_json::json!({ "seed_ip": ip });
+                let resp = client
+                    .post(format!("{}/swarm/join", daemon_url))
+                    .json(&payload)
+                    .send()
+                    .await;
+                handle_simple_response(resp, daemon_url).await?;
+            }
+            SwarmCommands::Ls => {
+                let resp = client
+                    .get(format!("{}/swarm/nodes", daemon_url))
+                    .send()
+                    .await;
+                // Just print raw JSON for MVP
                 handle_simple_response(resp, daemon_url).await?;
             }
         },
