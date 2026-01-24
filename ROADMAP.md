@@ -38,18 +38,14 @@ This document outlines the development path for Ignite, tracking completed miles
 
 ---
 
+### v0.6.0: The Polish Update (Completed)
+- **Lifecycle Management**: `ign restart` implemented.
+- **Enhanced Logging**: `ign logs <service>` implemented.
+- **Inspect API**: `/vms/:id` endpoint implemented.
+
+---
+
 ## 🚧 Upcoming Roadmap
-
-### v0.6.0: The Polish Update ("Ignite DX")
-**Focus**: Usability refinements and missing CLI commands.
-
-#### 1. Lifecycle Management
-- **Goal**: Implement `ign restart` for standalone and compose services.
-- **Spec**: `ign restart web`.
-
-#### 2. Enhanced Logging
-- **Goal**: Support service-based logging in compose.
-- **Spec**: `ign logs web` (resolves to VM IDs automatically).
 
 ### v0.7.0: The Cluster Edition ("Ignite Swarm")
 **Focus**: Multi-host networking and node orchestration.
