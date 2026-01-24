@@ -23,6 +23,7 @@ use tracing::{error, info, warn};
 
 mod cluster;
 mod dns;
+mod ui;
 use axum::body::Body;
 use flate2::read::GzDecoder;
 use ignite_core::builder::{IgniteFile, Instruction};
@@ -323,6 +324,7 @@ async fn main() {
         .route("/swarm/init", post(swarm_init_handler))
         .route("/swarm/join", post(swarm_join_handler))
         .route("/swarm/nodes", get(swarm_nodes_handler))
+        .fallback(ui::ui_handler)
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();

@@ -210,9 +210,12 @@
     - [x] `daemon`: Add `/cluster/join` endpoint and ClusterManager state.
     - [x] `cli`: Add `ign swarm init` and `ign swarm join`.
 ## Phase 20: The Desktop Experience (v0.8.0)
-- [ ] **Web UI**
-    - [ ] Build React/Next.js dashboard (embedded in Daemon).
-    - [ ] Features: VM List, Terminal, Metrics.
+- [ ] **Web UI (feat/web-ui)**
+    - [ ] **Frontend**: Initialize React + Vite project in `ui/`.
+    - [ ] **Frontend**: Implement Dashboard (VM List, Start/Stop controls).
+    - [ ] **Backend**: Integrate `rust-embed` to bundle static assets.
+    - [ ] **Backend**: Serve UI routes from `ignited`.
+    - [ ] **Features**: VM List, Terminal, Metrics.
 - [ ] **Distribution**
     - [ ] Bundle Daemon + CLI + UI.
     - [ ] Create `.deb`, `.rpm`, and Brew tap.
