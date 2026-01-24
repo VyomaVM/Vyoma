@@ -5,6 +5,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use tower_http::cors::CorsLayer;
+use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 // use tokio_stream::StreamExt;
 use futures::stream::Stream;
@@ -40,6 +42,7 @@ struct AppState {
     cni_manager: Arc<ignite_core::cni::CniManager>,
     cluster_manager: Arc<cluster::ClusterManager>,
     rootless: bool,
+    events_tx: broadcast::Sender<String>,
 }
 
 #[derive(Debug)]
@@ -278,12 +281,15 @@ async fn main() {
         }
     }
 
+    let (events_tx, _) = broadcast::channel(100);
+
     let state = AppState {
         vms: Arc::new(StdMutex::new(HashMap::new())),
         cgroups,
         cni_manager,
         cluster_manager: Arc::new(cluster::ClusterManager::new()),
         rootless,
+        events_tx,
     };
 
     // Recovery Phase
@@ -320,11 +326,13 @@ async fn main() {
             "/networks/:name",
             axum::routing::delete(delete_network_handler),
         )
+        .route("/events", get(events_handler))
         .route("/vms/:id", get(inspect_vm_handler))
         .route("/swarm/init", post(swarm_init_handler))
         .route("/swarm/join", post(swarm_join_handler))
         .route("/swarm/nodes", get(swarm_nodes_handler))
         .fallback(ui::ui_handler)
+        .layer(CorsLayer::permissive())
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
@@ -825,6 +833,12 @@ async fn run_vm(
         vms.insert(vm_id.clone(), Arc::new(TokioMutex::new(instance)));
     }
 
+    let _ = state.events_tx.send(serde_json::json!({
+        "type": "vm_start",
+        "id": vm_id,
+        "name": payload.labels.get("ignite.service").unwrap_or(&vm_id)
+    }).to_string());
+
     Ok(Json(RunResponse {
         vm_id,
         status: "Running".to_string(),
@@ -846,6 +860,12 @@ async fn stop_vm(
     if let Some(vm_mutex) = vm_arc {
         let mut vm = vm_mutex.lock().await;
         vm.cleanup(&state.cni_manager).await;
+        
+        let _ = state.events_tx.send(serde_json::json!({
+            "type": "vm_stop",
+            "id": id
+        }).to_string());
+        
         Ok(format!("VM {} stopped and cleaned up", id))
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
@@ -1949,4 +1969,22 @@ async fn swarm_join_handler(
 
 async fn swarm_nodes_handler(State(state): State<AppState>) -> Json<Vec<cluster::NodeInfo>> {
     Json(state.cluster_manager.list_nodes())
+}
+
+async fn events_handler(
+    State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    use tokio_stream::StreamExt;
+    let rx = state.events_tx.subscribe();
+    let stream = BroadcastStream::new(rx);
+
+    Sse::new(
+        stream.map(|msg| {
+            match msg {
+                Ok(data) => Ok(Event::default().data(data)),
+                Err(_) => Ok(Event::default().comment("missed message")),
+            }
+        })
+    )
+    .keep_alive(axum::response::sse::KeepAlive::default())
 }
