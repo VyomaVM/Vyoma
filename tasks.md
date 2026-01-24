@@ -200,6 +200,13 @@
     - [x] `ign exec` (alias to `ssh`).
 
 ## Phase 19: The Cluster Edition (v0.7.0)
-- [ ] **Ignite Swarm**
-    - [ ] Node Discovery mechanism.
-    - [ ] Remote API Client.
+- [ ] **Overlay Networking (feat/overlay)**
+    - [ ] **Research**: Validate rootless compatibility with VXLAN/Flannel (ADR 017).
+    - [ ] `core`: Implement VXLAN backend logic (or integrate CNI plugin).
+    - [ ] `daemon`: Add `--cluster-cidr` flag and subnet management.
+    - [ ] `cli`: Update `network create` to support overlay driver.
+- [ ] **Ignite Swarm (feat/cluster)**
+    - [ ] **Discovery**: Implement Gossip protocol or static node list.
+    - [ ] `daemon`: Add `/cluster/join` endpoint.
+    - [ ] `cli`: Add `ign swarm init` and `ign swarm join`.
+    - [ ] **Scheduling**: Basic placement logic (random or round-robin) for `ign run --replicas`.
