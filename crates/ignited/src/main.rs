@@ -292,8 +292,11 @@ async fn main() {
         events_tx,
     };
 
-    // Recovery Phase
     initialize_state(&state).await;
+
+
+
+
 
     // Start Process Monitor (Zombie Reaper)
     start_process_monitor(state.clone()).await;
@@ -318,6 +321,8 @@ async fn main() {
         .route("/restore", post(restore_vm))
         .route("/logs/:id", get(stream_logs))
         .route("/build", post(build_image))
+        .route("/images", get(list_images_handler))
+        .route("/volumes", get(list_volumes_handler))
         .route(
             "/networks",
             get(list_networks_handler).post(create_network_handler),
@@ -1987,4 +1992,44 @@ async fn events_handler(
         })
     )
     .keep_alive(axum::response::sse::KeepAlive::default())
+}
+
+// --- Extended API Handlers for Web UI ---
+
+async fn list_images_handler() -> Json<Vec<String>> {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+    let images_root = home.join(".ignite").join("images");
+    let mut images = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(images_root) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                 if let Ok(name) = entry.file_name().into_string() {
+                     images.push(name);
+                 }
+            }
+        }
+    }
+    Json(images)
+}
+
+
+
+#[derive(Serialize)]
+struct VolumeInfo {
+    name: String,
+    path: String,
+}
+
+async fn list_volumes_handler() -> Json<Vec<VolumeInfo>> {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+    let vol_root = home.join(".ignite").join("volumes");
+    let mut vols = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(vol_root) {
+        for entry in entries.flatten() {
+             if let Ok(name) = entry.file_name().into_string() {
+                  vols.push(VolumeInfo { name: name, path: entry.path().to_string_lossy().to_string() });
+             }
+        }
+    }
+    Json(vols)
 }

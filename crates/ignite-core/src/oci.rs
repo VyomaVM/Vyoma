@@ -312,6 +312,15 @@ impl OciManager {
 fn extract_field(header: &str, key: &str) -> Option<String> {
     let key_eq = format!("{}=", key);
     header.split(',')
-        .find(|p| p.trim().starts_with(&key_eq))
-        .map(|p| p.trim().split('"').nth(1).unwrap_or("").to_string())
+        .find_map(|p| {
+            let mut part = p.trim();
+            if part.to_lowercase().starts_with("bearer ") {
+                part = &part[7..].trim();
+            }
+            if part.starts_with(&key_eq) {
+                part.split('"').nth(1).map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
 }

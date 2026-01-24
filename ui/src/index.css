@@ -1,13 +1,9 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
 }
 
 body {
-  background-color: #0d1117;
-  color: #e6edf3;
-  min-height: 100vh;
+  @apply bg-slate-950 text-slate-200 min-h-screen;
 }

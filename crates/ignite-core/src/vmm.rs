@@ -131,7 +131,7 @@ impl VmmManager {
         thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines() {
-                 if let Ok(l) = line {
+                if let Ok(l) = line {
                     let _ = tx_err.send(format!("[STDERR] {}", l));
                 }
             }
