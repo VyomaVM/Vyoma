@@ -209,13 +209,13 @@
 - [ ] **Ignite Swarm (feat/cluster)**
     - [x] `daemon`: Add `/cluster/join` endpoint and ClusterManager state.
     - [x] `cli`: Add `ign swarm init` and `ign swarm join`.
-## Phase 20: The Desktop Experience (v0.8.0)
 - [ ] **Web UI (feat/web-ui)**
+    - [ ] **API**: Implement `/events` (SSE) for real-time updates.
+    - [ ] **API**: Implement `/vms/:id/console` (WebSocket) with `xterm.js` backend.
+    - [ ] **API**: Enable CORS for development.
     - [ ] **Frontend**: Initialize React + Vite project in `ui/`.
-    - [ ] **Frontend**: Implement Dashboard (VM List, Start/Stop controls).
-    - [ ] **Backend**: Integrate `rust-embed` to bundle static assets.
-    - [ ] **Backend**: Serve UI routes from `ignited`.
-    - [ ] **Features**: VM List, Terminal, Metrics.
+    - [ ] **Frontend**: Implement Dashboard (VM List, Terminal, Metrics).
+    - [ ] **Backend**: Integrate `rust-embed` and serve UI routes.
 - [ ] **Distribution**
     - [ ] Bundle Daemon + CLI + UI.
     - [ ] Create `.deb`, `.rpm`, and Brew tap.
