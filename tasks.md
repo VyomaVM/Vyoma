@@ -209,15 +209,27 @@
 - [ ] **Ignite Swarm (feat/cluster)**
     - [x] `daemon`: Add `/cluster/join` endpoint and ClusterManager state.
     - [x] `cli`: Add `ign swarm init` and `ign swarm join`.
-    - [ ] **Scheduling**: Basic placement logic (random or round-robin) for `ign run --replicas`.
+## Phase 20: The Desktop Experience (v0.8.0)
+- [ ] **Web UI**
+    - [ ] Build React/Next.js dashboard (embedded in Daemon).
+    - [ ] Features: VM List, Terminal, Metrics.
+- [ ] **Distribution**
+    - [ ] Bundle Daemon + CLI + UI.
+    - [ ] Create `.deb`, `.rpm`, and Brew tap.
+    - [ ] Decide: Electron/Tauri wrapper vs Browser-only.
 
-## Phase 20: Ecosystem Expansion (Future)
+## Phase 21: Pre-Release Polish (v0.9.0)
+- [ ] Security Audits.
+- [ ] Performance Tuning.
+- [ ] Final Documentation.
+
+## Phase 22: The Stable Release (v1.0.0)
+- [ ] Stable Release Candidate.
+
+## Phase 23: Ecosystem Expansion (Post-v1.0)
 - [ ] **Kubernetes Integration**
     - [ ] Research CRI (Container Runtime Interface).
     - [ ] Build `ignite-shim` for containerd.
 - [ ] **AI Workloads**
-    - [ ] Validate LLM inference in MicroVM (AVX512/GPU passes).
+    - [ ] Validate LLM inference in MicroVM (AVX512/GPU pass).
     - [ ] Support MCP Server workloads.
-- [ ] **Delivery**
-    - [ ] **Web UI**: React/Next.js dashboard interacting with Daemon API.
-    - [ ] **Installers**: Create `.deb`, `.rpm`, and Brew tap.

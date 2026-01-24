@@ -8,8 +8,8 @@ Proposed
 
 ## Context
 
-As we approach the stable release (v1.0), we need to define the ecosystem's scope beyond just running MicroVMs. 
-The goal is to provide a complete "Docker Desktop" alternative while supporting advanced workloads like AI and Cluster Orchestration.
+To ensure **Ignite v1.0** is a complete "Docker Desktop Alternative" and viable for AI/Cluster workloads, we must integrate these ecosystems BEFORE the stable release.
+These features will be delivered in **v0.8 (Workloads)** and **v0.9 (Distribution)**.
 
 ## Key Strategic Pillars
 

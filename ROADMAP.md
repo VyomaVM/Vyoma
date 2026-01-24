@@ -60,21 +60,24 @@ This document outlines the development path for Ignite, tracking completed miles
 
 ---
 
+### v0.8.0: The Desktop Experience
+**Focus**: User Interface and Distribution.
+- **Web UI**: Embedded dashboard for managing VMs.
+- **Installers**: Native installers (MSI, DMG, Deb) bundling CLI+Daemon.
+
+### v0.9.0: Pre-Release Polish
+**Focus**: Stability and Security.
+
 ## v1.0.0: The Stable Release
 **Focus**: Security auditing, performance optimization, and extensive documentation.
 
 - [ ] **Seccomp Hardening**: Strict syscall filtering.
 - [ ] **Signed Images**: Cosign integration.
-- [ ] **Web UI**: A simple, local dashboard for managing VMs (Desktop Mode).
 
 ---
 
-## 🚀 Future Ecosystem (v1.x)
+## 🚀 Future Ecosystem (Post-v1.0)
 
 ### 1. Workload Expansion
 - **Kubernetes**: Implement CRI Shim (`containerd` integration) to run Pods as VMs.
 - **AI/LLMs**: Specialized support for running AI models (GPU passthrough, MCP Servers).
-
-### 2. Distribution Channels
-- **Desktop Installer**: All-in-one setup for Developers/Students (CLI + Daemon + UI).
-- **Server Package**: Minimal headless install for Production/CI.
