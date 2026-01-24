@@ -65,4 +65,16 @@ This document outlines the development path for Ignite, tracking completed miles
 
 - [ ] **Seccomp Hardening**: Strict syscall filtering.
 - [ ] **Signed Images**: Cosign integration.
-- [ ] **Web UI**: A simple dashboard for managing VMs.
+- [ ] **Web UI**: A simple, local dashboard for managing VMs (Desktop Mode).
+
+---
+
+## 🚀 Future Ecosystem (v1.x)
+
+### 1. Workload Expansion
+- **Kubernetes**: Implement CRI Shim (`containerd` integration) to run Pods as VMs.
+- **AI/LLMs**: Specialized support for running AI models (GPU passthrough, MCP Servers).
+
+### 2. Distribution Channels
+- **Desktop Installer**: All-in-one setup for Developers/Students (CLI + Daemon + UI).
+- **Server Package**: Minimal headless install for Production/CI.

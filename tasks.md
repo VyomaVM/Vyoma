@@ -209,5 +209,15 @@
 - [ ] **Ignite Swarm (feat/cluster)**
     - [x] `daemon`: Add `/cluster/join` endpoint and ClusterManager state.
     - [x] `cli`: Add `ign swarm init` and `ign swarm join`.
-    - [ ] **Discovery**: Implement Gossip protocol or static node list sync.
     - [ ] **Scheduling**: Basic placement logic (random or round-robin) for `ign run --replicas`.
+
+## Phase 20: Ecosystem Expansion (Future)
+- [ ] **Kubernetes Integration**
+    - [ ] Research CRI (Container Runtime Interface).
+    - [ ] Build `ignite-shim` for containerd.
+- [ ] **AI Workloads**
+    - [ ] Validate LLM inference in MicroVM (AVX512/GPU passes).
+    - [ ] Support MCP Server workloads.
+- [ ] **Delivery**
+    - [ ] **Web UI**: React/Next.js dashboard interacting with Daemon API.
+    - [ ] **Installers**: Create `.deb`, `.rpm`, and Brew tap.
