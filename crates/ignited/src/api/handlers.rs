@@ -1655,12 +1655,20 @@ pub async fn swarm_join_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
+#[derive(Serialize)]
+pub struct RegisterResponse {
+    pub assigned: cluster::NodeInfo,
+    pub peers: Vec<cluster::NodeInfo>,
+}
+
 pub async fn swarm_register_handler(
     State(state): State<AppState>,
     Json(node): Json<cluster::NodeInfo>,
-) -> Json<Vec<cluster::NodeInfo>> {
-    state.cluster_manager.add_node(node);
-    Json(state.cluster_manager.list_nodes())
+) -> Json<RegisterResponse> {
+    // If we are Seed (or Acting Leader), we allocate.
+    // Logic: cluster_manager.handle_registration(node)
+    let (assigned, peers) = state.cluster_manager.handle_registration(node);
+    Json(RegisterResponse { assigned, peers })
 }
 
 
