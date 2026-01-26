@@ -15,3 +15,4 @@ Cargo.lock
 # Temporary files
 tmp/
 *.log
+docs/
