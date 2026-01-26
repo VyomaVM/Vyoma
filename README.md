@@ -1,71 +1,122 @@
-# Ignite 🔥
+# Ignite 🔥: The Micro-VM Ecosystem
 
-**Ignite** is a modern, open-source micro-VM manager that brings the user experience of Docker to Firecracker micro-VMs. It allows you to spin up secure, fast, and lightweight virtual machines in milliseconds, using standard OCI (Docker) images.
+[![Release Badge](https://img.shields.io/github/v/release/Subeshrock/micro-vm-ecosystem?style=flat-square)](https://github.com/Subeshrock/micro-vm-ecosystem/releases)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/Subeshrock/micro-vm-ecosystem/release.yml?style=flat-square)](https://github.com/Subeshrock/micro-vm-ecosystem/actions)
 
-> **Status**: v0.3.0 (Released)
+**Ignite** is a production-grade Micro-VM manager. It combines the blazing speed and security of **Firecracker** with the beloved developer experience of **Docker**.
 
-## 🚀 Features
+Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images. No heavy kernels, no complex QEMU flags—just code.
 
-*   **Docker-like CLI**: `ign run`, `ign ps`, `ign stop`, `ign logs`.
-*   **OCI Image Support**: Pull directly from Docker Hub (`ign pull alpine:latest`).
-*   **Instant Clones**: Uses Device Mapper snapshots for sub-second VM delivery.
-*   **Developer Friendly**: Port mapping (`-p 8080:80`) and Volume mounts (`-v $PWD:/app`).
-*   **Teleportation**: Snapshot a running VM, export it to a file, and move it to another machine.
-*   **Time Travel**: Built-in Git integration for VM state management.
-*   **GitOps Built-in**: Define your VM builds with `Ignitefile`.
+---
 
-## 🛠️ Installation
+## 🚀 Key Features (v1.0)
 
-### Prerequisites
-*   Linux (x86_64) with KVM enabled (`/dev/kvm`).
-*   `sudo` privileges (for networking and storage management).
-*   `firecracker` (v1.6+) and `virtiofsd` binaries in your path.
+*   **Docker UX**: Familiar commands: `run`, `ps`, `logs`, `exec`.
+*   **Ignite Swarm**: Built-in clustering with **Mesh Networking** (VXLAN) and deterministic IP allocation.
+*   **Ignite Compose**: Orchestrate stacks with `ignite-compose.yml`.
+*   **Web Dashboard**: Built-in visual management UI (bundled in Daemon, accessible at `http://localhost:3000`).
+*   **Self-Contained**: `.deb` / `.rpm` packages bundle primary dependencies (Firecracker).
+*   **Persistence**: Volume mounts (`virtiofs`) and Port Mapping.
+*   **Snapshotting**: Instant VM snapshots and State Teleportation.
 
-### Build from Source
+---
+
+## � Installation
+
+### 1. Download Package
+Go to the [Releases Page](https://github.com/Subeshrock/micro-vm-ecosystem/releases) and download the latest package for your distro.
+
+### 2. Install (Debian/Ubuntu)
+The package automatically installs the Daemon (`ignited`) as a systemd service running as root, and the Client (`ign`) for users.
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/ignite.git
-cd ignite
-
-# Build release binaries
-cargo build --release
-
-# Run validation checks
-./target/release/ign doctor
+sudo dpkg -i ignite_1.0.0_amd64.deb
 ```
 
-## ⚡ Quick Start
+**What's Installed:**
+*   `/usr/bin/ignited`: The Daemon (Run via Systemd).
+*   `/usr/bin/ign`: The CLI Tool.
+*   `/usr/bin/firecracker`: Bundled VMM binary.
+*   `/etc/systemd/system/ignited.service`: Service definition.
 
-1.  **Start the Daemon**
+### 3. Verify Installation
+```bash
+ign doctor
+```
+This utility checks for KVM (`/dev/kvm`), tun/tap support, and daemon connectivity.
+
+---
+
+## ⚡ Usage Guide
+
+### Lifecycle
+*   **Run a VM**:
     ```bash
-    sudo ./target/release/ignited &
+    ign run ubuntu:latest --vcpu 2 --memory 1024 -p 8080:80
     ```
+*   **List VMs**: `ign ps`
+*   **Logs**: `ign logs -f <vm_id>`
+*   **Shell Access**: `ign exec <vm_id> /bin/bash`
+*   **Stop/Remove**: `ign stop <vm_id>`, `ign rm <vm_id>`
 
-2.  **Pull an Image**
+### Networking
+Ignite uses CNI for robust networking.
+*   **List Networks**: `ign network ls`
+*   **Create Network**: `ign network create my-net --subnet 10.10.0.0/16`
+
+### Clustering (Ignite Swarm)
+Turn multiple machines into a single mesh.
+1.  **Initialize Seed (Leader)**:
     ```bash
-    ./target/release/ign pull alpine:latest
+    ign swarm init
+    # OR specify IP: ign swarm init --advertise-addr 192.168.1.10
     ```
-
-3.  **Run a Micro-VM**
+2.  **Join Worker**:
     ```bash
-    ./target/release/ign run alpine:latest --vcpu 1 --memory 512
+    ign swarm join <SEED_IP>
     ```
+3.  **List Nodes**: `ign swarm ls`
 
-4.  **Check Status**
-    ```bash
-    ./target/release/ign ps
-    ```
+Swarm ensures unique Subnet Leases (e.g., `10.42.1.0/24` for Node 1) and routes traffic transparently over VXLAN.
 
-## 📖 Documentation
+### Orchestration (Ignite Compose)
+Define complex stacks using `ignite-compose.yml`:
+```yaml
+version: "1.0"
+services:
+  web:
+    image: nginx:alpine
+    ports: ["80:80"]
+  db:
+    image: postgres:15
+    cpus: 2
+```
+*   **Deploy**: `ign up -d`
+*   **Teardown**: `ign down`
 
-*   [Project Summary](PROJECT_SUMMARY.md): Architecture and deep dive.
-*   [Architecture Decisions (ADRs)](ADR.md): Why we made certain design choices.
-*   [Development Tasks](tasks.md): Current roadmap and progress.
+---
+
+## � Architecture & Dependencies
+
+Ignite is designed to be "Batteries Included".
+
+**Dependencies (Managed by Package):**
+*   **Firecracker**: The VMM (Virtual Machine Monitor). Bundled in `.deb`/`.rpm`.
+*   **KVM**: Kernel-based Virtual Machine. **MUST be enabled in BIOS/OS**.
+*   **Systemd**: Manages the `ignited` daemon lifecycle.
+
+**Optional Dependencies:**
+*   **Virtiofsd**: Required if using `-v` Volume Mounts. (Please install separately if needed: `sudo apt install virtiofsd` on some distros, or download binary).
+
+**Privilege Model:**
+*   **Daemon (`ignited`)**: Runs as **Root** to manage Tap devices, CNI, and Firecracker jails.
+*   **Client (`ign`)**: Runs as **User**. Communicates via HTTP (`localhost:3000`).
+
+---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please check `tasks.md` for upcoming features like CNI Networking and Rootless Mode.
+We welcome contributions! Please feel free to open issues or PRs.
 
 ## 📄 License
 
