@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "ign"
-version = "0.6.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-compose"
-version = "0.6.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "ignite-core",
@@ -1007,7 +1007,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-core"
-version = "0.6.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1026,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "ignited"
-version = "0.6.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "axum",

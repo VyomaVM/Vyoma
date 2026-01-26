@@ -16,3 +16,4 @@ Cargo.lock
 tmp/
 *.log
 docs/
+dist/
