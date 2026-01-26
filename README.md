@@ -96,21 +96,72 @@ services:
 
 ---
 
-## � Architecture & Dependencies
+## 📘 Ignitefile Reference (Build)
 
-Ignite is designed to be "Batteries Included".
+The `Ignitefile` is used to build custom images via `ign build`.
 
-**Dependencies (Managed by Package):**
-*   **Firecracker**: The VMM (Virtual Machine Monitor). Bundled in `.deb`/`.rpm`.
-*   **KVM**: Kernel-based Virtual Machine. **MUST be enabled in BIOS/OS**.
+```dockerfile
+# Start from a base image (Docker Hub or local)
+FROM alpine:3.18
+
+# Run commands to install packages or setup environment
+RUN apk add --no-cache python3 curl
+
+# Copy files from host execution context to VM
+COPY app.py /app/app.py
+COPY config.json /etc/config.json
+```
+> **Note**: `CMD`, `ENV`, and `ENTRYPOINT` are not yet supported. VMs start with `/bin/sh` init unless overridden.
+
+---
+
+## 📘 Ignite Compose Reference
+
+Use `ignite-compose.yml` to orchestrate multi-VM stacks.
+
+```yaml
+version: "1.0"
+services:
+  web:
+    image: nginx:alpine
+    ports: 
+      - "8080:80"        # Host:VM
+    volumes:
+      - "./html:/var/www" # Host:VM (Requires virtiofsd)
+    cpus: 1              # vCPU limit
+    memory: 512          # Memory limit in MiB
+    depends_on:
+      - db
+
+  db:
+    build: 
+      context: ./database
+      ignitefile: Ignitefile
+    environment:         # Environment variables (WIP)
+      POSTGRES_PASSWORD: secret
+```
+> **Note**: Custom `networks:` are not supported in v1.0. Services communicate via the default bridge using their Service Name as hostname (DNS enabled).
+
+---
+
+## 🔧 Architecture & Dependencies
+
+Ignite is designed to be "Batteries Included", but some advanced features need helpers.
+
+**Primary Dependencies (Bundled in Packet):**
+*   **Firecracker**: The VMM (Virtual Machine Monitor).
+*   **KVM**: Kernel-based Virtual Machine. **MUST be enabled in BIOS/OS** (`/dev/kvm`).
 *   **Systemd**: Manages the `ignited` daemon lifecycle.
 
-**Optional Dependencies:**
-*   **Virtiofsd**: Required if using `-v` Volume Mounts. (Please install separately if needed: `sudo apt install virtiofsd` on some distros, or download binary).
+**Optional Dependencies (Install Manually):**
+*   **Virtiofsd**: REQUIRED for Volume Mounts (`-v`).
+    *   **Ubuntu/Debian**: `sudo apt install virtiofsd`
+    *   **Fedora**: `sudo dnf install virtiofsd`
+    *   **Manual**: Download binary from [GitLab](https://gitlab.com/virtio-fs/virtiofsd/-/releases) and place in `$PATH` or `/usr/bin`.
 
 **Privilege Model:**
-*   **Daemon (`ignited`)**: Runs as **Root** to manage Tap devices, CNI, and Firecracker jails.
-*   **Client (`ign`)**: Runs as **User**. Communicates via HTTP (`localhost:3000`).
+*   **Daemon (`ignited`)**: Runs as **Root**.
+*   **Client (`ign`)**: Runs as **User**.
 
 ---
 
