@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev build-essential rpm libssl-dev protobuf-compiler
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build UI
+        run: |
+            cd ui
+            npm install
+            npm run build
+            cd ..
+
+      - name: Build Debian Package
+        run: ./scripts/build_deb.sh
+
+      - name: Build RPM Package
+        run: ./scripts/build_rpm.sh
+
+      - name: Create Release & Upload Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/*.deb
+            dist/*.rpm
+          generate_release_notes: true
+          draft: false
+          prerelease: false
