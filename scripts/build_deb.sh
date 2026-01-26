@@ -16,9 +16,24 @@ mkdir -p "${WORK_DIR}/usr/bin"
 mkdir -p "${WORK_DIR}/etc/systemd/system"
 mkdir -p "${WORK_DIR}/DEBIAN"
 
-# 3. Copy Assets
+# 3. Fetch & Copy Dependencies (Firecracker, Virtiofsd)
+echo "Fetching dependencies..."
+if [ ! -f "firecracker" ]; then
+    wget -q -O firecracker.tgz https://github.com/firecracker-microvm/firecracker/releases/download/v1.7.0/firecracker-v1.7.0-x86_64.tgz
+    tar -xzf firecracker.tgz
+    mv release-v1.7.0-x86_64/firecracker-v1.7.0-x86_64 firecracker
+    chmod +x firecracker
+fi
+
+# Virtiofsd (Assuming availability or skipping for now if complex - but v1.0 needs it for volumes)
+# For MVP packaging, we stick to firecracker. User can install plugins via 'ign doctor --fix' later?
+# A true usage needs CNI plugins too.
+# Let's bundling 'firecracker' at least.
+
+# 4. Copy Assets
 cp target/release/ignited "${WORK_DIR}/usr/bin/"
 cp target/release/ign "${WORK_DIR}/usr/bin/"
+cp firecracker "${WORK_DIR}/usr/bin/firecracker"
 cp packaging/systemd/ignited.service "${WORK_DIR}/etc/systemd/system/"
 
 # 4. Create Control File
@@ -48,5 +63,10 @@ chmod 755 "${WORK_DIR}/DEBIAN/postinst"
 # 6. Build Package
 mkdir -p dist
 dpkg-deb --build "${WORK_DIR}" "dist/${PKG_NAME}_${VERSION}_${ARCH}.deb"
+
+# 7. Cleanup
+rm -f firecracker firecracker.tgz
+rm -rf release-v1.7.0-x86_64
+rm -rf "${WORK_DIR}"
 
 echo "Package created at dist/${PKG_NAME}_${VERSION}_${ARCH}.deb"
