@@ -119,6 +119,7 @@ async fn main() {
         .route("/vms/:id", get(handlers::inspect_vm_handler))
         .route("/swarm/init", post(handlers::swarm_init_handler))
         .route("/swarm/join", post(handlers::swarm_join_handler))
+        .route("/swarm/register", post(handlers::swarm_register_handler))
         .route("/swarm/nodes", get(handlers::swarm_nodes_handler))
         .fallback(ui::ui_handler)
         .layer(CorsLayer::permissive())

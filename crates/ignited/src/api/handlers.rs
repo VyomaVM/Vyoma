@@ -1650,9 +1650,19 @@ pub async fn swarm_join_handler(
     state
         .cluster_manager
         .join(&payload.seed_ip)
+        .await
         .map(|_| format!("Joined swarm via seed {}", payload.seed_ip))
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
+
+pub async fn swarm_register_handler(
+    State(state): State<AppState>,
+    Json(node): Json<cluster::NodeInfo>,
+) -> Json<Vec<cluster::NodeInfo>> {
+    state.cluster_manager.add_node(node);
+    Json(state.cluster_manager.list_nodes())
+}
+
 
 pub async fn swarm_nodes_handler(State(state): State<AppState>) -> Json<Vec<cluster::NodeInfo>> {
     Json(state.cluster_manager.list_nodes())
