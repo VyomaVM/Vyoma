@@ -11,6 +11,8 @@ use tower_http::cors::CorsLayer;
 
 use ignite_core::cgroups::CgroupManager;
 
+use clap::Parser;
+
 mod cluster;
 mod dns;
 mod ui;
@@ -20,9 +22,16 @@ mod api;
 use state::AppState;
 use api::handlers;
 
+#[derive(Parser)]
+#[command(name = "ignited", about = "Ignite MicroVM Daemon", version)]
+struct Args {}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+
+    // Parse Args (Handles --help / --version)
+    let _args = Args::parse();
 
     // Enforce Root (Privileged Model)
     unsafe {

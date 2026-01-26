@@ -76,7 +76,7 @@ enum Commands {
         /// VM ID
         id: String,
     },
-    /// List active VMs (Not implemented yet)
+    /// List active VMs
     Ps,
     /// Create a snapshot of a VM
     Snapshot {

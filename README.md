@@ -49,6 +49,8 @@ This utility checks for KVM (`/dev/kvm`), tun/tap support, and daemon connectivi
 
 ## ⚡ Usage Guide
 
+For a complete reference of all 20+ commands, see [COMMANDS.md](COMMANDS.md).
+
 ### Lifecycle
 *   **Run a VM**:
     ```bash
