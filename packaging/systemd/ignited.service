@@ -1,0 +1,15 @@
+[Unit]
+Description=Ignite MicroVM Daemon
+Documentation=https://github.com/Subeshrock/micro-vm-ecosystem
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/ignited
+Restart=on-failure
+RestartSec=5s
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target
