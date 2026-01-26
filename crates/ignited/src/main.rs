@@ -340,8 +340,17 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
+    // Enforce Root (Privileged Model)
+    unsafe {
+        if libc::geteuid() != 0 {
+            tracing::error!("CRITICAL: Ignite Daemon must run as ROOT (Privileged Model).");
+            tracing::error!("Please run with 'sudo'. Rootless mode is experimental.");
+            std::process::exit(1);
+        }
+    }
+
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
-    info!("Daemon listening on {}", listener.local_addr().unwrap());
+    info!("Daemon listening on TCP {}", listener.local_addr().unwrap());
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(shutdown_state))
