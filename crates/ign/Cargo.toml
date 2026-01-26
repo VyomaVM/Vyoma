@@ -21,4 +21,4 @@ ignite-core = { path = "../ignite-core" }
 futures.workspace = true
 tokio-util = { version = "0.7.17", features = ["codec"] }
 colored = "3.0.0"
-ignite-compose = { version = "0.6.0", path = "../ignite-compose" }
+ignite-compose = { version = "1.0.0", path = "../ignite-compose" }

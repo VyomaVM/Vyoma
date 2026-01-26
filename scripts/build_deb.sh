@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="0.9.0" # Match Cargo.toml
+VERSION="1.0.0" # Match Cargo.toml
 ARCH="amd64"
 PKG_NAME="ignite"
 WORK_DIR="target/debian/${PKG_NAME}_${VERSION}_${ARCH}"

@@ -140,11 +140,11 @@
     - [x] Ensure CLI consistency.
 
 ## Phase 22: The Stable Release (v1.0.0)
-- [ ] **Distribution (DEB/RPM)**
-    - [ ] Create `build_deb.sh` script (using `dpkg-deb`).
-    - [ ] Create `build_rpm.sh` script (using `rpmbuild`).
-    - [ ] Bundle Daemon + CLI + UI into Packages.
-    - [ ] Ensure `systemd` unit files are included.
+- [x] **Distribution (DEB/RPM)**
+    - [x] Create `build_deb.sh` script (using `dpkg-deb`).
+    - [x] Create `build_rpm.sh` script (using `rpmbuild`).
+    - [x] Bundle Daemon + CLI + UI into Packages.
+    - [x] Ensure `systemd` unit files are included.
 - [ ] **Release Candidate**
     - [ ] Final Testing.
     - [ ] Tag `v1.0.0`.
