@@ -22,16 +22,24 @@ mod api;
 use state::AppState;
 use api::handlers;
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(name = "ignited", about = "Ignite MicroVM Daemon", version)]
-struct Args {}
+struct Args {
+    /// Port to listen on
+    #[arg(short, long, default_value = "3000")]
+    port: u16,
+
+    /// Host interface to bind to
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+}
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
     // Parse Args (Handles --help / --version)
-    let _args = Args::parse();
+    let args = Args::parse();
 
     // Enforce Root (Privileged Model)
     unsafe {
@@ -42,7 +50,7 @@ async fn main() {
         }
     }
 
-    info!("ignited (Ignite Daemon) starting up...");
+    info!("ignited (Ignite Daemon) starting up on {}:{}...", args.host, args.port);
 
     let cgroups = CgroupManager::new();
     if let Err(e) = cgroups.init() {
@@ -134,7 +142,8 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    let addr = format!("{}:{}", args.host, args.port);
+    let listener = TcpListener::bind(&addr).await.unwrap();
     info!("Daemon listening on TCP {}", listener.local_addr().unwrap());
 
     axum::serve(listener, app)
