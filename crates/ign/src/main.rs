@@ -21,6 +21,10 @@ use ignite_core::api::VolumeMount;
 #[command(name = "ign")]
 #[command(about = "Ignite: Docker for Micro-VMs", long_about = None)]
 struct Cli {
+    /// Daemon address
+    #[arg(long, global = true, default_value = "http://127.0.0.1:3000")]
+    address: String,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -115,7 +119,6 @@ enum Commands {
     /// Build a new image from an Ignitefile
     Build {
         /// Path to build context (directory containing Ignitefile)
-        #[arg(default_value = ".")]
         #[arg(default_value = ".")]
         path: String,
     },
@@ -236,7 +239,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
     let client = Client::new();
-    let daemon_url = "http://127.0.0.1:3000";
+    let daemon_url = &cli.address;
 
     match cli.command {
         Commands::Pull { image } => {
