@@ -8,24 +8,33 @@ setup_env
 
 # Start Daemon
 echo "Starting Daemon..."
-sudo -E $IGNITED_BIN > $TEST_HOME/daemon.log 2>&1 &
+sudo -E $IGNITED_BIN --port 3008 > $TEST_HOME/daemon.log 2>&1 &
 DAEMON_PID=$!
 sleep 3
-IGN="$IGN_BIN --address http://127.0.0.1:3000"
+IGN="$IGN_BIN --address http://127.0.0.1:3008"
 
 # 1. Run VM
 echo "Running VM..."
-$IGN run alpine:latest --hostname snap-vm
+# Capture ID from run output "Success! VM ID: ..."
+OUTPUT=$($IGN run alpine:latest --hostname snap-vm)
+echo "$OUTPUT"
+VM_ID=$(echo "$OUTPUT" | grep "VM ID:" | awk '{print $4}' | tr -d ',')
+
+# Fallback
+if [ -z "$VM_ID" ]; then
+    VM_ID=$($IGN ps | grep snap-vm | awk '{print $1}')
+fi
+echo "VM ID: $VM_ID"
 sleep 5
 
 # 2. Snapshot
-echo "Snapshotting..."
-$IGN snapshot snap-vm
+echo "Snapshotting $VM_ID..."
+$IGN snapshot $VM_ID
 assert_success "Snapshot Request"
 
 # 3. Export
 echo "Exporting..."
-$IGN export snap-vm $TEST_HOME/vm_export.tar.gz
+$IGN export $VM_ID $TEST_HOME/vm_export.tar.gz
 assert_success "Export"
 
 if [ ! -f "$TEST_HOME/vm_export.tar.gz" ]; then

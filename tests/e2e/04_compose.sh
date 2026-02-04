@@ -8,12 +8,12 @@ check_root
 setup_env
 
 # Start Daemon
-echo "Starting Daemon..."
-sudo -E $IGNITED_BIN > $TEST_HOME/daemon.log 2>&1 &
+echo "Starting Daemon (3004)..."
+sudo -E $IGNITED_BIN --port 3004 > $TEST_HOME/daemon.log 2>&1 &
 DAEMON_PID=$!
 sleep 3
 
-IGN="$IGN_BIN --address http://127.0.0.1:3000"
+IGN="$IGN_BIN --address http://127.0.0.1:3004"
 
 # 1. Setup Compose File
 mkdir -p $TEST_HOME/compose_test

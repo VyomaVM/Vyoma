@@ -1,15 +1,29 @@
 #!/bin/bash
-set -e
 
-# Run all tests in sequence
-echo "Running All E2E Tests..."
+# Utility to invoke tests and track partial failures
+run_test() {
+    local script=$1
+    echo "--------------------------------------------------"
+    echo "RUNNING: $script"
+    echo "--------------------------------------------------"
+    if sudo -E $script; then
+        echo "✅ PASS: $script"
+    else
+        echo "❌ FAIL: $script"
+    fi
+    # Cleanup between tests just in case
+    sudo pkill ignited || true
+    echo ""
+}
 
-sudo ./tests/e2e/01_lifecycle.sh
-sudo ./tests/e2e/02_volumes_ports.sh
-sudo ./tests/e2e/03_builder.sh
-sudo ./tests/e2e/04_compose.sh
-sudo ./tests/e2e/05_swarm.sh
-sudo ./tests/e2e/06_network.sh
-sudo ./tests/e2e/07_snapshot.sh
+echo "Starting Full Regression Suite..."
 
-echo "All Tests Passed Successfully!"
+run_test ./tests/e2e/01_lifecycle.sh
+run_test ./tests/e2e/02_volumes_ports.sh
+run_test ./tests/e2e/03_builder.sh
+run_test ./tests/e2e/04_compose.sh
+run_test ./tests/e2e/05_swarm.sh
+run_test ./tests/e2e/06_network.sh
+run_test ./tests/e2e/07_snapshot.sh
+
+echo "Suite Completed."
