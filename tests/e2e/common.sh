@@ -54,8 +54,10 @@ cleanup_env() {
         kill $pid || true
         wait $pid || true
     fi
-    # Also aggressive kill if still running
     pkill -P $$ ignited || true
+    # Cleanup DM and loops
+    sudo dmsetup remove_all || true
+    losetup -D || true
     rm -rf $TEST_HOME
 }
 
