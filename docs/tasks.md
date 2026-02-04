@@ -154,7 +154,17 @@
     - [ ] Evaluate Electron vs Tauri.
     - [ ] Build standalone desktop installer.
 
-## Phase 24: Ecosystem Expansion (Post-v1.0)
+## Phase 24: Battle Testing & Robustness (v1.1)
+- [ ] **Comprehensive Testing**
+    - [ ] Create `TESTING.md` for developer guidance.
+    - [ ] **Unit Tests**: Audit and increase coverage for core modules (`ignite-core`).
+    - [ ] **Integration Tests**: Create a script to spin up `ignited` and run full CLI flows (`ign run`, `net create`).
+    - [ ] **E2E Tests**: Validate Swarm logic (multi-node simulation).
+- [ ] **Developer Experience**
+    - [ ] Document `.env` configuration (RUST_LOG, IGNITE_HOME).
+    - [ ] Create proper `CONTRIBUTING.md`.
+
+## Phase 25: Ecosystem Expansion (Post-v1.0)
 - [ ] **Kubernetes Integration**
     - [ ] Research CRI (Container Runtime Interface).
     - [ ] Build `ignite-shim` for containerd.

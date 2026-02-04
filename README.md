@@ -167,6 +167,12 @@ Ignite is designed to be "Batteries Included", but some advanced features need h
 
 ---
 
+## 🧪 Testing & Development
+
+For developers contributing to Ignite, please refer to:
+*   [TESTING.md](TESTING.md) for running tests.
+*   [COMMANDS.md](COMMANDS.md) for full CLI reference.
+
 ## 🤝 Contributing
 
 We welcome contributions! Please feel free to open issues or PRs.

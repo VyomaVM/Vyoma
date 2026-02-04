@@ -1030,6 +1030,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "axum",
+ "clap",
  "dirs 5.0.1",
  "flate2",
  "futures",
