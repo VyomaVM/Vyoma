@@ -18,7 +18,8 @@ echo "Running VM..."
 # Capture ID from run output "Success! VM ID: ..."
 OUTPUT=$($IGN run alpine:latest --hostname snap-vm)
 echo "$OUTPUT"
-VM_ID=$(echo "$OUTPUT" | grep "VM ID:" | awk '{print $4}' | tr -d ',')
+# Robust extraction: Split by "VM ID: ", take 2nd part, then take first word.
+VM_ID=$(echo "$OUTPUT" | awk -F 'VM ID: ' '{print $2}' | awk '{print $1}' | tr -d ',')
 
 # Fallback
 if [ -z "$VM_ID" ]; then
