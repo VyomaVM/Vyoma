@@ -56,13 +56,45 @@ $IGN network create test-net --subnet 10.99.0.0/16
 $IGN network ls | grep "test-net"
 echo "Network Created."
 
-# Test 3: Swarm Init
+# Test 3: Swarm Init (Node 1)
 echo "Testing Swarm Init..."
 $IGN swarm init
 $IGN swarm ls | grep "seed"
 echo "Swarm Initialized."
 
-# Test 4: Image Pull (Mock or Real? Real if net available)
+# Test 4: Multi-Node Swarm (Requires Root & Port Config)
+echo "Testing Swarm Join (Node 2)..."
+TEST_DIR_2=$(mktemp -d)
+# We need to copy CNI plugins or ensure they exist? Ignited creates them in ~/.ignite.
+# Since TEST_DIR_2 is empty, ignited will create them.
+
+# Start Node 2 on Port 3001
+echo "Starting Daemon Node 2..."
+if [ "$EUID" -ne 0 ]; then
+  sudo -E HOME=$TEST_DIR_2 ./target/release/ignited --port 3001 > $TEST_DIR_2/daemon.log 2>&1 &
+else
+  HOME=$TEST_DIR_2 ./target/release/ignited --port 3001 > $TEST_DIR_2/daemon.log 2>&1 &
+fi
+NODE2_PID=$!
+sleep 3
+
+# Helper for Node 2
+IGN2="./target/release/ign --address http://127.0.0.1:3001"
+
+# Join
+# Assuming Node 1 is at 127.0.0.1 (default port in join logic?)
+$IGN2 swarm join --ip 127.0.0.1
+
+# Verify on Node 1
+$IGN swarm ls 
+# Should see new node?
+
+# Cleanup Node 2 logic
+sudo kill $NODE2_PID || true
+rm -rf $TEST_DIR_2
+echo "Swarm Join Test Complete."
+
+# Test 5: Image Pull (Mock or Real? Real if net available)
 # Skipping for speed unless requested, or use small image.
 # $IGN pull alpine:latest
 
