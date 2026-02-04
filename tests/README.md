@@ -19,5 +19,10 @@ sudo ./tests/e2e/01_lifecycle.sh
 ```
 
 ## Coverage
-*   01 Lifecycle: Image Pull, Run, Ps, Logs, Stop.
+*   01 Lifecycle: Image Pull, Run, Ps, Logs, Stop, Pause, Resume, Restart.
+*   02 Volumes & Ports: Mounts (-v) and Bindings (-p).
+*   03 Builder: Ignitefile build process.
+*   04 Compose: Up, Down, Scale.
 *   05 Swarm: Init, Join, Ls (Multi-node).
+*   06 Network: Create, Ls, Rm (CNI).
+*   07 Snapshot: Snapshot, Export, Import (Teleportation).

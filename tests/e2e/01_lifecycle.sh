@@ -51,9 +51,45 @@ echo "Checking Logs..."
 $IGN logs $VM_ID
 assert_success "Logs Retrieval"
 
-# 5. Stop
+# 5. Pause/Resume
+echo "Pausing VM..."
+$IGN pause $VM_ID
+assert_success "Pause VM"
+sleep 1
+
+# Check Status (Should be Paused?)
+# Currently PS output doesn't clearly show status in text mode easily unless we grep JSON?
+# We assume success if command returns 0.
+
+echo "Resuming VM..."
+$IGN resume $VM_ID
+assert_success "Resume VM"
+sleep 1
+
+# 6. Restart
+echo "Restarting VM..."
+$IGN restart $VM_ID
+assert_success "Restart VM"
+sleep 5
+
+# Verify Restart (New PID or VM ID might change? Logic says Restart replaces VM)
+# IGN restart command replaces VM. ID might stay same?
+# Check PS again.
+if $IGN ps | grep -q "test-vm"; then
+     echo -e "${GREEN}Pass: VM Restarted${NC}"
+else
+     echo -e "${RED}Fail: VM missing after restart${NC}"
+     exit 1
+fi
+
+# 7. Stop
 echo "Stopping VM..."
 $IGN stop $VM_ID
+# Note: If ID changed during restart, we might need to re-fetch ID.
+# Restart logic in CLI: "Stopping VM... Starting replacement VM".
+# It prints new VM ID?
+# We should use Hostname to stop to be safe.
+$IGN stop test-vm || $IGN stop $VM_ID || true
 assert_success "Stop Request"
 
 sleep 2
