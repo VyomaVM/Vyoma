@@ -22,6 +22,7 @@ mod dns;
 mod ui;
 mod state;
 mod api;
+mod swarm;
 
 use state::{AppState, wal::Wal, recovery::Recovery};
 use api::handlers;
