@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{debug, info};
 
@@ -59,6 +59,43 @@ pub struct ConfigDescriptor {
 #[derive(Deserialize, Debug, Clone)]
 pub struct LayerDescriptor {
     pub digest: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+pub struct OciImageConfig {
+    pub entrypoint: Option<Vec<String>>,
+    pub cmd: Option<Vec<String>>,
+    pub env: Option<Vec<String>>,
+    #[serde(rename = "WorkingDir")]
+    pub working_dir: Option<String>,
+    #[serde(rename = "ExposedPorts")]
+    pub exposed_ports: Option<HashMap<String, serde_json::Value>>,
+    pub user: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OciConfigBlob {
+    pub architecture: String,
+    pub os: String,
+    pub config: OciImageConfig,
+}
+
+impl OciImageConfig {
+    /// Produce the full command to exec: ENTRYPOINT + CMD combined
+    pub fn full_command(&self) -> Vec<String> {
+        let mut cmd = vec![];
+        if let Some(ep) = &self.entrypoint {
+            cmd.extend_from_slice(ep);
+        }
+        if let Some(c) = &self.cmd {
+            cmd.extend_from_slice(c);
+        }
+        if cmd.is_empty() {
+            cmd.push("/bin/sh".to_string());
+        }
+        cmd
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -306,6 +343,19 @@ impl OciManager {
             .map_err(|e| anyhow!("Failed to parse Manifest V2: {}", e))?;
         
         Ok(v2.layers.iter().map(|l| l.digest.clone()).collect())
+    }
+
+    pub fn parse_config_digest(&self, manifest_json: &str) -> Result<String> {
+        let v2: ManifestV2 = serde_json::from_str(manifest_json)
+            .map_err(|e| anyhow!("Failed to parse Manifest V2: {}", e))?;
+        Ok(v2.config.digest)
+    }
+
+    pub async fn pull_config_blob(&mut self, image: &str, digest: &str) -> Result<OciImageConfig> {
+        let blob = self.pull_layer(image, digest).await?;
+        let full_config: OciConfigBlob = serde_json::from_slice(&blob)
+            .map_err(|e| anyhow!("Failed to parse OCI config blob: {}", e))?;
+        Ok(full_config.config)
     }
 }
 

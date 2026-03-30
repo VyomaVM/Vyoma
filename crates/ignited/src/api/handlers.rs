@@ -238,6 +238,58 @@ pub async fn run_vm(
         format!("ign-{}", vm_id)
     };
 
+    // --- Inject OCI Config via debugfs ---
+    let config_path = base_image_file.parent().unwrap().join("ignite-config.json");
+    let mut envs = vec![];
+    let mut oci_cmd = vec!["/bin/sh".to_string()];
+    let mut workdir = "/".to_string();
+
+    if let Ok(config_str) = std::fs::read_to_string(&config_path) {
+        if let Ok(oci_config) = serde_json::from_str::<ignite_core::oci::OciImageConfig>(&config_str) {
+            oci_cmd = oci_config.full_command();
+            if let Some(e) = oci_config.env {
+                envs = e;
+            }
+            if let Some(wd) = oci_config.working_dir {
+                if !wd.is_empty() {
+                    workdir = wd;
+                }
+            }
+        }
+    }
+
+    let mut init_script = String::new();
+    init_script.push_str("#!/bin/sh\n");
+    init_script.push_str("set -e\n"); // break on errors
+    init_script.push_str("mount -t proc proc /proc || true\n");
+    init_script.push_str("mount -t sysfs sys /sys || true\n");
+    init_script.push_str("mount -t devtmpfs dev /dev || true\n");
+
+    for e in &envs {
+        init_script.push_str(&format!("export \"{}\"\n", e.replace('"', "\\\"")));
+    }
+    
+    init_script.push_str(&format!("mkdir -p {}\n", workdir));
+    init_script.push_str(&format!("cd {}\n", workdir));
+    
+    // Very basic shell quoting for execution
+    let cmd_str = oci_cmd.into_iter().map(|s| format!("\"{}\"", s.replace('"', "\\\""))).collect::<Vec<_>>().join(" ");
+    init_script.push_str(&format!("exec {}\n", cmd_str));
+
+    let temp_init_path = vm_dir.join("ignite-init.sh");
+    if let Err(e) = std::fs::write(&temp_init_path, init_script) {
+        warn!("Failed to write ignite-init.sh: {}", e);
+    } else {
+        // debugfs Injection
+        let write_debugfs = format!("cd /sbin\nrm ignite-init\nwrite {} ignite-init\nsif ignite-init mode 0755\n", temp_init_path.to_string_lossy());
+        let _ = Command::new("sudo")
+            .args(&["debugfs", "-w", "-R", &write_debugfs.replace('\n', " -R "), &dm_path])
+            .status();
+        
+        info!("Injected /sbin/ignite-init for {}. CMD: {}", vm_id, cmd_str);
+    }
+    // -------------------------------------
+
     // Network Setup
     let (vm_ip, tap_name, netns_path_final) = if state.rootless {
         // Rootless (Slirp4netns)
@@ -325,7 +377,7 @@ pub async fn run_vm(
         info!("Rootless: Skipping ProxyManager. Ports are mapped by slirp4netns.");
     }
 
-    let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0:{}:eth0:off:{} init=/bin/sh", 
+    let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0:{}:eth0:off:{} init=/sbin/ignite-init", 
         vm_ip, "172.16.0.1", vm_id, "172.16.0.1");
     // "ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>:<dns0-ip>"
     // Correct kernel format: ip=172.16.0.X::172.16.0.1:255.255.255.0:myvm:eth0:off:172.16.0.1
@@ -1109,8 +1161,11 @@ pub async fn build_image(
 
     let current_image_path = image_store_path.join("base.ext4");
 
+    let current_image_path = image_store_path.join("base.ext4");
+
     // Track if we have a base
     let mut has_base = false;
+    let mut oci_config = ignite_core::oci::OciImageConfig::default();
 
     for instr in ignite_file.instructions {
         match instr {
@@ -1266,12 +1321,32 @@ pub async fn build_image(
                     }
                 }
 
-                // Unmount
                 let _ = Command::new("sudo")
                     .args(&["umount", mount_point.path().to_str().unwrap()])
                     .status();
                 let _ = StorageManager::detach_loop_device(&loop_device);
             }
+            Instruction::Cmd(args) => {
+                info!("CMD {:?}", args);
+                oci_config.cmd = Some(args);
+            }
+            Instruction::Entrypoint(args) => {
+                info!("ENTRYPOINT {:?}", args);
+                oci_config.entrypoint = Some(args);
+            }
+            Instruction::Env { key, value } => {
+                info!("ENV {}={}", key, value);
+                let current_envs = oci_config.env.get_or_insert_with(Vec::new);
+                current_envs.push(format!("{}={}", key, value));
+            }
+        }
+    }
+
+    // Save the built configuration
+    let config_path = image_store_path.join("ignite-config.json");
+    if let Ok(json_str) = serde_json::to_string_pretty(&oci_config) {
+        if let Err(e) = std::fs::write(&config_path, json_str) {
+            warn!("Failed to write ignite-config.json: {}", e);
         }
     }
 
@@ -1307,6 +1382,20 @@ pub async fn ensure_image_locally(
         let layers = oci
             .parse_layers(&manifest_json)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        if let Ok(config_digest) = oci.parse_config_digest(&manifest_json) {
+            info!("Fetching OCI config blob: {}", config_digest);
+            if let Ok(config) = oci.pull_config_blob(image_name, &config_digest).await {
+                let config_path = image_store_path.join("ignite-config.json");
+                if let Ok(json_str) = serde_json::to_string_pretty(&config) {
+                    if let Err(e) = std::fs::write(&config_path, json_str) {
+                        warn!("Failed to write ignite-config.json: {}", e);
+                    } else {
+                        info!("Saved OCI configuration to {:?}", config_path);
+                    }
+                }
+            }
+        }
 
         let temp_unpack_dir =
             tempfile::tempdir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
