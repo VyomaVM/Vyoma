@@ -8,6 +8,12 @@ use anyhow::Result;
 pub struct IgniteCompose {
     pub version: String,
     pub services: HashMap<String, Service>,
+    
+    #[serde(default)]
+    pub networks: HashMap<String, NetworkConfig>,
+    
+    #[serde(default)]
+    pub volumes: HashMap<String, VolumeConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,30 +30,67 @@ pub struct BuildConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkConfig {
+    pub driver: Option<String>,
+    pub external: Option<bool>,
+    #[serde(default)]
+    pub ipam: IpamConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct IpamConfig {
+    #[serde(default)]
+    pub config: Vec<IpamSubnet>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpamSubnet {
+    pub subnet: Option<String>,
+    pub gateway: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VolumeConfig {
+    pub driver: Option<String>,
+    pub external: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Service {
     pub image: Option<String>,
     pub build: Option<BuildSource>,
     pub cpus: Option<u32>,
-    pub memory: Option<u32>, // MB
-    pub ports: Option<Vec<String>>, // "8080:80"
-    pub volumes: Option<Vec<String>>, // "/host:/vm"
+    pub memory: Option<u32>,
+    pub ports: Option<Vec<String>>,
+    pub volumes: Option<Vec<String>>,
     pub environment: Option<HashMap<String, String>>,
     pub command: Option<String>,
     pub depends_on: Option<Vec<String>>,
+    #[serde(default)]
+    pub networks: Vec<String>,
 }
-
-// ...
 
 impl IgniteCompose {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = fs::read_to_string(path)?;
-        let compose: IgniteCompose = serde_yaml::from_str(&content)?;
-        Ok(compose)
+        Self::from_str(&content)
     }
 
     pub fn from_str(content: &str) -> Result<Self> {
         let compose: IgniteCompose = serde_yaml::from_str(content)?;
+        
+        if !Self::is_supported_version(&compose.version) {
+            return Err(anyhow::anyhow!(
+                "Unsupported compose version: {}. Supported: 1.0, 3.x (3.0-3.9)",
+                compose.version
+            ));
+        }
+        
         Ok(compose)
+    }
+
+    fn is_supported_version(version: &str) -> bool {
+        version == "1.0" || version.starts_with("3.")
     }
 
     pub fn start_order(&self) -> Result<Vec<(String, Service)>> {
@@ -55,7 +98,6 @@ impl IgniteCompose {
         let mut visited = HashSet::new();
         let mut visiting = HashSet::new();
 
-        // Sort keys for deterministic output on independent nodes
         let mut keys: Vec<_> = self.services.keys().collect();
         keys.sort();
 
@@ -87,6 +129,30 @@ impl IgniteCompose {
         }
 
         Ok(())
+    }
+
+    pub fn get_network_names(&self) -> Vec<String> {
+        self.networks.keys().cloned().collect()
+    }
+
+    pub fn get_volume_names(&self) -> Vec<String> {
+        self.volumes.keys().cloned().collect()
+    }
+
+    pub fn is_network_external(&self, name: &str) -> bool {
+        self.networks
+            .get(name)
+            .and_then(|n| n.external.as_ref())
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub fn is_volume_external(&self, name: &str) -> bool {
+        self.volumes
+            .get(name)
+            .and_then(|v| v.external.as_ref())
+            .copied()
+            .unwrap_or(false)
     }
 }
 
@@ -120,6 +186,46 @@ services:
     }
 
     #[test]
+    fn test_parse_compose_v3() {
+        let yaml = r#"
+version: "3.8"
+services:
+  web:
+    image: nginx:latest
+    networks:
+      - frontend
+  api:
+    image: node:18
+    networks:
+      - frontend
+      - backend
+networks:
+  frontend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  backend:
+    driver: bridge
+volumes:
+  db-data:
+    driver: local
+"#;
+        let compose = IgniteCompose::from_str(yaml).unwrap();
+        assert!(compose.version.starts_with("3"));
+        assert_eq!(compose.networks.len(), 2);
+        assert!(compose.networks.contains_key("frontend"));
+        assert!(compose.networks.contains_key("backend"));
+        assert_eq!(compose.volumes.len(), 1);
+        
+        let web = compose.services.get("web").unwrap();
+        assert_eq!(web.networks, vec!["frontend"]);
+        
+        let api = compose.services.get("api").unwrap();
+        assert_eq!(api.networks, vec!["frontend", "backend"]);
+    }
+
+    #[test]
     fn test_parse_build_compose() {
         let yaml = r#"
 version: "1.0"
@@ -148,5 +254,22 @@ services:
             }
             _ => panic!("Expected BuildSource::Config"),
         }
+    }
+
+    #[test]
+    fn test_external_network() {
+        let yaml = r#"
+version: "3.8"
+services:
+  app:
+    image: nginx
+    networks:
+      - ext-network
+networks:
+  ext-network:
+    external: true
+"#;
+        let compose = IgniteCompose::from_str(yaml).unwrap();
+        assert!(compose.is_network_external("ext-network"));
     }
 }
