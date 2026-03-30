@@ -3,6 +3,8 @@ members = [
     "crates/ignited",
     "crates/ign",
     "crates/ignite-core", "crates/ignite-compose",
+    "crates/ignite-storage",
+    "crates/ignite-net",
 ]
 resolver = "2"
 
@@ -25,3 +27,5 @@ futures = "0.3"
 # We will likely need these for the Phase 2/3:
 # devicemapper = "..." 
 # rtnetlink = "..."
+sled = "0.34"
+uuid = { version = "1.0", features = ["v4"] }

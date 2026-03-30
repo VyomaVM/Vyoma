@@ -1029,7 +1029,7 @@ dependencies = [
 
 [[package]]
 name = "ign"
-version = "1.1.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1052,7 +1052,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-compose"
-version = "1.1.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "ignite-core",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-core"
-version = "1.1.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1080,8 +1080,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "ignite-net"
+version = "1.2.1"
+dependencies = [
+ "anyhow",
+ "ipnetwork",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ignite-storage"
+version = "1.2.1"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "sled",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ignited"
-version = "1.1.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1137,6 +1165,15 @@ name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
+
+[[package]]
+name = "ipnetwork"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf466541e9d546596ee94f9f69590f89473455f88372423e0008fc1a7daf100e"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "iri-string"
