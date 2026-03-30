@@ -9,6 +9,9 @@ pub enum Instruction {
     From(String),
     Run(String),
     Copy { src: String, dest: String },
+    Cmd(Vec<String>),
+    Entrypoint(Vec<String>),
+    Env { key: String, value: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +56,44 @@ impl IgniteFile {
                          src: copy_parts[0].to_string(),
                          dest: copy_parts[1].to_string(),
                      });
+                },
+                "CMD" => {
+                    if parts.len() < 2 { return Err(anyhow!("CMD requires arguments")); }
+                    let value = parts[1].trim();
+                    let args = if value.starts_with('[') && value.ends_with(']') {
+                        serde_json::from_str::<Vec<String>>(value).unwrap_or_else(|_| vec![value.to_string()])
+                    } else {
+                        vec![value.to_string()]
+                    };
+                    instructions.push(Instruction::Cmd(args));
+                },
+                "ENTRYPOINT" => {
+                    if parts.len() < 2 { return Err(anyhow!("ENTRYPOINT requires arguments")); }
+                    let value = parts[1].trim();
+                    let args = if value.starts_with('[') && value.ends_with(']') {
+                        serde_json::from_str::<Vec<String>>(value).unwrap_or_else(|_| vec![value.to_string()])
+                    } else {
+                        vec![value.to_string()]
+                    };
+                    instructions.push(Instruction::Entrypoint(args));
+                },
+                "ENV" => {
+                    if parts.len() < 2 { return Err(anyhow!("ENV requires arguments")); }
+                    let value = parts[1].trim();
+                    if let Some((k, v)) = value.split_once('=') {
+                        instructions.push(Instruction::Env {
+                            key: k.trim().to_string(),
+                            value: v.trim().to_string()
+                        });
+                    } else {
+                        let env_parts: Vec<&str> = value.split_whitespace().collect();
+                        if env_parts.len() >= 2 {
+                             instructions.push(Instruction::Env {
+                                 key: env_parts[0].to_string(),
+                                 value: env_parts[1..].join(" "),
+                             });
+                        }
+                    }
                 },
                 _ => {
                     return Err(anyhow!("Unknown instruction: {}", parts[0]));
