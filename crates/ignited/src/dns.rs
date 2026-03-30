@@ -14,6 +14,11 @@ pub async fn start_dns_server(state: AppState) {
     info!("Starting DNS Server on {}", addr);
 
     tokio::spawn(async move {
+        // Initial delay to allow bridge to be ready (ADR-029 fix for WSL2 race condition)
+        // The user reported DNS binding fails because it tries before bridge IP is ready
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        info!("DNS: Initial delay complete, attempting to bind...");
+        
         // Retry loop for binding
         let socket = loop {
             match UdpSocket::bind(&addr).await {
@@ -22,8 +27,8 @@ pub async fn start_dns_server(state: AppState) {
                     break s;
                 },
                 Err(e) => {
-                    warn!("DNS bind failed (interface might not be ready): {}. Retrying in 5s...", e);
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    warn!("DNS bind failed (interface might not be ready): {}. Retrying in 2s...", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
             }
         };
@@ -112,7 +117,7 @@ async fn handle_conn(buf: &[u8], state: &AppState) -> anyhow::Result<Vec<u8>> {
 async fn forward_query(buf: &[u8]) -> anyhow::Result<Vec<u8>> {
     // Simple forwarder to 1.1.1.1
     let upstream = "1.1.1.1:53";
-    let socket = UdpSocket::bind("0.0.0.0:0").await?; // Ephemeral
+    let socket = UdpSocket::bind("0.0.0.0:0").await?;
     
     socket.send_to(buf, upstream).await?;
     

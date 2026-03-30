@@ -64,6 +64,14 @@ EOF
 cat <<EOF > "${WORK_DIR}/DEBIAN/postinst"
 #!/bin/bash
 # Create group and user (ADR-022)
+# Add ignite to kvm group for /dev/kvm access (ADR-029)
+if getent group kvm > /dev/null 2>&1; then
+    usermod -aG kvm ignite 2>/dev/null || true
+fi
+# Fix /dev/kvm permissions if it exists
+chmod 0660 /dev/kvm 2>/dev/null || true
+chown root:kvm /dev/kvm 2>/dev/null || true
+
 if ! getent group ignite > /dev/null 2>&1; then
     groupadd --system ignite
 fi

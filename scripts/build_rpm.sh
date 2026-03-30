@@ -67,6 +67,14 @@ if ! getent group ignite > /dev/null 2>&1; then
 fi
 if ! getent passwd ignite > /dev/null 2>&1; then
     useradd -r -s /sbin/nologin -g ignite ignite
+
+# Add ignite to kvm group for /dev/kvm access (ADR-029)
+if getent group kvm > /dev/null 2>&1; then
+    usermod -aG kvm ignite 2>/dev/null || true
+fi
+# Fix /dev/kvm permissions if it exists
+chmod 0660 /dev/kvm 2>/dev/null || true
+chown root:kvm /dev/kvm 2>/dev/null || true
 fi
 
 cat <<'SUDOERS' > /etc/sudoers.d/ignite
