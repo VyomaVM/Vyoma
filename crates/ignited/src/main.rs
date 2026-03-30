@@ -2,7 +2,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, Mutex as TokioMutex};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -19,7 +19,7 @@ mod ui;
 mod state;
 mod api;
 
-use state::AppState;
+use state::{AppState, wal::Wal, recovery::Recovery};
 use api::handlers;
 
 #[derive(Parser, Debug)]
@@ -83,7 +83,32 @@ async fn main() {
         cni_config_dir,
     ));
 
-    let (events_tx, _) = broadcast::channel(100);
+    // Initialize WAL (ADR-023)
+    let state_dir = home.join(".ignite").join("state");
+    let (_db, wal) = match Wal::open_or_create(&state_dir) {
+        Ok((db, wal)) => {
+            info!("WAL initialized successfully");
+            (db, Arc::new(wal))
+        }
+        Err(e) => {
+            error!("Failed to initialize WAL: {}", e);
+            panic!("Cannot start without WAL");
+        }
+    };
+
+    // Run crash recovery
+    match Recovery::recover_on_startup(&home, &wal) {
+        Ok(recovered_vms) => {
+            for vm in &recovered_vms {
+                info!("Recovered VM: {} with status: {:?}", vm.vm_id, vm.status);
+            }
+        }
+        Err(e) => {
+            warn!("Recovery scan failed: {}", e);
+        }
+    }
+
+    let (events_tx, _rx) = broadcast::channel(100);
 
     let state = AppState {
         vms: Arc::new(StdMutex::new(HashMap::new())),
@@ -92,6 +117,7 @@ async fn main() {
         cluster_manager: Arc::new(cluster::ClusterManager::new()),
         rootless: false, // Enforced false
         events_tx,
+        wal,
     };
 
     api::handlers::initialize_state(&state).await;

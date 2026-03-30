@@ -35,7 +35,7 @@ use tokio::task::JoinHandle;
 use tokio_util::io::StreamReader;
 // use futures::StreamExt as FuturesStreamExt;
 
-use crate::state::{AppState, VmInstance, VmState};
+use crate::state::{AppState, VmInstance, VmState, wal::WalEntry};
 
 
 
@@ -78,6 +78,11 @@ pub async fn shutdown_signal(state: AppState) {
             if let Some(vm_mutex) = vm_arc {
                 let mut vm = vm_mutex.lock().await;
                 vm.cleanup(&state.cni_manager).await;
+
+                // WAL: Log VM stop
+        if let Err(e) = state.wal.append(&WalEntry::vm_stop(id.clone())) {
+            error!("Failed to write WAL entry: {}", e);
+        }
             }
         }
     }
@@ -570,6 +575,14 @@ pub async fn run_vm(
     {
         let mut vms = state.vms.lock().unwrap();
         vms.insert(vm_id.clone(), Arc::new(TokioMutex::new(instance)));
+
+    // WAL: Log VM creation and start
+    if let Err(e) = state.wal.append(&WalEntry::vm_create(vm_id.clone())) {
+        error!("Failed to write WAL entry: {}", e);
+    }
+    if let Err(e) = state.wal.append(&WalEntry::vm_start(vm_id.clone())) {
+        error!("Failed to write WAL entry: {}", e);
+    }
     }
 
     let _ = state.events_tx.send(serde_json::json!({
@@ -599,6 +612,11 @@ pub async fn stop_vm(
     if let Some(vm_mutex) = vm_arc {
         let mut vm = vm_mutex.lock().await;
         vm.cleanup(&state.cni_manager).await;
+
+        // WAL: Log VM stop
+        if let Err(e) = state.wal.append(&WalEntry::vm_stop(id.clone())) {
+            error!("Failed to write WAL entry: {}", e);
+        }
         
         let _ = state.events_tx.send(serde_json::json!({
             "type": "vm_stop",
@@ -902,6 +920,14 @@ pub async fn restore_vm(
     {
         let mut vms = state.vms.lock().unwrap();
         vms.insert(vm_id.clone(), Arc::new(TokioMutex::new(instance)));
+
+    // WAL: Log VM creation and start
+    if let Err(e) = state.wal.append(&WalEntry::vm_create(vm_id.clone())) {
+        error!("Failed to write WAL entry: {}", e);
+    }
+    if let Err(e) = state.wal.append(&WalEntry::vm_start(vm_id.clone())) {
+        error!("Failed to write WAL entry: {}", e);
+    }
     }
 
     Ok(Json(RunResponse {

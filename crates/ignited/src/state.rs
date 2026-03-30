@@ -11,6 +11,9 @@ use ignite_core::vmm::VmmManager;
 
 use crate::cluster;
 
+pub mod wal;
+pub mod recovery;
+
 #[derive(Clone)]
 pub struct AppState {
     pub vms: Arc<StdMutex<HashMap<String, Arc<TokioMutex<VmInstance>>>>>,
@@ -19,6 +22,7 @@ pub struct AppState {
     pub cluster_manager: Arc<cluster::ClusterManager>,
     pub rootless: bool,
     pub events_tx: broadcast::Sender<String>,
+    pub wal: Arc<wal::Wal>,
 }
 
 #[derive(Debug)]

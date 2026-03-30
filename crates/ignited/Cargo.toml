@@ -31,3 +31,4 @@ reqwest = { version = "0.13.1", features = ["json"] }
 clap = { version = "4.4", features = ["derive"] }
 
 
+sled = "0.34"
