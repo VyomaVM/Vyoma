@@ -18,3 +18,4 @@ ui/.gitignore
 ui/eslint.config.js
 ui/public/vite.svg
 ui/src/assets/react.svg
+openspec/

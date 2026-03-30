@@ -62,6 +62,18 @@ install -m 644 ignited.service %{buildroot}/etc/systemd/system/ignited.service
 /etc/systemd/system/ignited.service
 
 %post
+if ! getent group ignite > /dev/null 2>&1; then
+    groupadd -r ignite
+fi
+if ! getent passwd ignite > /dev/null 2>&1; then
+    useradd -r -s /sbin/nologin -g ignite ignite
+fi
+
+cat <<'SUDOERS' > /etc/sudoers.d/ignite
+ignite ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/sbin/ip, /usr/sbin/losetup, /usr/sbin/dmsetup, /usr/sbin/debugfs
+SUDOERS
+chmod 0440 /etc/sudoers.d/ignite
+
 systemctl daemon-reload
 systemctl enable ignited
 systemctl start ignited

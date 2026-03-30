@@ -63,10 +63,24 @@ EOF
 # 5. Create Post-Install Script
 cat <<EOF > "${WORK_DIR}/DEBIAN/postinst"
 #!/bin/bash
+# Create group and user (ADR-022)
+if ! getent group ignite > /dev/null 2>&1; then
+    groupadd --system ignite
+fi
+if ! getent passwd ignite > /dev/null 2>&1; then
+    useradd --system --shell /usr/sbin/nologin --gid ignite ignite
+fi
+
+# Ensure sudoers bypass for ignited commands as ignite user
+cat <<'SUDOERS' > /etc/sudoers.d/ignite
+ignite ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/bin/ip, /usr/sbin/losetup, /usr/sbin/dmsetup, /usr/bin/debugfs
+SUDOERS
+chmod 0440 /etc/sudoers.d/ignite
+
 systemctl daemon-reload
 systemctl enable ignited
 systemctl start ignited
-echo "Ignite installed! Run 'ign doctor' to verify."
+echo "Ignite installed! Run 'sudo usermod -aG ignite \$USER' to use the CLI without root."
 EOF
 chmod 755 "${WORK_DIR}/DEBIAN/postinst"
 

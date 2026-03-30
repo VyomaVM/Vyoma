@@ -41,14 +41,7 @@ async fn main() {
     // Parse Args (Handles --help / --version)
     let args = Args::parse();
 
-    // Enforce Root (Privileged Model)
-    unsafe {
-        if libc::geteuid() != 0 {
-            error!("CRITICAL: Ignite Daemon must run as ROOT (Privileged Model).");
-            error!("Please run with 'sudo'.");
-            std::process::exit(1);
-        }
-    }
+    // Root requirement stripped in favor of AmbientCapabilities (ADR-022)
 
     info!("ignited (Ignite Daemon) starting up on {}:{}...", args.host, args.port);
 
