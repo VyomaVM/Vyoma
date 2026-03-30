@@ -3,11 +3,15 @@ use axum::{
     Router,
 };
 use tracing::{info, error, warn};
-use tokio::net::TcpListener;
+use tokio::net::UnixListener;
 use tokio::sync::{broadcast, Mutex as TokioMutex};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::collections::HashMap;
+use std::os::unix::fs::PermissionsExt;
 use tower_http::cors::CorsLayer;
+use tower_service::Service;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto;
 
 use ignite_core::cgroups::CgroupManager;
 
@@ -25,13 +29,9 @@ use api::handlers;
 #[derive(Parser, Debug)]
 #[command(name = "ignited", about = "Ignite MicroVM Daemon", version)]
 struct Args {
-    /// Port to listen on
-    #[arg(short, long, default_value = "3000")]
-    port: u16,
-
-    /// Host interface to bind to
-    #[arg(long, default_value = "127.0.0.1")]
-    host: String,
+    /// Path to listen on (Unix Socket)
+    #[arg(short, long, default_value = "/var/run/ignite/ignite.sock")]
+    socket_path: String,
 }
 
 #[tokio::main]
@@ -43,7 +43,7 @@ async fn main() {
 
     // Root requirement stripped in favor of AmbientCapabilities (ADR-022)
 
-    info!("ignited (Ignite Daemon) starting up on {}:{}...", args.host, args.port);
+    info!("ignited (Ignite Daemon) starting up (Unix Socket: {})...", args.socket_path);
 
     let cgroups = CgroupManager::new();
     if let Err(e) = cgroups.init() {
@@ -161,12 +161,60 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let addr = format!("{}:{}", args.host, args.port);
-    let listener = TcpListener::bind(&addr).await.unwrap();
-    info!("Daemon listening on TCP {}", listener.local_addr().unwrap());
+    let socket_path = args.socket_path;
+    let path = std::path::Path::new(&socket_path);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::remove_file(&socket_path);
+    let listener = UnixListener::bind(&socket_path).unwrap();
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(handlers::shutdown_signal(shutdown_state))
-        .await
-        .unwrap();
+    let permissions = std::fs::Permissions::from_mode(0o660);
+    if let Err(e) = std::fs::set_permissions(&socket_path, permissions) {
+        warn!("Could not set 0660 permissions on socket: {}. You may need root.", e);
+    }
+    
+    // Attempt to set ownership to root:ignite if possible
+    let _ = std::process::Command::new("chgrp")
+        .arg("ignite")
+        .arg(&socket_path)
+        .output();
+        
+    info!("Daemon listening on Unix Socket {}", socket_path);
+
+    let shutdown_rx = handlers::shutdown_signal(shutdown_state);
+    let mut shutdown_flag = Box::pin(shutdown_rx);
+
+    loop {
+        tokio::select! {
+            result = listener.accept() => {
+                match result {
+                    Ok((stream, _)) => {
+                        let io = TokioIo::new(stream);
+                        let tower_service = app.clone();
+                        
+                        tokio::spawn(async move {
+                            let hyper_service = hyper::service::service_fn(move |request: axum::extract::Request<hyper::body::Incoming>| {
+                                tower_service.clone().call(request)
+                            });
+
+                            if let Err(err) = auto::Builder::new(TokioExecutor::new())
+                                .serve_connection(io, hyper_service)
+                                .await
+                            {
+                                error!("Error parsing connection: {:?}", err);
+                            }
+                        });
+                    }
+                    Err(e) => error!("Failed to accept connection: {}", e),
+                }
+            }
+            _ = &mut shutdown_flag => {
+                info!("Daemon shutting down gracefully...");
+                break;
+            }
+        }
+    }
+    
+    let _ = std::fs::remove_file(&socket_path);
 }
