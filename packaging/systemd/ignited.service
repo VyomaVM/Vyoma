@@ -5,7 +5,14 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User=ignite
+Group=ignite
+# Ensure /var/run/ignite exists and is owned by ignite:ignite
+RuntimeDirectory=ignite
+RuntimeDirectoryMode=0775
+# Minimal capabilities needed for KVM, Network Namespaces, Loop Mounts
+AmbientCapabilities=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE
 ExecStart=/usr/bin/ignited
 Restart=on-failure
 RestartSec=5s
