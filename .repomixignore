@@ -1,0 +1,20 @@
+# Add patterns to ignore here, one per line
+# Example:
+# *.log
+# tmp/
+README.md
+COMMANDS.md
+CHANGELOG.md
+LICENSE
+cleanup_resources.sh
+mock_cni.sh
+validate_rc.sh
+bin/
+.gitignore
+.repomixignore
+Cargo.toml
+repomix.config.json
+ui/.gitignore
+ui/eslint.config.js
+ui/public/vite.svg
+ui/src/assets/react.svg
