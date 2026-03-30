@@ -27,14 +27,16 @@ impl VirtioFsManager {
             std::fs::remove_file(&self.socket_path)?;
         }
 
-        // Try to find virtiofsd in bin/ or PATH
-        // We assume it's "virtiofsd" in PATH or "bin/virtiofsd" relative to CWD
-        let binary = if Path::new("bin/virtiofsd").exists() {
+        // Try to find virtiofsd in priority order (ADR 021)
+        let binary = if Path::new("/opt/ignite/bin/virtiofsd").exists() {
+            "/opt/ignite/bin/virtiofsd"
+        } else if Path::new("/usr/libexec/ignite/virtiofsd").exists() {
+            "/usr/libexec/ignite/virtiofsd"
+        } else if Path::new("bin/virtiofsd").exists() {
             "bin/virtiofsd"
         } else {
             "virtiofsd"
         };
-        
         let child = Command::new(binary)
             .arg(format!("--socket-path={}", self.socket_path))
             .arg(format!("--shared-dir={}", source_path))
