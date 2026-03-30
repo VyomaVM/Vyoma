@@ -17,8 +17,16 @@ if [ ! -f "firecracker" ]; then
     chmod +x firecracker
 fi
 
+if [ ! -f "virtiofsd_bin" ]; then
+    echo "Fetching virtiofsd..."
+    wget -q -O virtiofsd.zip "https://gitlab.com/virtio-fs/virtiofsd/-/releases/v1.11.1/downloads/virtiofsd-v1.11.1-x86_64-musl.zip"
+    unzip -q virtiofsd.zip
+    mv virtiofsd virtiofsd_bin
+    chmod +x virtiofsd_bin
+fi
+
 # 3. Create Source Tarball
-tar -czf "${WORK_DIR}/SOURCES/ignite-${VERSION}.tar.gz" -C target/release ign ignited -C ../../packaging/systemd ignited.service -C ../../ firecracker
+tar -czf "${WORK_DIR}/SOURCES/ignite-${VERSION}.tar.gz" -C target/release ign ignited -C ../../packaging/systemd ignited.service -C ../../ firecracker virtiofsd_bin
 
 # 4. Create SPEC File
 cat <<EOF > "${WORK_DIR}/SPECS/ignite.spec"
@@ -38,16 +46,19 @@ Docker-like experience for Firecracker MicroVMs.
 
 %install
 mkdir -p %{buildroot}/usr/bin
+mkdir -p %{buildroot}/usr/libexec/ignite
 mkdir -p %{buildroot}/etc/systemd/system
 install -m 755 ignited %{buildroot}/usr/bin/ignited
 install -m 755 ign %{buildroot}/usr/bin/ign
 install -m 755 firecracker %{buildroot}/usr/bin/firecracker
+install -m 755 virtiofsd_bin %{buildroot}/usr/libexec/ignite/virtiofsd
 install -m 644 ignited.service %{buildroot}/etc/systemd/system/ignited.service
 
 %files
 /usr/bin/ignited
 /usr/bin/ign
 /usr/bin/firecracker
+/usr/libexec/ignite/virtiofsd
 /etc/systemd/system/ignited.service
 
 %post
@@ -68,7 +79,7 @@ mkdir -p dist
 mv ${WORK_DIR}/RPMS/x86_64/*.rpm dist/
 
 # 7. Cleanup
-rm -f firecracker firecracker.tgz
+rm -f firecracker firecracker.tgz virtiofsd.zip virtiofsd_bin
 rm -rf release-v1.7.0-x86_64
 rm -rf "${WORK_DIR}"
 

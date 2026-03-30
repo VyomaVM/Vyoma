@@ -1057,23 +1057,28 @@ fn check_cgroups() -> Result<bool> {
 }
 
 fn check_binary(name: &str) -> Result<bool> {
-    // Check PATH or .ignite/bin??
-    // Currently daemon assumes local relative path 'bin/firecracker',
-    // but users might run 'ign' from anywhere.
-    // Ideally 'ignited' should find them.
-    // 'ign doctor' runs as user.
-    // Let's check `which <name>` first.
+    use std::path::Path;
+
+    // Check standard packaging paths (ADR 021)
+    if Path::new(&format!("/opt/ignite/bin/{}", name)).exists() {
+        return Ok(true);
+    }
+    if Path::new(&format!("/usr/libexec/ignite/{}", name)).exists() {
+        return Ok(true);
+    }
+
+    // Check local development path
+    if Path::new(&format!("bin/{}", name)).exists() {
+        return Ok(true);
+    }
+
+    // Check system PATH
     let status = std::process::Command::new("which")
         .arg(name)
         .output()?
         .status;
-    if status.success() {
-        return Ok(true);
-    }
-
-    // Check local bin?
-    // We haven't defined a global install path yet.
-    Ok(false)
+    
+    Ok(status.success())
 }
 
 fn check_bridge() -> Result<bool> {

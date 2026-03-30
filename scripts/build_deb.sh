@@ -25,15 +25,25 @@ if [ ! -f "firecracker" ]; then
     chmod +x firecracker
 fi
 
+if [ ! -f "virtiofsd" ]; then
+    echo "Fetching virtiofsd..."
+    wget -q -O virtiofsd.zip "https://gitlab.com/virtio-fs/virtiofsd/-/releases/v1.11.1/downloads/virtiofsd-v1.11.1-x86_64-musl.zip"
+    unzip -q virtiofsd.zip
+    mv virtiofsd virtiofsd_bin
+    chmod +x virtiofsd_bin
+fi
+
 # Virtiofsd (Assuming availability or skipping for now if complex - but v1.0 needs it for volumes)
 # For MVP packaging, we stick to firecracker. User can install plugins via 'ign doctor --fix' later?
 # A true usage needs CNI plugins too.
 # Let's bundling 'firecracker' at least.
 
 # 4. Copy Assets
+mkdir -p "${WORK_DIR}/usr/libexec/ignite"
 cp target/release/ignited "${WORK_DIR}/usr/bin/"
 cp target/release/ign "${WORK_DIR}/usr/bin/"
 cp firecracker "${WORK_DIR}/usr/bin/firecracker"
+cp virtiofsd_bin "${WORK_DIR}/usr/libexec/ignite/virtiofsd"
 cp packaging/systemd/ignited.service "${WORK_DIR}/etc/systemd/system/"
 
 # 4. Create Control File
@@ -65,7 +75,7 @@ mkdir -p dist
 dpkg-deb --build "${WORK_DIR}" "dist/${PKG_NAME}_${VERSION}_${ARCH}.deb"
 
 # 7. Cleanup
-rm -f firecracker firecracker.tgz
+rm -f firecracker firecracker.tgz virtiofsd.zip virtiofsd_bin
 rm -rf release-v1.7.0-x86_64
 rm -rf "${WORK_DIR}"
 
