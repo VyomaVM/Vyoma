@@ -28,7 +28,6 @@ pub struct AppState {
 #[derive(Debug)]
 pub struct VmInstance {
     pub vmm: VmmManager,
-    // Resources to clean up
     pub id: String,
     pub tap_name: String,
     pub dm_name: String,
@@ -43,13 +42,11 @@ pub struct VmInstance {
     pub cgroup_path: Option<String>,
     pub netns_path: Option<String>,
 
-    // Metadata for Recovery
     pub config_ports: Vec<PortMapping>,
     pub config_volumes: Vec<VolumeMount>,
     pub hostname: Option<String>,
     pub labels: HashMap<String, String>,
 
-    // For restart
     pub base_image_path: String,
     pub vcpu: u32,
     pub mem_size_mib: u32,
@@ -166,6 +163,13 @@ impl VmInstance {
             let cm = CgroupManager::new();
             if let Err(e) = cm.remove_vm_cgroup(&self.id) {
                 error!("Failed to remove cgroup for {}: {}", self.id, e);
+            }
+        }
+
+        // 8. Kill VirtioFs Managers (ADR-025)
+        for fs_mgr in &mut self.fs_managers {
+            if let Err(e) = fs_mgr.kill() {
+                error!("Failed to kill virtiofsd: {}", e);
             }
         }
     }
