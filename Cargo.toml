@@ -5,6 +5,7 @@ members = [
     "crates/ignite-core", "crates/ignite-compose",
     "crates/ignite-storage",
     "crates/ignite-net",
+    "crates/ignite-teleport",
 ]
 resolver = "2"
 
