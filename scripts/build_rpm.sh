@@ -17,20 +17,20 @@ if [ ! -f "firecracker" ]; then
     chmod +x firecracker
 fi
 
+# virtiofsd is optional
 if [ ! -f "virtiofsd_bin" ]; then
-    echo "Fetching virtiofsd..."
-    wget -q -O virtiofsd.zip "https://gitlab.com/virtio-fs/virtiofsd/-/releases/v1.11.1/downloads/virtiofsd-v1.11.1-x86_64-musl.zip"
-    unzip -q virtiofsd.zip
-    mv virtiofsd virtiofsd_bin
-    chmod +x virtiofsd_bin
+    echo "Skipping virtiofsd (optional dependency)"
 fi
 
-# 3. Create Source Tarball
-tar -czf "${WORK_DIR}/SOURCES/ignite-${VERSION}.tar.gz" -C target/release ign ignited -C ../../packaging/systemd ignited.service -C ../../ firecracker virtiofsd_bin
+# 3. Create Source Tarball - only include files that exist
+TAR_SOURCES="-C target/release ign ignited -C ../../packaging/systemd ignited.service -C ../../ firecracker"
+if [ -f "virtiofsd_bin" ]; then
+    TAR_SOURCES="$TAR_SOURCES virtiofsd_bin"
+fi
+tar -czf "${WORK_DIR}/SOURCES/ignite-${VERSION}.tar.gz" $TAR_SOURCES
 
-# 4. Create SPEC File
-cat <<EOF > "${WORK_DIR}/SPECS/ignite.spec"
-Name:       ignite
+# 4. Create SPEC File - start with base content
+SPEC_CONTENT="Name:       ignite
 Version:    ${VERSION}
 Release:    1%{?dist}
 Summary:    MicroVM Ecosystem
@@ -51,45 +51,53 @@ mkdir -p %{buildroot}/etc/systemd/system
 install -m 755 ignited %{buildroot}/usr/bin/ignited
 install -m 755 ign %{buildroot}/usr/bin/ign
 install -m 755 firecracker %{buildroot}/usr/bin/firecracker
-install -m 755 virtiofsd_bin %{buildroot}/usr/libexec/ignite/virtiofsd
-install -m 644 ignited.service %{buildroot}/etc/systemd/system/ignited.service
+install -m 644 ignited.service %{buildroot}/etc/systemd/system/ignited.service"
+
+# Add virtiofsd install if it exists
+if [ -f "virtiofsd_bin" ]; then
+    SPEC_CONTENT="$SPEC_CONTENT
+install -m 755 virtiofsd_bin %{buildroot}/usr/libexec/ignite/virtiofsd"
+fi
+
+SPEC_CONTENT="$SPEC_CONTENT
 
 %files
 /usr/bin/ignited
 /usr/bin/ign
 /usr/bin/firecracker
-/usr/libexec/ignite/virtiofsd
-/etc/systemd/system/ignited.service
+/etc/systemd/system/ignited.service"
+
+# Add virtiofsd to files if it exists
+if [ -f "virtiofsd_bin" ]; then
+    SPEC_CONTENT="$SPEC_CONTENT
+/usr/libexec/ignite/virtiofsd"
+fi
+
+# Add postinstall section
+SPEC_CONTENT="$SPEC_CONTENT
 
 %post
-if ! getent group ignite > /dev/null 2>&1; then
+if ! getent group ignite > /dev/null 2\&1; then
     groupadd -r ignite
 fi
-if ! getent passwd ignite > /dev/null 2>&1; then
+if ! getent passwd ignite > /dev/null 2\&1; then
     useradd -r -s /sbin/nologin -g ignite ignite
-
-# Add ignite to kvm group for /dev/kvm access (ADR-029)
-if getent group kvm > /dev/null 2>&1; then
-    usermod -aG kvm ignite 2>/dev/null || true
+    if getent group kvm > /dev/null 2\&1; then
+        usermod -aG kvm ignite 2>/dev/null || true
+    fi
+    chmod 0660 /dev/kvm 2>/dev/null || true
+    chown root:kvm /dev/kvm 2>/dev/null || true
 fi
-# Fix /dev/kvm permissions if it exists
-chmod 0660 /dev/kvm 2>/dev/null || true
-chown root:kvm /dev/kvm 2>/dev/null || true
-fi
-
-cat <<'SUDOERS' > /etc/sudoers.d/ignite
-ignite ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/sbin/ip, /usr/sbin/losetup, /usr/sbin/dmsetup, /usr/sbin/debugfs
-SUDOERS
-chmod 0440 /etc/sudoers.d/ignite
-
 systemctl daemon-reload
 systemctl enable ignited
 systemctl start ignited
 
 %changelog
-* Mon Jan 26 2026 Subeshrock <subesh.rock.3@gmail.com> - 1.0.0-1
-- Initial release
-EOF
+* Tue Mar 31 2026 Subeshrock <subesh.rock.3@gmail.com> - 2.1.0-1
+- Release v2.1.0
+"
+
+echo "$SPEC_CONTENT" > "${WORK_DIR}/SPECS/ignite.spec"
 
 # 5. Build RPM
 rpmbuild --define "_topdir $(pwd)/${WORK_DIR}" -bb "${WORK_DIR}/SPECS/ignite.spec"
@@ -99,7 +107,7 @@ mkdir -p dist
 mv ${WORK_DIR}/RPMS/x86_64/*.rpm dist/
 
 # 7. Cleanup
-rm -f firecracker firecracker.tgz virtiofsd.zip virtiofsd_bin
+rm -f firecracker firecracker.tgz virtiofsd_bin
 rm -rf release-v1.7.0-x86_64
 rm -rf "${WORK_DIR}"
 
