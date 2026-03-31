@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package ignite.v1;
+
+option go_package = "ignite/v1;ignitev1";
+
+service VmService {
+    rpc CreateVm (CreateVmRequest) returns (CreateVmResponse);
+    rpc StartVm (VmIdRequest) returns (VmStatusResponse);
+    rpc StopVm (VmIdRequest) returns (VmStatusResponse);
+    rpc DeleteVm (VmIdRequest) returns (google.protobuf.Empty);
+    rpc ListVms (ListVmsRequest) returns (ListVmsResponse);
+    rpc GetVm (VmIdRequest) returns (VmInfo);
+    rpc ExecCommand (ExecRequest) returns (stream ExecOutput);
+    rpc StreamLogs (LogRequest) returns (stream LogLine);
+    rpc CreateSnapshot (SnapshotRequest) returns (SnapshotInfo);
+    rpc RestoreSnapshot (RestoreRequest) returns (VmInfo);
+    rpc MigrateVm (MigrateRequest) returns (stream MigrationProgress);
+}
+
+message CreateVmRequest {
+    string image = 1;
+    uint32 vcpus = 2;
+    uint64 memory_mb = 3;
+    string name = 4;
+    repeated PortMapping ports = 5;
+    repeated VolumeMapping volumes = 6;
+}
+
+message CreateVmResponse {
+    string vm_id = 1;
+}
+
+message VmIdRequest {
+    string vm_id = 1;
+}
+
+message VmStatusResponse {
+    string vm_id = 1;
+    string status = 2;
+}
+
+message ListVmsRequest {}
+
+message ListVmsResponse {
+    repeated VmInfo vms = 1;
+}
+
+message VmInfo {
+    string id = 1;
+    string image = 2;
+    string status = 3;
+    string ip = 4;
+    uint32 vcpus = 5;
+    uint64 memory_mb = 6;
+    repeated PortMapping ports = 7;
+    int64 created_at = 8;
+}
+
+message PortMapping {
+    uint32 host = 1;
+    uint32 vm = 2;
+}
+
+message VolumeMapping {
+    string host_path = 1;
+    string vm_path = 2;
+}
+
+message ExecRequest {
+    string vm_id = 1;
+    repeated string command = 2;
+}
+
+message ExecOutput {
+    bytes stdout = 1;
+    bytes stderr = 2;
+    int32 exit_code = 3;
+}
+
+message LogRequest {
+    string vm_id = 1;
+    bool follow = 2;
+    int32 tail = 3;
+}
+
+message LogLine {
+    string line = 1;
+    int64 timestamp = 2;
+}
+
+message SnapshotRequest {
+    string vm_id = 1;
+    string name = 2;
+}
+
+message SnapshotInfo {
+    string snapshot_id = 1;
+    string name = 2;
+    int64 created_at = 3;
+    uint64 size_bytes = 4;
+}
+
+message RestoreRequest {
+    string vm_id = 1;
+    string snapshot_id = 2;
+}
+
+message MigrateRequest {
+    string vm_id = 1;
+    string dest_address = 2;
+    uint32 bandwidth_mbps = 3;
+}
+
+message MigrationProgress {
+    uint32 round = 1;
+    uint64 pages_transferred = 2;
+    uint64 total_pages = 3;
+    uint64 bytes_transferred = 4;
+    bool completed = 5;
+    string error = 6;
+}
+
+message google.protobuf.Empty {}
