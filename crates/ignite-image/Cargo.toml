@@ -1,0 +1,21 @@
+[package]
+name = "ignite-image"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+hex = "0.4"
+thiserror = "1.0"
+toml = "0.8"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile.workspace = true
