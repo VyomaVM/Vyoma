@@ -24,6 +24,8 @@ mod state;
 mod api;
 mod swarm;
 mod metrics;
+mod timemachine;
+mod auto_snapshot;
 
 use state::{AppState, wal::Wal, recovery::Recovery};
 use api::handlers;

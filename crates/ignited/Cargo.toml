@@ -36,3 +36,4 @@ hyper-util = { version = "0.1.20", features = ["server-auto", "tokio"] }
 hyper = "1.8.1"
 tower-service = "0.3.3"
 prometheus.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
