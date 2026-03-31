@@ -23,6 +23,7 @@ mod ui;
 mod state;
 mod api;
 mod swarm;
+mod metrics;
 
 use state::{AppState, wal::Wal, recovery::Recovery};
 use api::handlers;
