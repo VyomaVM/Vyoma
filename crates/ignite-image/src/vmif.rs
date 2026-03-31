@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VmifManifest {
     pub schema_version: u32,
     pub created: String,
@@ -15,7 +15,7 @@ pub struct VmifManifest {
     pub size_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OciImageConfig {
     pub entrypoint: Option<Vec<String>>,
     pub cmd: Option<Vec<String>>,
