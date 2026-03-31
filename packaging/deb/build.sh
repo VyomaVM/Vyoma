@@ -3,11 +3,12 @@
 
 set -e
 
-PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
 PACKAGE_DIR="$BUILD_DIR/ignite_2.0.0_amd64"
 
 echo "Building Ignite Debian package..."
+echo "Project root: $PROJECT_ROOT"
 
 # Clean previous build
 rm -rf "$BUILD_DIR"
@@ -18,11 +19,15 @@ echo "Building Rust binaries..."
 cd "$PROJECT_ROOT"
 cargo build --release
 
-# Build UI
+# Build UI (optional - requires Node.js)
 echo "Building UI..."
-cd "$PROJECT_ROOT/ui"
-npm install 2>/dev/null || true
-npm run build 2>/dev/null || true
+if command -v npm &> /dev/null; then
+    cd "$PROJECT_ROOT/ui"
+    npm install
+    npm run build
+else
+    echo "Skipping UI build (npm not found)"
+fi
 
 # Create package structure
 echo "Creating package structure..."
@@ -66,6 +71,10 @@ Categories=System;Virtualization;
 Keywords=microvm;virtualization;docker;
 EOF
 
+# Copy systemd service
+mkdir -p "$PACKAGE_DIR/lib/systemd/system"
+cp "$PROJECT_ROOT/packaging/systemd/ignited.service" "$PACKAGE_DIR/lib/systemd/system/"
+
 # Create postinst script
 cat > "$PACKAGE_DIR/DEBIAN/postinst" << 'EOF'
 #!/bin/bash
@@ -81,8 +90,15 @@ id ignite >/dev/null 2>&1 || useradd -r -s /sbin/nologin -d /var/lib/ignite igni
 mkdir -p /var/lib/ignite
 chown ignite:ignite /var/lib/ignite 2>/dev/null || true
 
+# Enable and start systemd service automatically
+if command -v systemctl &> /dev/null; then
+    systemctl daemon-reload
+    systemctl enable ignited.service 2>/dev/null || true
+    systemctl start ignited.service 2>/dev/null || true
+    echo "Ignite daemon auto-started"
+fi
+
 echo "Ignite installed successfully!"
-echo "Run 'ignited' to start the daemon"
 echo "Open http://localhost:3000 for the dashboard"
 EOF
 chmod +x "$PACKAGE_DIR/DEBIAN/postinst"

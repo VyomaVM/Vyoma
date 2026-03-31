@@ -17,6 +17,31 @@ use ignite_compose::IgniteCompose;
 use ignite_core::api::PortMapping;
 use ignite_core::api::VolumeMount;
 
+/// Resolve socket path with fallback to user-writable location
+fn resolve_socket_path(default_path: &str) -> String {
+    // Try default path first
+    if Path::new(default_path).exists() {
+        return default_path.to_string();
+    }
+    
+    // Fallback to user-specific runtime directory
+    if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
+        let user_socket = format!("{}/ignite.sock", xdg);
+        if Path::new(&user_socket).exists() {
+            return user_socket;
+        }
+    }
+    
+    // Fallback to /tmp (for development)
+    let tmp_socket = format!("{}/ignite.sock", std::env::temp_dir().display());
+    if Path::new(&tmp_socket).exists() {
+        return tmp_socket;
+    }
+    
+    // Return default path anyway - let it fail with clear error
+    default_path.to_string()
+}
+
 #[derive(Parser)]
 #[command(name = "ign")]
 #[command(about = "Ignite: Docker for Micro-VMs", long_about = None)]
@@ -238,9 +263,16 @@ struct RunResponse {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
+    
+    // Resolve socket path with fallback to user-writable location
+    let socket_path = resolve_socket_path(&cli.socket_path);
+    
+    // Connect via Unix Socket
     let client = Client::builder()
-        .unix_socket(&cli.socket_path)
+        .unix_socket(socket_path.as_str())
         .build()?;
+    
+    // Daemon URL for HTTP requests (goes through Unix Socket proxy)
     let daemon_url = "http://localhost";
 
     match cli.command {

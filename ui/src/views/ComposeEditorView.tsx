@@ -24,7 +24,7 @@ const defaultYaml = `services:
 `;
 
 export function ComposeEditorView() {
-  const [yamlContent, setYamlContent] = useState(defaultYaml);
+  const [yamlContent, _setYamlContent] = useState(defaultYaml);
   const [errors, setErrors] = useState<string[]>([]);
   const [deployStatus, setDeployStatus] = useState('');
 

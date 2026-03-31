@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Clock, Play, Trash2, Plus } from 'lucide-react';
 import { useVmList, useSnapshots } from '../hooks/useApi';
-import { Card, Button, EmptyState, Loading } from '../components/ui';
+import { Button, EmptyState, Loading } from '../components/ui';
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:3000' : '';
 

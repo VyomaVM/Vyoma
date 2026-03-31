@@ -3,6 +3,10 @@
 **/*.rs.bk
 Cargo.lock
 
+# Build outputs
+build/
+dist/
+
 # IDEs
 .vscode/
 .idea/
@@ -16,4 +20,7 @@ Cargo.lock
 tmp/
 *.log
 docs/
-dist/
+
+# Node.js
+ui/node_modules/
+ui/dist/

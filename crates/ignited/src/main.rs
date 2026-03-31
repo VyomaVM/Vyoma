@@ -37,6 +37,9 @@ struct Args {
     /// Path to listen on (Unix Socket)
     #[arg(short, long, default_value = "/var/run/ignite/ignite.sock")]
     socket_path: String,
+    /// HTTP port for dashboard (default: 3000, use 0 to disable)
+    #[arg(short = 'p', long, default_value_t = 3000)]
+    http_port: u16,
 }
 
 #[tokio::main]
@@ -186,6 +189,33 @@ async fn main() {
         .output();
         
     info!("Daemon listening on Unix Socket {}", socket_path);
+
+    // Start HTTP server for dashboard if port is not 0
+    if args.http_port > 0 {
+        let http_app = app.clone();
+        tokio::spawn(async move {
+            let addr = format!("0.0.0.0:{}", args.http_port);
+            info!("Dashboard available at http://localhost:{}", args.http_port);
+            let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+            loop {
+                match listener.accept().await {
+                    Ok((stream, _)) => {
+                        let io = TokioIo::new(stream);
+                        let tower_service = http_app.clone();
+                        tokio::spawn(async move {
+                            let hyper_service = hyper::service::service_fn(move |request| {
+                                tower_service.clone().call(request)
+                            });
+                            let _ = auto::Builder::new(TokioExecutor::new())
+                                .serve_connection(io, hyper_service)
+                                .await;
+                        });
+                    }
+                    Err(e) => error!("HTTP accept error: {}", e),
+                }
+            }
+        });
+    }
 
     let shutdown_rx = handlers::shutdown_signal(shutdown_state);
     let mut shutdown_flag = Box::pin(shutdown_rx);

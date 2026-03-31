@@ -7,11 +7,12 @@ export function useApi<T>(endpoint: string, options?: { autoFetch?: boolean }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetch = async () => {
+  const doFetch = async () => {
+    if (!API_BASE) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`);
+      const res = await globalThis.fetch(`${API_BASE}${endpoint}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setData(json);
@@ -23,10 +24,10 @@ export function useApi<T>(endpoint: string, options?: { autoFetch?: boolean }) {
   };
 
   useEffect(() => {
-    if (options?.autoFetch !== false) fetch();
+    if (options?.autoFetch !== false) doFetch();
   }, [endpoint]);
 
-  return { data, loading, error, refetch: fetch };
+  return { data, loading, error, refetch: doFetch };
 }
 
 export function useVmList() {
@@ -42,7 +43,7 @@ export function useVolumes() {
 }
 
 export function useNetworks() {
-  return useApi<Network[]>('/networks');
+  return useApi<{ networks: Network[] }>('/networks');
 }
 
 export function useSwarmNodes() {

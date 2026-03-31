@@ -1,6 +1,6 @@
 import { RefreshCw, Terminal, Square } from 'lucide-react';
 import { useVmList } from '../hooks/useApi';
-import { Card, StatusBadge, EmptyState, Loading } from './ui';
+import { Card, StatusBadge, EmptyState, Loading } from '../components/ui';
 
 export function MicroVMsView() {
   const { data, loading, refetch } = useVmList();
