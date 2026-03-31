@@ -27,11 +27,16 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 ### 1. Download Package
 Go to the [Releases Page](https://github.com/Subeshrock/micro-vm-ecosystem/releases) and download the latest package for your distro.
 
-### 2. Install (Debian/Ubuntu)
-The package automatically starts the Daemon (`ignited`) as a systemd service and installs the Client (`ign`) for users.
+### 2. Install
 
+**Debian/Ubuntu:**
 ```bash
-sudo dpkg -i ignite_2.0.0_amd64.deb
+sudo dpkg -i ignite_2.1.0_amd64.deb
+```
+
+**Fedora/RHEL/CentOS:**
+```bash
+sudo rpm -i ignite-2.1.0-1.x86_64.rpm
 ```
 
 **What's Installed:**
@@ -143,7 +148,7 @@ services:
     environment:         # Environment variables (WIP)
       POSTGRES_PASSWORD: secret
 ```
-> **Note**: Custom `networks:` are not supported in v1.0. Services communicate via the default bridge using their Service Name as hostname (DNS enabled).
+> **Note**: Custom `networks:` are not supported in Compose v1.0. Services communicate via the default bridge using their Service Name as hostname (DNS enabled).
 
 ---
 
