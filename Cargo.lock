@@ -487,6 +487,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-deque"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9dd111b7b7f7d55b72c0a6ae361660ee5853c9af73f70c3c2ef6858b950e2e51"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-epoch"
 version = "0.9.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1202,7 +1212,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -1324,7 +1334,7 @@ dependencies = [
 
 [[package]]
 name = "ign"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1347,7 +1357,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-agent"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1359,8 +1369,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ignite-agent-vm"
+version = "1.9.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "vsock",
+]
+
+[[package]]
 name = "ignite-compose"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "ignite-core",
@@ -1370,7 +1395,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-core"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1389,7 +1414,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-image"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1409,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-net"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "ipnetwork",
@@ -1423,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-proto"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1441,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-sdk"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -1454,7 +1479,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-storage"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1468,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-teleport"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "bitvec",
@@ -1484,7 +1509,7 @@ dependencies = [
 
 [[package]]
 name = "ignited"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1737,6 +1762,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "memoffset"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1794,6 +1828,28 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
+]
+
+[[package]]
+name = "nix"
+version = "0.31.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d6d0705320c1e6ba1d912b5e37cf18071b6c2e9b7fa8215a1e8a7651966f5d3"
+dependencies = [
+ "bitflags 2.11.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+ "memoffset",
+]
+
+[[package]]
+name = "ntapi"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
+dependencies = [
+ "winapi",
 ]
 
 [[package]]
@@ -2245,6 +2301,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
+]
+
+[[package]]
+name = "rayon"
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -2937,6 +3013,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sysinfo"
+version = "0.30.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a5b4ddaee55fb2bea2bf0e5000747e5f5c0de765e5a5ff87f4cd106439f4bb3"
+dependencies = [
+ "cfg-if",
+ "core-foundation-sys",
+ "libc",
+ "ntapi",
+ "once_cell",
+ "rayon",
+ "windows",
+]
+
+[[package]]
 name = "system-configuration"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3493,6 +3584,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vsock"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba782755fc073877e567c2253c0be48e4aa9a254c232d36d3985dfae0bd5205"
+dependencies = [
+ "libc",
+ "nix",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3696,6 +3797,25 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "windows"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48a53791691ab099e5e2ad123536d0fff50652600abaf43bbf952894110d0be"
+dependencies = [
+ "windows-core 0.52.0",
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-core"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ab640c8d7e35bf8ba19b884ba838ceb4fba93a4e8c65a9059d08afcfc683d9"
+dependencies = [
+ "windows-targets 0.52.6",
+]
 
 [[package]]
 name = "windows-core"
