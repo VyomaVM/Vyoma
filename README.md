@@ -9,7 +9,7 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 
 ---
 
-## 🚀 Key Features (v2.1.0)
+## 🚀 Key Features (v2.1.1)
 
 *   **Docker UX**: Familiar commands: `run`, `ps`, `logs`, `exec`.
 *   **Ignite Swarm**: Built-in clustering with **Mesh Networking** (VXLAN) and deterministic IP allocation.
@@ -31,12 +31,12 @@ Go to the [Releases Page](https://github.com/Subeshrock/micro-vm-ecosystem/relea
 
 **Debian/Ubuntu:**
 ```bash
-sudo dpkg -i ignite_2.1.0_amd64.deb
+sudo dpkg -i ignite_2.1.1_amd64.deb
 ```
 
 **Fedora/RHEL/CentOS:**
 ```bash
-sudo rpm -i ignite-2.1.0-1.x86_64.rpm
+sudo rpm -i ignite-2.1.1-1.x86_64.rpm
 ```
 
 **What's Installed:**

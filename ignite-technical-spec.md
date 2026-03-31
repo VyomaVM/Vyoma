@@ -531,8 +531,8 @@ usermod -aG kvm ignite
 
 # Set socket permissions so ign CLI users can connect
 # Users must be in the 'ignite' group to use ign CLI
-chown root:ignite /var/run/ignite.sock 2>/dev/null || true
-chmod 0660 /var/run/ignite.sock 2>/dev/null || true
+chown root:ignite /run/ignite/ignite.sock 2>/dev/null || true
+chmod 0660 /run/ignite/ignite.sock 2>/dev/null || true
 
 # /dev/kvm access
 chmod 0660 /dev/kvm 2>/dev/null || true
