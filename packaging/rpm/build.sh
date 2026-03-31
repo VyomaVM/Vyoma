@@ -1,0 +1,201 @@
+#!/bin/bash
+# Ignite RPM Package Build Script
+
+set -e
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+BUILD_DIR="$PROJECT_ROOT/build"
+PACKAGE_DIR="$BUILD_DIR/ignite_2.1.0_x86_64"
+
+echo "Building Ignite RPM package..."
+echo "Project root: $PROJECT_ROOT"
+
+# Check for rpmbuild
+if ! command -v rpmbuild &> /dev/null; then
+    echo "rpmbuild not found. Install rpm-build package:"
+    echo "  Fedora/RHEL: sudo dnf install rpm-build"
+    echo "  Debian/Ubuntu: sudo apt install rpm"
+    exit 1
+fi
+
+# Clean previous build
+rm -rf "$BUILD_DIR"
+mkdir -p "$PACKAGE_DIR"
+
+# Build Rust binaries
+echo "Building Rust binaries..."
+cd "$PROJECT_ROOT"
+cargo build --release
+
+# Build UI (optional - requires Node.js)
+echo "Building UI..."
+if command -v npm &> /dev/null; then
+    cd "$PROJECT_ROOT/ui"
+    npm install
+    npm run build
+else
+    echo "Skipping UI build (npm not found)"
+fi
+
+# Create package structure
+echo "Creating package structure..."
+mkdir -p "$PACKAGE_DIR/usr/bin"
+mkdir -p "$PACKAGE_DIR/usr/lib/ignite"
+mkdir -p "$PACKAGE_DIR/usr/share/applications"
+mkdir -p "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps"
+mkdir -p "$PACKAGE_DIR/usr/share/doc/ignite"
+mkdir -p "$PACKAGE_DIR/SOURCES"
+
+# Copy binaries
+cp "$PROJECT_ROOT/target/release/ign" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
+cp "$PROJECT_ROOT/target/release/ignited" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
+cp "$PROJECT_ROOT/target/release/ignite-agent" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
+
+# Copy UI dist
+if [ -d "$PROJECT_ROOT/ui/dist" ]; then
+    cp -r "$PROJECT_ROOT/ui/dist" "$PACKAGE_DIR/usr/lib/ignite/ui"
+fi
+
+# Copy firecracker (if exists)
+if [ -d "$PROJECT_ROOT/bin" ]; then
+    cp -r "$PROJECT_ROOT/bin" "$PACKAGE_DIR/usr/lib/ignite/"
+fi
+
+# Copy favicon as icon
+if [ -f "$PROJECT_ROOT/ui/public/favicon.svg" ]; then
+    cp "$PROJECT_ROOT/ui/public/favicon.svg" "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps/ignite.svg"
+fi
+
+# Create desktop file
+cat > "$PACKAGE_DIR/usr/share/applications/ignite.desktop" << 'EOF'
+[Desktop Entry]
+Name=Ignite
+Comment=MicroVM Management Dashboard
+Exec=/usr/bin/ignited
+Icon=ignite
+Terminal=false
+Type=Application
+Categories=System;Virtualization;
+Keywords=microvm;virtualization;docker;
+EOF
+
+# Copy systemd service
+mkdir -p "$PACKAGE_DIR/lib/systemd/system"
+cp "$PROJECT_ROOT/packaging/systemd/ignited.service" "$PACKAGE_DIR/lib/systemd/system/"
+
+# Create RPM SPEC file
+cat > "$BUILD_DIR/ignite.spec" << 'SPECFILE'
+Name:           ignite
+Version:        2.1.0
+Release:        1%{?dist}
+Summary:        Lightweight MicroVM runtime
+License:        MIT
+URL:            https://github.com/Subeshrock/micro-vm-ecosystem
+BuildArch:      x86_64
+
+Requires:       libc >= 2.34, libstdc++ >= 6.0
+Requires:       kvm
+Requires(post): systemd
+Requires(post): systemd-sysv
+
+%description
+Ignite is a lightweight MicroVM runtime for running containers
+as lightweight virtual machines. It combines the security of
+virtualization with the speed of containers.
+
+%prep
+# Nothing to prep
+
+%build
+# Already built by cargo
+
+%install
+rm -rf %{buildroot}
+mkdir -p %{buildroot}/usr/bin
+mkdir -p %{buildroot}/usr/lib/ignite
+mkdir -p %{buildroot}/usr/share/applications
+mkdir -p %{buildroot}/usr/share/icons/hicolor/64x64/apps
+mkdir -p %{buildroot}/usr/share/doc/ignite
+mkdir -p %{buildroot}/lib/systemd/system
+
+# Copy binaries
+cp -r usr/bin/* %{buildroot}/usr/bin/
+
+# Copy UI
+if [ -d usr/lib/ignite/ui ]; then
+    cp -r usr/lib/ignite/ui %{buildroot}/usr/lib/ignite/
+fi
+
+# Copy firecracker binaries
+if [ -d usr/lib/ignite/bin ]; then
+    cp -r usr/lib/ignite/bin %{buildroot}/usr/lib/ignite/
+fi
+
+# Copy icon
+if [ -f usr/share/icons/hicolor/64x64/apps/ignite.svg ]; then
+    cp usr/share/icons/hicolor/64x64/apps/ignite.svg %{buildroot}/usr/share/icons/hicolor/64x64/apps/
+fi
+
+# Copy desktop file
+cp usr/share/applications/ignite.desktop %{buildroot}/usr/share/applications/
+
+# Copy systemd service
+cp lib/systemd/system/ignited.service %{buildroot}/lib/systemd/system/
+
+%files
+%defattr(-,root,root,-)
+/usr/bin/ign
+/usr/bin/ignited
+/usr/bin/ignite-agent
+%dir /usr/lib/ignite
+%if exists(usr/lib/ignite/ui)
+/usr/lib/ignite/ui
+%endif
+%if exists(usr/lib/ignite/bin)
+/usr/lib/ignite/bin
+%endif
+/usr/share/applications/ignite.desktop
+/usr/share/icons/hicolor/64x64/apps/ignite.svg
+/lib/systemd/system/ignited.service
+
+%post
+# Create ignite user if not exists
+id ignite >/dev/null 2>&1 || useradd -r -s /sbin/nologin -d /var/lib/ignite ignite 2>/dev/null || true
+
+# Create data directory
+mkdir -p /var/lib/ignite
+chown ignite:ignite /var/lib/ignite 2>/dev/null || true
+
+# Create runtime directory
+mkdir -p /run/ignite
+chown ignite:ignite /run/ignite 2>/dev/null || true
+
+# Enable and start systemd service
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable ignited.service 2>/dev/null || true
+systemctl start ignited.service 2>/dev/null || true
+
+echo "Ignite installed successfully!"
+echo "Open http://localhost:3000 for the dashboard"
+
+%postun
+# Reload systemd on removal
+if [ $1 -eq 0 ]; then
+    systemctl daemon-reload 2>/dev/null || true
+fi
+
+%changelog
+* Tue Mar 31 2026 Subeshrock <subesh.rock.3@gmail.com> - 2.1.0-1
+- Release v2.1.0
+SPECFILE
+
+# Change to build directory and build RPM
+cd "$BUILD_DIR"
+cp -r "$PACKAGE_DIR" SOURCES
+
+echo "Building RPM package..."
+rpmbuild --define "_topdir $BUILD_DIR" \
+         --define "_rpmdir $BUILD_DIR/RPMS" \
+         -bb "$BUILD_DIR/ignite.spec"
+
+echo "Done! Package created at: $BUILD_DIR/RPMS/x86_64/ignite-2.1.0-1.x86_64.rpm"

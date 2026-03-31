@@ -47,7 +47,7 @@ fn resolve_socket_path(default_path: &str) -> String {
 #[command(about = "Ignite: Docker for Micro-VMs", long_about = None)]
 struct Cli {
     /// Socket path to daemon (Unix Socket)
-    #[arg(short, long, global = true, default_value = "/var/run/ignite/ignite.sock")]
+    #[arg(short, long, global = true, default_value = "/run/ignite/ignite.sock")]
     socket_path: String,
 
     #[command(subcommand)]
@@ -266,6 +266,7 @@ async fn main() -> Result<()> {
     
     // Resolve socket path with fallback to user-writable location
     let socket_path = resolve_socket_path(&cli.socket_path);
+    info!("Using socket path: {}", socket_path);
     
     // Connect via Unix Socket
     let client = Client::builder()

@@ -35,7 +35,7 @@ use api::handlers;
 #[command(name = "ignited", about = "Ignite MicroVM Daemon", version)]
 struct Args {
     /// Path to listen on (Unix Socket)
-    #[arg(short, long, default_value = "/var/run/ignite/ignite.sock")]
+    #[arg(short, long, default_value = "/run/ignite/ignite.sock")]
     socket_path: String,
     /// HTTP port for dashboard (default: 3000, use 0 to disable)
     #[arg(short = 'p', long, default_value_t = 3000)]
@@ -177,17 +177,12 @@ async fn main() {
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path).unwrap();
 
-    let permissions = std::fs::Permissions::from_mode(0o660);
+    // Allow all users to access the socket (no group or logout required)
+    let permissions = std::fs::Permissions::from_mode(0o666);
     if let Err(e) = std::fs::set_permissions(&socket_path, permissions) {
-        warn!("Could not set 0660 permissions on socket: {}. You may need root.", e);
+        warn!("Could not set 0666 permissions on socket: {}", e);
     }
     
-    // Attempt to set ownership to root:ignite if possible
-    let _ = std::process::Command::new("chgrp")
-        .arg("ignite")
-        .arg(&socket_path)
-        .output();
-        
     info!("Daemon listening on Unix Socket {}", socket_path);
 
     // Start HTTP server for dashboard if port is not 0

@@ -5,7 +5,7 @@ set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
-PACKAGE_DIR="$BUILD_DIR/ignite_2.0.0_amd64"
+PACKAGE_DIR="$BUILD_DIR/ignite_2.1.0_amd64"
 
 echo "Building Ignite Debian package..."
 echo "Project root: $PROJECT_ROOT"
@@ -90,6 +90,16 @@ id ignite >/dev/null 2>&1 || useradd -r -s /sbin/nologin -d /var/lib/ignite igni
 mkdir -p /var/lib/ignite
 chown ignite:ignite /var/lib/ignite 2>/dev/null || true
 
+# Create runtime directory
+mkdir -p /run/ignite
+chown ignite:ignite /run/ignite 2>/dev/null || true
+
+# Add installing user to ignite group (must logout/login to take effect)
+if [ -n "$SUDO_USER" ]; then
+    usermod -aG ignite "$SUDO_USER" 2>/dev/null || true
+    echo "Added $SUDO_USER to ignite group. Log out and back in to use CLI."
+fi
+
 # Enable and start systemd service automatically
 if command -v systemctl &> /dev/null; then
     systemctl daemon-reload
@@ -114,7 +124,7 @@ chmod +x "$PACKAGE_DIR/DEBIAN/postrm"
 # Create control file
 cat > "$PACKAGE_DIR/DEBIAN/control" << 'EOF'
 Package: ignite
-Version: 2.0.0
+Version: 2.1.0
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -128,6 +138,6 @@ EOF
 
 # Build package
 echo "Building .deb package..."
-dpkg-deb --build "$PACKAGE_DIR" "$BUILD_DIR/ignite_2.0.0_amd64.deb"
+dpkg-deb --build "$PACKAGE_DIR" "$BUILD_DIR/ignite_2.1.0_amd64.deb"
 
-echo "Done! Package created at: $BUILD_DIR/ignite_2.0.0_amd64.deb"
+echo "Done! Package created at: $BUILD_DIR/ignite_2.1.0_amd64.deb"

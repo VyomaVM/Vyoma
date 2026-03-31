@@ -9,13 +9,14 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 
 ---
 
-## 🚀 Key Features (v1.0)
+## 🚀 Key Features (v2.1.0)
 
 *   **Docker UX**: Familiar commands: `run`, `ps`, `logs`, `exec`.
 *   **Ignite Swarm**: Built-in clustering with **Mesh Networking** (VXLAN) and deterministic IP allocation.
 *   **Ignite Compose**: Orchestrate stacks with `ignite-compose.yml`.
 *   **Web Dashboard**: Built-in visual management UI (bundled in Daemon, accessible at `http://localhost:3000`).
-*   **Self-Contained**: `.deb` / `.rpm` packages bundle primary dependencies (Firecracker).
+*   **VS Code Extension**: Manage VMs directly from VS Code.
+*   **Self-Contained**: `.deb` package bundles primary dependencies (Firecracker).
 *   **Persistence**: Volume mounts (`virtiofs`) and Port Mapping.
 *   **Snapshotting**: Instant VM snapshots and State Teleportation.
 
@@ -27,10 +28,10 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 Go to the [Releases Page](https://github.com/Subeshrock/micro-vm-ecosystem/releases) and download the latest package for your distro.
 
 ### 2. Install (Debian/Ubuntu)
-The package automatically installs the Daemon (`ignited`) as a systemd service running as root, and the Client (`ign`) for users.
+The package automatically starts the Daemon (`ignited`) as a systemd service and installs the Client (`ign`) for users.
 
 ```bash
-sudo dpkg -i ignite_1.0.0_amd64.deb
+sudo dpkg -i ignite_2.0.0_amd64.deb
 ```
 
 **What's Installed:**

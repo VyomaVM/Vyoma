@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="1.0.0"
+VERSION="2.1.0"
 WORK_DIR="target/rpm"
 mkdir -p "${WORK_DIR}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
