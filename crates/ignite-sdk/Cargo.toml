@@ -1,0 +1,14 @@
+[package]
+name = "ignite-sdk"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+ignite-proto = { path = "../ignite-proto" }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }

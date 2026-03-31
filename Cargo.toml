@@ -9,6 +9,7 @@ members = [
     "crates/ignite-proto",
     "crates/ignite-image",
     "crates/ignite-agent",
+    "crates/ignite-sdk",
 ]
 resolver = "2"
 
