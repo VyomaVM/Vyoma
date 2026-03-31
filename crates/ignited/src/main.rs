@@ -26,6 +26,7 @@ mod swarm;
 mod metrics;
 mod timemachine;
 mod auto_snapshot;
+mod hibernation;
 
 use state::{AppState, wal::Wal, recovery::Recovery};
 use api::handlers;
