@@ -39,8 +39,17 @@ export function Layout({ children, activeTab, onTabChange }: LayoutProps) {
     <div className="flex h-screen bg-slate-950 text-slate-200 font-sans overflow-hidden">
       <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0">
         <div className="p-5 flex items-center gap-3 border-b border-slate-800/80">
-          <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-red-600 rounded-lg flex items-center justify-center shadow-lg shadow-orange-900/20">
-            <span className="font-bold text-white">I</span>
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center">
+            <svg width="32" height="32" viewBox="0 0 64 64" className="w-full h-full">
+              <defs>
+                <linearGradient id="flame" x1="0%" y1="100%" x2="0%" y2="0%">
+                  <stop offset="0%" stopColor="#FF4500"/>
+                  <stop offset="50%" stopColor="#FF6B2B"/>
+                  <stop offset="100%" stopColor="#FFA500"/>
+                </linearGradient>
+              </defs>
+              <path d="M32 4C32 4 18 20 18 36c0 7.7 6.3 14 14 14s14-6.3 14-14C46 20 32 4 32 4zm0 40c-4.4 0-8-3.6-8-8 0-6 8-16 8-16s8 10 8 16c0 4.4-3.6 8-8 8z" fill="url(#flame)"/>
+            </svg>
           </div>
           <h1 className="font-bold text-lg tracking-tight text-white">Ignite</h1>
         </div>
