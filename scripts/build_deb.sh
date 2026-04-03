@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="2.1.1"
+VERSION="2.1.2"
 ARCH="amd64"
 PKG_NAME="ignite"
 WORK_DIR="target/debian/${PKG_NAME}_${VERSION}_${ARCH}"
@@ -17,7 +17,7 @@ mkdir -p "${WORK_DIR}/usr/lib/ignite"
 mkdir -p "${WORK_DIR}/etc/systemd/system"
 mkdir -p "${WORK_DIR}/DEBIAN"
 
-# 3. Fetch & Copy Dependencies (Firecracker, Virtiofsd)
+# 3. Fetch & Copy Dependencies (Firecracker, Virtiofsd, CNI plugins)
 echo "Fetching dependencies..."
 if [ ! -f "firecracker" ]; then
     wget -q -O firecracker.tgz https://github.com/firecracker-microvm/firecracker/releases/download/v1.7.0/firecracker-v1.7.0-x86_64.tgz
@@ -26,11 +26,35 @@ if [ ! -f "firecracker" ]; then
     chmod +x firecracker
 fi
 
+# Fetch CNI plugins
+CNI_VERSION="v1.5.1"
+CNI_DIR="${WORK_DIR}/usr/lib/ignite/cni"
+echo "Fetching CNI plugins..."
+mkdir -p "${CNI_DIR}/bin"
+if [ ! -f "cni-plugins.tgz" ]; then
+    wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz"
+fi
+tar -xzf cni-plugins.tgz -C "${CNI_DIR}/bin/"
+
 # Fetch virtiofsd with fallback URLs
 VIRTIOFSD_VERSION="1.11.1"
 VIRTIOFSD_DIR="${WORK_DIR}/usr/lib/ignite"
 
 echo "Fetching virtiofsd..."
+
+# Build UI (optional - requires Node.js)
+echo "Building UI..."
+if command -v npm &> /dev/null; then
+    cd ui
+    npm install
+    npm run build
+    cd ..
+    mkdir -p "${WORK_DIR}/usr/lib/ignite"
+    cp -r ui/dist "${WORK_DIR}/usr/lib/ignite/ui"
+    echo "UI bundled successfully"
+else
+    echo "Skipping UI build (npm not found)"
+fi
 if [ ! -f "virtiofsd" ]; then
     # Primary: GitLab releases
     PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-x86_64-musl.zip"
@@ -93,9 +117,16 @@ cat <<'POSTINST' > "${WORK_DIR}/DEBIAN/postinst"
 #!/bin/bash
 set -e
 
-# Create ignite user if not exists
+# Create ignite user (for socket ownership)
 if ! id ignite >/dev/null 2>&1; then
     useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Ignite MicroVM Daemon" ignite 2>/dev/null || true
+fi
+
+# Add installing user to ignite and kvm groups
+if [ -n "$SUDO_USER" ]; then
+    usermod -aG ignite "$SUDO_USER" 2>/dev/null || true
+    usermod -aG kvm "$SUDO_USER" 2>/dev/null || true
+    echo "Added $SUDO_USER to ignite and kvm groups. Log out and back in to use CLI."
 fi
 
 # Add ignite daemon user to kvm group (for /dev/kvm access)
@@ -107,29 +138,21 @@ fi
 chmod 0660 /dev/kvm 2>/dev/null || true
 chown root:kvm /dev/kvm 2>/dev/null || true
 
-# Create runtime directory
+# Create runtime directory - owned by root:ignite, group writable (0775)
 mkdir -p /run/ignite
 chown root:ignite /run/ignite 2>/dev/null || true
-chmod 0755 /run/ignite 2>/dev/null || true
+chmod 0775 /run/ignite 2>/dev/null || true
 
-# Set socket group ownership (will be created by daemon)
-chown root:ignite /run/ignite/ignite.sock 2>/dev/null || true
-chmod 0660 /run/ignite/ignite.sock 2>/dev/null || true
-
-# Ensure sudoers bypass for ignited commands as ignite user
-if [ ! -f /etc/sudoers.d/ignite ]; then
-    cat <<'SUDOERS' > /etc/sudoers.d/ignite
-ignite ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/bin/ip, /usr/sbin/losetup, /usr/sbin/dmsetup, /usr/bin/debugfs
-SUDOERS
-    chmod 0440 /etc/sudoers.d/ignite
-fi
+# Setup CNI plugins directory (symlink from system data dir to package location)
+rm -rf /var/lib/ignite/.ignite/cni/bin 2>/dev/null || true
+ln -sf /usr/lib/ignite/cni/bin /var/lib/ignite/.ignite/cni/bin
 
 # Enable and start service
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable ignited.service 2>/dev/null || true
 systemctl start ignited.service 2>/dev/null || true
 
-echo "Ignite v2.1.1 installed successfully!"
+echo "Ignite v${VERSION} installed successfully!"
 echo "Open http://localhost:3000 for the dashboard"
 echo "Run 'ign run nginx:latest' to start your first VM"
 POSTINST
@@ -152,7 +175,7 @@ mkdir -p dist
 dpkg-deb --build "${WORK_DIR}" "dist/${PKG_NAME}_${VERSION}_${ARCH}.deb"
 
 # 9. Cleanup
-rm -f firecracker firecracker.tgz virtiofsd.zip virtiofsd virtiofsd_bin
+rm -f firecracker firecracker.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
 rm -rf release-v1.7.0-x86_64
 rm -rf "${WORK_DIR}"
 

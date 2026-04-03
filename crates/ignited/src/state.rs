@@ -23,12 +23,14 @@ pub struct AppState {
     pub rootless: bool,
     pub events_tx: broadcast::Sender<String>,
     pub wal: Arc<wal::Wal>,
+    pub data_dir: String,
 }
 
 #[derive(Debug)]
 pub struct VmInstance {
     pub vmm: VmmManager,
     pub id: String,
+    pub fc_socket_path: String,
     pub tap_name: String,
     pub dm_name: String,
     pub loop_devices: Vec<String>,

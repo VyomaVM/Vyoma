@@ -6,7 +6,7 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
 PACKAGE_DIR="$BUILD_DIR/ignite_2.1.1_x86_64"
-VERSION="2.1.1"
+VERSION="2.1.2"
 
 echo "Building Ignite RPM package..."
 echo "Project root: $PROJECT_ROOT"
@@ -208,7 +208,7 @@ cp lib/systemd/system/ignited.service %{buildroot}/lib/systemd/system/
 /lib/systemd/system/ignited.service
 
 %post
-# Create ignite user if not exists
+# Create ignite user (for socket ownership)
 if ! getent passwd ignite > /dev/null 2>&1; then
     useradd -r -s /sbin/nologin -c "Ignite MicroVM Daemon" -d /var/lib/ignite ignite 2>/dev/null || true
 fi
@@ -231,16 +231,10 @@ mkdir -p /run/ignite
 chown root:ignite /run/ignite 2>/dev/null || true
 chmod 0755 /run/ignite 2>/dev/null || true
 
-# Set socket group ownership (will be created by daemon)
-chown root:ignite /run/ignite/ignite.sock 2>/dev/null || true
-chmod 0660 /run/ignite/ignite.sock 2>/dev/null || true
-
-# Ensure sudoers bypass for ignited commands
-if [ ! -f /etc/sudoers.d/ignite ]; then
-    cat <<'SUDOERS' > /etc/sudoers.d/ignite
-ignite ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/bin/ip, /usr/sbin/losetup, /usr/sbin/dmsetup, /usr/bin/debugfs
-SUDOERS
-    chmod 0440 /etc/sudoers.d/ignite
+# Add installing user to ignite and kvm groups
+if [ -n "$USER" ]; then
+    usermod -aG ignite $USER 2>/dev/null || true
+    usermod -aG kvm $USER 2>/dev/null || true
 fi
 
 # Enable and start systemd service

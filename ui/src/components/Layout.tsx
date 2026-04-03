@@ -96,7 +96,7 @@ export function Layout({ children, activeTab, onTabChange }: LayoutProps) {
             </div>
             <div className="text-xs">
               <div className="text-slate-300 font-medium">Daemon Active</div>
-              <div className="text-slate-500">v2.1.1</div>
+              <div className="text-slate-500">v2.1.2</div>
             </div>
           </div>
         </div>

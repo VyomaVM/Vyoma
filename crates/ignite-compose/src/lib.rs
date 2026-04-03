@@ -1,17 +1,17 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use anyhow::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IgniteCompose {
     pub version: String,
     pub services: HashMap<String, Service>,
-    
+
     #[serde(default)]
     pub networks: HashMap<String, NetworkConfig>,
-    
+
     #[serde(default)]
     pub volumes: HashMap<String, VolumeConfig>,
 }
@@ -78,19 +78,19 @@ impl IgniteCompose {
 
     pub fn from_str(content: &str) -> Result<Self> {
         let compose: IgniteCompose = serde_yaml::from_str(content)?;
-        
+
         if !Self::is_supported_version(&compose.version) {
             return Err(anyhow::anyhow!(
                 "Unsupported compose version: {}. Supported: 1.0, 3.x (3.0-3.9)",
                 compose.version
             ));
         }
-        
+
         Ok(compose)
     }
 
     fn is_supported_version(version: &str) -> bool {
-        version == "1.0" || version.starts_with("3.")
+        version == "1" || version == "1.0" || version.starts_with("3.")
     }
 
     pub fn start_order(&self) -> Result<Vec<(String, Service)>> {
@@ -104,13 +104,26 @@ impl IgniteCompose {
         for name in keys {
             self.visit(name, &mut visited, &mut visiting, &mut order)?;
         }
-        
+
         Ok(order)
     }
 
-    fn visit(&self, name: &String, visited: &mut HashSet<String>, visiting: &mut HashSet<String>, order: &mut Vec<(String, Service)>) -> Result<()> {
-        if visited.contains(name) { return Ok(()); }
-        if visiting.contains(name) { return Err(anyhow::anyhow!("Circular dependency detected involving {}", name)); }
+    fn visit(
+        &self,
+        name: &String,
+        visited: &mut HashSet<String>,
+        visiting: &mut HashSet<String>,
+        order: &mut Vec<(String, Service)>,
+    ) -> Result<()> {
+        if visited.contains(name) {
+            return Ok(());
+        }
+        if visiting.contains(name) {
+            return Err(anyhow::anyhow!(
+                "Circular dependency detected involving {}",
+                name
+            ));
+        }
 
         visiting.insert(name.clone());
 
@@ -118,7 +131,11 @@ impl IgniteCompose {
             if let Some(deps) = &service.depends_on {
                 for dep in deps {
                     if !self.services.contains_key(dep) {
-                         return Err(anyhow::anyhow!("Service '{}' depends on undefined service '{}'", name, dep));
+                        return Err(anyhow::anyhow!(
+                            "Service '{}' depends on undefined service '{}'",
+                            name,
+                            dep
+                        ));
                     }
                     self.visit(dep, visited, visiting, order)?;
                 }
@@ -176,7 +193,7 @@ services:
         let compose = IgniteCompose::from_str(yaml).unwrap();
         assert_eq!(compose.version, "1.0");
         assert_eq!(compose.services.len(), 2);
-        
+
         let web = compose.services.get("web").unwrap();
         assert_eq!(web.image.as_ref().unwrap(), "nginx:latest");
         assert_eq!(web.ports.as_ref().unwrap()[0], "8080:80");
@@ -217,10 +234,10 @@ volumes:
         assert!(compose.networks.contains_key("frontend"));
         assert!(compose.networks.contains_key("backend"));
         assert_eq!(compose.volumes.len(), 1);
-        
+
         let web = compose.services.get("web").unwrap();
         assert_eq!(web.networks, vec!["frontend"]);
-        
+
         let api = compose.services.get("api").unwrap();
         assert_eq!(api.networks, vec!["frontend", "backend"]);
     }

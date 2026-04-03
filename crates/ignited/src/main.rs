@@ -40,6 +40,9 @@ struct Args {
     /// HTTP port for dashboard (default: 3000, use 0 to disable)
     #[arg(short = 'p', long, default_value_t = 3000)]
     http_port: u16,
+    /// Data directory containing kernel and firecracker binaries
+    #[arg(short, long, default_value = "/var/lib/ignite")]
+    data_dir: String,
 }
 
 #[tokio::main]
@@ -126,6 +129,7 @@ async fn main() {
         rootless: false, // Enforced false
         events_tx,
         wal,
+        data_dir: args.data_dir.clone(),
     };
 
     api::handlers::initialize_state(&state).await;
@@ -172,18 +176,53 @@ async fn main() {
     let socket_path = args.socket_path;
     let path = std::path::Path::new(&socket_path);
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::remove_file(&socket_path);
-    let listener = UnixListener::bind(&socket_path).unwrap();
-
-    // Allow all users to access the socket (no group or logout required)
-    let permissions = std::fs::Permissions::from_mode(0o666);
-    if let Err(e) = std::fs::set_permissions(&socket_path, permissions) {
-        warn!("Could not set 0666 permissions on socket: {}", e);
+        // Try to create directory
+        match std::fs::create_dir_all(parent) {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("Cannot create directory {}: {}", parent.display(), e);
+            }
+        }
     }
     
-    info!("Daemon listening on Unix Socket {}", socket_path);
+    // Try to bind, if fails try alternative locations
+    let actual_socket_path: String;
+    let listener = match UnixListener::bind(&socket_path) {
+        Ok(l) => {
+            actual_socket_path = socket_path.clone();
+            l
+        }
+        Err(_) => {
+            // Try alternative: XDG_RUNTIME_DIR or /tmp
+            let alt_dir = std::env::var("XDG_RUNTIME_DIR")
+                .map(|d| std::path::PathBuf::from(d))
+                .unwrap_or_else(|_| std::env::temp_dir());
+            
+            let alt_socket_path = alt_dir.join("ignite.sock");
+            warn!("Cannot bind to {}. Trying alternative: {}", socket_path, alt_socket_path.display());
+            
+            let _ = std::fs::remove_file(&alt_socket_path);
+            match UnixListener::bind(&alt_socket_path) {
+                Ok(l) => {
+                    actual_socket_path = alt_socket_path.to_string_lossy().to_string();
+                    warn!("Using alternative socket at {}", actual_socket_path);
+                    l
+                }
+                Err(e) => {
+                    error!("Failed to bind socket at any location: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    };
+
+    // Set socket permissions: root:ignite (0660) - users in ignite group can access
+    let permissions = std::fs::Permissions::from_mode(0o660);
+    if let Err(e) = std::fs::set_permissions(&actual_socket_path, permissions) {
+        warn!("Could not set 0660 permissions on socket: {}", e);
+    }
+    
+    info!("Daemon listening on Unix Socket {}", actual_socket_path);
 
     // Start HTTP server for dashboard if port is not 0
     if args.http_port > 0 {

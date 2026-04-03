@@ -9,11 +9,11 @@ setup_env
 
 # Start Daemon
 echo "Starting Daemon (Port 3002)..."
-sudo -E $IGNITED_BIN --port 3002 > $TEST_HOME/daemon.log 2>&1 &
+sudo -E $IGNITED_BIN --socket-path /run/ignite/test.sock --http-port 3002 > $TEST_HOME/daemon.log 2>&1 &
 DAEMON_PID=$!
 sleep 3
 
-IGN="$IGN_BIN --address http://127.0.0.1:3002"
+IGN="$IGN_BIN --socket-path /run/ignite/test.sock --http-port 3002"
 
 # Prepare Volume
 HOST_VOL=$(mktemp -d)

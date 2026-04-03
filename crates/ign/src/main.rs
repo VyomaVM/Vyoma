@@ -50,6 +50,10 @@ struct Cli {
     #[arg(short, long, global = true, default_value = "/run/ignite/ignite.sock")]
     socket_path: String,
 
+    /// HTTP port of daemon (for HTTP requests through Unix Socket)
+    #[arg(short = 'p', long, global = true, default_value_t = 80)]
+    http_port: u16,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -274,7 +278,7 @@ async fn main() -> Result<()> {
         .build()?;
     
     // Daemon URL for HTTP requests (goes through Unix Socket proxy)
-    let daemon_url = "http://localhost";
+    let daemon_url = format!("http://localhost:{}", cli.http_port);
 
     match cli.command {
         Commands::Pull { image } => {
@@ -284,7 +288,7 @@ async fn main() -> Result<()> {
                 .json(&serde_json::json!({ "image": image }))
                 .send()
                 .await;
-            handle_simple_response(resp, daemon_url).await?;
+            handle_simple_response(resp, &daemon_url).await?;
         }
         Commands::Run {
             image,
@@ -357,7 +361,7 @@ async fn main() -> Result<()> {
                 .send()
                 .await;
 
-            handle_response(resp, daemon_url).await?;
+            handle_response(resp, &daemon_url).await?;
         }
         Commands::Stop { id } => {
             info!("Requesting to stop VM: {}", id);
@@ -365,7 +369,7 @@ async fn main() -> Result<()> {
                 .post(format!("{}/stop/{}", daemon_url, id))
                 .send()
                 .await;
-            handle_simple_response(resp, daemon_url).await?;
+            handle_simple_response(resp, &daemon_url).await?;
         }
         Commands::Pause { id } => {
             info!("Requesting to pause VM: {}", id);
@@ -373,7 +377,7 @@ async fn main() -> Result<()> {
                 .post(format!("{}/pause/{}", daemon_url, id))
                 .send()
                 .await;
-            handle_simple_response(resp, daemon_url).await?;
+            handle_simple_response(resp, &daemon_url).await?;
         }
         Commands::Resume { id } => {
             info!("Requesting to resume VM: {}", id);
@@ -381,7 +385,7 @@ async fn main() -> Result<()> {
                 .post(format!("{}/resume/{}", daemon_url, id))
                 .send()
                 .await;
-            handle_simple_response(resp, daemon_url).await?;
+            handle_simple_response(resp, &daemon_url).await?;
         }
         Commands::Exec { id, cmd } => {
             // 1. Resolve IP
@@ -480,7 +484,7 @@ async fn main() -> Result<()> {
                         .json(&payload)
                         .send()
                         .await;
-                    handle_simple_response(resp, daemon_url).await?;
+                    handle_simple_response(resp, &daemon_url).await?;
                 }
                 Err(e) => error!("Failed to connect to daemon: {}", e),
             }
@@ -531,7 +535,7 @@ async fn main() -> Result<()> {
                 .post(format!("{}/snapshot/{}", daemon_url, id))
                 .send()
                 .await;
-            handle_simple_response(resp, daemon_url).await?;
+            handle_simple_response(resp, &daemon_url).await?;
         }
         Commands::Restore {
             snapshot_path,
@@ -552,7 +556,7 @@ async fn main() -> Result<()> {
                 .send()
                 .await;
 
-            handle_response(resp, daemon_url).await?;
+            handle_response(resp, &daemon_url).await?;
         }
         Commands::Export { id, output } => {
             info!("Exporting VM {} to {}", id, output);
@@ -560,7 +564,7 @@ async fn main() -> Result<()> {
         }
         Commands::Import { input } => {
             info!("Importing VM from {}", input);
-            import_vm(&input, daemon_url).await?;
+            import_vm(&input, &daemon_url).await?;
         }
         Commands::Logs { id, follow: _ } => {
             // 1. Resolve ID (if Name provided)
@@ -611,8 +615,7 @@ async fn main() -> Result<()> {
         }
         Commands::Build { path } => {
             info!("Building image from context: {}", path);
-            info!("Building image from context: {}", path);
-            build_image(&path, daemon_url).await?;
+            build_image_with_client(&path, &client, &daemon_url).await?;
         }
         Commands::Doctor => {
             run_doctor().await?;
@@ -650,14 +653,14 @@ async fn main() -> Result<()> {
                     .json(&payload)
                     .send()
                     .await;
-                handle_simple_response(resp, daemon_url).await?;
+                handle_simple_response(resp, &daemon_url).await?;
             }
             NetworkCommands::Rm { name } => {
                 let resp = client
                     .delete(format!("{}/networks/{}", daemon_url, name))
                     .send()
                     .await;
-                handle_simple_response(resp, daemon_url).await?;
+                handle_simple_response(resp, &daemon_url).await?;
             }
         },
         Commands::Swarm { command } => match command {
@@ -667,7 +670,7 @@ async fn main() -> Result<()> {
                     .post(format!("{}/swarm/init", daemon_url))
                     .send()
                     .await;
-                handle_simple_response(resp, daemon_url).await?;
+                handle_simple_response(resp, &daemon_url).await?;
             }
             SwarmCommands::Join { ip } => {
                 info!("Joining swarm at {}...", ip);
@@ -677,7 +680,7 @@ async fn main() -> Result<()> {
                     .json(&payload)
                     .send()
                     .await;
-                handle_simple_response(resp, daemon_url).await?;
+                handle_simple_response(resp, &daemon_url).await?;
             }
             SwarmCommands::Ls => {
                 let resp = client
@@ -685,7 +688,7 @@ async fn main() -> Result<()> {
                     .send()
                     .await;
                 // Just print raw JSON for MVP
-                handle_simple_response(resp, daemon_url).await?;
+                handle_simple_response(resp, &daemon_url).await?;
             }
         },
         Commands::Up { file, detach } => {
@@ -742,7 +745,7 @@ async fn main() -> Result<()> {
                                 ignite_compose::BuildSource::Config(c) => c.context.clone(),
                             };
                             info!("Building service '{}' from {}", name, context);
-                            build_image(&context, daemon_url).await?
+                            build_image_with_client(&context, &client, &daemon_url).await?
                         } else if let Some(ref img) = service.image {
                             img.clone()
                         } else {
@@ -967,7 +970,7 @@ async fn main() -> Result<()> {
 
                     for i in 0..needed {
                         info!("Starting replica {}/{}", i + 1, needed);
-                        start_service_helper(&client, daemon_url, &stack_name, &svc_name, service)
+                        start_service_helper(&client, &daemon_url, &stack_name, &svc_name, service)
                             .await?;
                     }
                 } else if running_count > target_count {
@@ -981,7 +984,7 @@ async fn main() -> Result<()> {
                                 .post(format!("{}/stop/{}", daemon_url, id))
                                 .send()
                                 .await;
-                            handle_simple_response(resp, daemon_url).await?;
+                            handle_simple_response(resp, &daemon_url).await?;
                         }
                     }
                 } else {
@@ -1125,7 +1128,7 @@ fn check_bridge() -> Result<bool> {
     Ok(output.status.success())
 }
 
-async fn build_image(context_path: &str, daemon_url: &str) -> Result<String> {
+async fn build_image_with_client(context_path: &str, client: &Client, daemon_url: &str) -> Result<String> {
     let context_path = Path::new(context_path);
     if !context_path.exists() {
         return Err(anyhow::anyhow!(
@@ -1153,12 +1156,11 @@ async fn build_image(context_path: &str, daemon_url: &str) -> Result<String> {
     let stream = tokio_util::codec::FramedRead::new(file, tokio_util::codec::BytesCodec::new());
     let body = reqwest::Body::wrap_stream(stream);
 
-    let client = Client::new();
     let resp = client
         .post(format!("{}/build", daemon_url))
         .body(body)
         .send()
-        .await?; // Removed map_err, standard error propagation
+        .await?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -1169,6 +1171,11 @@ async fn build_image(context_path: &str, daemon_url: &str) -> Result<String> {
     let image_id = resp.text().await?;
     info!("Build complete. Image ID: {}", image_id);
     Ok(image_id)
+}
+
+async fn build_image(context_path: &str, daemon_url: &str) -> Result<String> {
+    let client = Client::new();
+    build_image_with_client(context_path, &client, daemon_url).await
 }
 
 fn export_vm(vm_id: &str, output_path: &str) -> Result<()> {
@@ -1247,7 +1254,7 @@ async fn import_vm(input_path: &str, daemon_url: &str) -> Result<()> {
         .send()
         .await;
 
-    handle_response(resp, daemon_url).await?;
+    handle_response(resp, &daemon_url).await?;
 
     // NOTE: TempDir will be deleted when it goes out of scope!
     // But Restore API copies the COW file, so that's fine for COW.
@@ -1368,7 +1375,7 @@ async fn start_service_helper(
             ignite_compose::BuildSource::Config(c) => c.context.clone(),
         };
         info!("Building service '{}' from {}", name, context);
-        build_image(&context, daemon_url).await?
+        build_image_with_client(&context, client, daemon_url).await?
     } else if let Some(ref img) = service.image {
         img.clone()
     } else {
