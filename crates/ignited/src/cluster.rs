@@ -83,7 +83,8 @@ impl ClusterManager {
         
         // 1. Register with Seed
         let client = reqwest::Client::new();
-        let url = format!("http://{}:3000/swarm/register", seed_ip);
+        let port = std::env::var("IGNITE_DAEMON_PORT").unwrap_or_else(|_| "3000".to_string());
+        let url = format!("http://{}:{}/swarm/register", seed_ip, port);
         let resp = client.post(&url)
             .json(&req_node)
             .send()

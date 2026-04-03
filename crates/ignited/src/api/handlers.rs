@@ -541,6 +541,7 @@ pub async fn run_vm(
     let instance = VmInstance {
         vmm,
         id: vm_id.clone(),
+        fc_socket_path: socket_path.clone(),
         tap_name: if state.rootless {
             String::new()
         } else {
@@ -642,8 +643,9 @@ pub async fn pause_vm(
 
     if let Some(vm_mutex) = vm_arc {
         let vm = vm_mutex.lock().await;
+        info!("Pause VM {}: fc_socket_path={}", id, vm.fc_socket_path);
         vm.vmm
-            .pause_instance()
+            .pause_instance_with_socket(&vm.fc_socket_path)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         Ok(format!("VM {} paused", id))
@@ -666,7 +668,7 @@ pub async fn resume_vm(
     if let Some(vm_mutex) = vm_arc {
         let vm = vm_mutex.lock().await;
         vm.vmm
-            .resume_instance()
+            .resume_instance_with_socket(&vm.fc_socket_path)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         Ok(format!("VM {} resumed", id))
@@ -695,9 +697,10 @@ pub async fn snapshot_vm(
         let vm_dir = home.join(".ignite").join("vms").join(&id);
         let snapshot_path = vm_dir.join("snapshot.snap");
         let mem_path = vm_dir.join("memory.mem");
+        let fc_socket = vm.fc_socket_path.clone();
 
         // 1. Pause VM (Required for snapshot)
-        vm.vmm.pause_instance().await.map_err(|e| {
+        vm.vmm.pause_instance_with_socket(&fc_socket).await.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to pause: {}", e),
@@ -714,7 +717,7 @@ pub async fn snapshot_vm(
             .await;
 
         // 3. Resume VM (Always resume, even if snapshot failed)
-        if let Err(e) = vm.vmm.resume_instance().await {
+        if let Err(e) = vm.vmm.resume_instance_with_socket(&fc_socket).await {
             error!("Failed to resume VM {} after snapshot: {}", id, e);
         }
 
@@ -895,6 +898,7 @@ pub async fn restore_vm(
     let instance = VmInstance {
         vmm,
         id: vm_id.clone(),
+        fc_socket_path: socket_path.clone(),
         tap_name: tap_name.clone(),
         dm_name: dm_name.clone(),
         slirp: None,
@@ -1530,6 +1534,7 @@ pub async fn initialize_state(state: &AppState) {
             let instance = VmInstance {
                 vmm,
                 id: vm_state.id.clone(),
+                fc_socket_path: socket_path.clone(),
                 tap_name: vm_state.tap_name,
                 dm_name: vm_state.dm_name,
                 loop_devices: vm_state.loop_devices,
@@ -1563,6 +1568,7 @@ pub async fn initialize_state(state: &AppState) {
             let mut instance = VmInstance {
                 vmm,
                 id: vm_state.id.clone(),
+                fc_socket_path: socket_path,
                 tap_name: vm_state.tap_name,
                 dm_name: vm_state.dm_name,
                 loop_devices: vm_state.loop_devices,

@@ -8,10 +8,10 @@ setup_env
 
 # Start Daemon
 echo "Starting Daemon..."
-sudo -E $IGNITED_BIN --port 3008 > $TEST_HOME/daemon.log 2>&1 &
+sudo -E $IGNITED_BIN --socket-path /run/ignite/test.sock --http-port 3008 > $TEST_HOME/daemon.log 2>&1 &
 DAEMON_PID=$!
 sleep 3
-IGN="$IGN_BIN --address http://127.0.0.1:3008"
+IGN="$IGN_BIN --socket-path /run/ignite/test.sock --http-port 3008"
 
 # 1. Run VM
 echo "Running VM..."
@@ -26,9 +26,9 @@ if [ -z "$VM_ID" ]; then
     VM_ID=$($IGN ps | grep snap-vm | awk '{print $1}')
 fi
 echo "VM ID: $VM_ID"
-sleep 5
 
-# 2. Snapshot
+# 2. Snapshot (Must be done quickly - within 1 second - Alpine's /bin/sh exits fast)
+sleep 1
 echo "Snapshotting $VM_ID..."
 $IGN snapshot $VM_ID
 assert_success "Snapshot Request"

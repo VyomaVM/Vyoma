@@ -6,7 +6,7 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
 PACKAGE_DIR="$BUILD_DIR/ignite_2.1.1_amd64"
-VERSION="2.1.1"
+VERSION="2.1.2"
 
 echo "Building Ignite Debian package..."
 echo "Project root: $PROJECT_ROOT"
@@ -124,7 +124,7 @@ set -e
 # Update icons cache
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 
-# Create ignite user if not exists
+# Create ignite user (for socket ownership)
 if ! id ignite >/dev/null 2>&1; then
     useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Ignite MicroVM Daemon" ignite 2>/dev/null || true
 fi
@@ -147,23 +147,11 @@ mkdir -p /run/ignite
 chown root:ignite /run/ignite 2>/dev/null || true
 chmod 0755 /run/ignite 2>/dev/null || true
 
-# Set socket group ownership (will be created by daemon)
-chown root:ignite /run/ignite/ignite.sock 2>/dev/null || true
-chmod 0660 /run/ignite/ignite.sock 2>/dev/null || true
-
-# Add installing user to ignite group
+# Add installing user to ignite and kvm groups
 if [ -n "$SUDO_USER" ]; then
     usermod -aG ignite "$SUDO_USER" 2>/dev/null || true
     usermod -aG kvm "$SUDO_USER" 2>/dev/null || true
     echo "Added $SUDO_USER to ignite and kvm groups. Log out and back in to use CLI."
-fi
-
-# Ensure sudoers bypass for ignited commands
-if [ ! -f /etc/sudoers.d/ignite ]; then
-    cat <<'SUDOERS' > /etc/sudoers.d/ignite
-ignite ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/bin/ip, /usr/sbin/losetup, /usr/sbin/dmsetup, /usr/bin/debugfs
-SUDOERS
-    chmod 0440 /etc/sudoers.d/ignite
 fi
 
 # Enable and start systemd service automatically

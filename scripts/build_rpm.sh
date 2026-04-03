@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="2.1.1"
+VERSION="2.1.2"
 WORK_DIR="target/rpm"
 mkdir -p "${WORK_DIR}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
@@ -109,9 +109,15 @@ fi
 SPEC_CONTENT="$SPEC_CONTENT
 
 %post
-# Create ignite user if not exists
+# Create ignite user (for socket ownership)
 if ! getent passwd ignite > /dev/null 2>&1; then
     useradd -r -s /sbin/nologin -c \"Ignite MicroVM Daemon\" -d /var/lib/ignite ignite 2>/dev/null || true
+fi
+
+# Add installing user to ignite and kvm groups
+if [ -n \"\$USER\" ]; then
+    usermod -aG ignite \$USER 2>/dev/null || true
+    usermod -aG kvm \$USER 2>/dev/null || true
 fi
 
 # Add ignite daemon user to kvm group (for /dev/kvm access)
@@ -128,23 +134,11 @@ mkdir -p /run/ignite
 chown root:ignite /run/ignite 2>/dev/null || true
 chmod 0755 /run/ignite 2>/dev/null || true
 
-# Set socket group ownership (will be created by daemon)
-chown root:ignite /run/ignite/ignite.sock 2>/dev/null || true
-chmod 0660 /run/ignite/ignite.sock 2>/dev/null || true
-
-# Ensure sudoers bypass for ignited commands
-if [ ! -f /etc/sudoers.d/ignite ]; then
-    cat <<'SUDOERS' > /etc/sudoers.d/ignite
-ignite ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/bin/ip, /usr/sbin/losetup, /usr/sbin/dmsetup, /usr/bin/debugfs
-SUDOERS
-    chmod 0440 /etc/sudoers.d/ignite
-fi
-
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable ignited.service 2>/dev/null || true
 systemctl start ignited.service 2>/dev/null || true
 
-echo \"Ignite v${VERSION} installed successfully!\"
+echo \"Ignite v\${VERSION} installed successfully!\"
 echo \"Open http://localhost:3000 for the dashboard\"
 echo \"Run 'ign run nginx:latest' to start your first VM\"
 
@@ -157,11 +151,10 @@ if [ \$1 -eq 0 ]; then
 fi
 
 %changelog
-* Tue Mar 31 2026 Subeshrock <subesh.rock.3@gmail.com> - ${VERSION}-1
-- Bundle virtiofsd for volume mounts
-- Fix KVM permissions and socket ownership
-- Add ignite user to kvm group
-- Improve post-install setup
+* Wed Apr 01 2026 Subeshrock <subesh.rock.3@gmail.com> - \${VERSION}-1
+- Run daemon as root with capabilities (no sudo needed)
+- Remove sudoers configuration
+- Fix socket and KVM permissions
 "
 
 echo "$SPEC_CONTENT" > "${WORK_DIR}/SPECS/ignite.spec"

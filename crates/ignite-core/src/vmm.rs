@@ -6,7 +6,7 @@ use std::time::Duration;
 use std::fmt;
 use std::thread;
 use std::io::{BufRead, BufReader};
-use tracing::info;
+use tracing::{info, error};
 use tokio::sync::broadcast;
 
 impl fmt::Debug for VmmManager {
@@ -46,6 +46,51 @@ pub struct VmmManager {
     log_sender: broadcast::Sender<String>,
 }
 
+async fn api_request_with_socket<T: Serialize>(socket_path: &str, endpoint: &str, method: &str, body: Option<&T>) -> Result<()> {
+    let url = format!("http://localhost{}", endpoint);
+    
+    // Check if socket exists
+    if !Path::new(socket_path).exists() {
+        return Err(anyhow!("Firecracker socket not found at {} - Firecracker may have crashed", socket_path));
+    }
+    
+    // Check if it's actually a socket
+    let metadata = std::fs::metadata(socket_path)?;
+    use std::os::unix::fs::FileTypeExt;
+    if !metadata.file_type().is_socket() {
+        return Err(anyhow!("Path {} exists but is not a socket (type: {:?})", socket_path, metadata.file_type()));
+    }
+    
+    let mut cmd = Command::new("curl");
+    cmd.arg("--unix-socket").arg(socket_path)
+       .arg("-X").arg(method)
+       .arg("--silent")
+       .arg("--show-error")
+       .arg("-w").arg("\\n%{http_code}");
+
+    if let Some(b) = body {
+        let json = serde_json::to_string(b)?;
+        cmd.arg("-H").arg("Content-Type: application/json");
+        cmd.arg("-H").arg("Accept: application/json");
+        cmd.arg("-d").arg(json);
+    }
+    
+    cmd.arg(&url);
+
+    info!("FC API request: curl --unix-socket {} {} {}", socket_path, method, url);
+    
+    let output = cmd.output().map_err(|e| anyhow!("Failed to execute curl: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        error!("FC API {} failed. stderr: {}, stdout: {}", endpoint, stderr, stdout);
+        return Err(anyhow!("API request {} failed: {} | response: {}", endpoint, stderr, stdout));
+    }
+
+    Ok(())
+}
+
 impl VmmManager {
     pub fn new(socket_path: &str) -> Self {
         let (tx, _) = broadcast::channel(100);
@@ -56,6 +101,34 @@ impl VmmManager {
         }
     }
     
+    pub fn socket_path(&self) -> &str {
+        &self.socket_path
+    }
+
+    pub fn pause_instance_with_socket(&self, socket_path: &str) -> impl std::future::Future<Output = Result<()>> {
+        let socket = socket_path.to_string();
+        async move {
+            #[derive(Serialize)]
+            struct StateChange {
+                state: String,
+            }
+            let change = StateChange { state: "Paused".to_string() };
+            api_request_with_socket(&socket, "/vm", "PATCH", Some(&change)).await
+        }
+    }
+
+    pub fn resume_instance_with_socket(&self, socket_path: &str) -> impl std::future::Future<Output = Result<()>> {
+        let socket = socket_path.to_string();
+        async move {
+            #[derive(Serialize)]
+            struct StateChange {
+                state: String,
+            }
+            let change = StateChange { state: "Resumed".to_string() };
+            api_request_with_socket(&socket, "/vm", "PATCH", Some(&change)).await
+        }
+    }
+
     pub fn get_pid(&self) -> Option<u32> {
         self.process.as_ref().map(|p| p.id())
     }
@@ -193,12 +266,19 @@ impl VmmManager {
     async fn api_request<T: Serialize>(&self, endpoint: &str, method: &str, body: Option<&T>) -> Result<()> {
         let url = format!("http://localhost{}", endpoint);
         
+        info!("VMM api_request: socket_path={}, endpoint={}, method={}", self.socket_path, endpoint, method);
+        
+        // Check if socket exists
+        if !Path::new(&self.socket_path).exists() {
+            return Err(anyhow!("Firecracker socket not found at {} - FC may have crashed", self.socket_path));
+        }
+        
         let mut cmd = Command::new("curl");
         cmd.arg("--unix-socket").arg(&self.socket_path)
            .arg("-X").arg(method)
            .arg("--silent")
            .arg("--show-error")
-           .arg("--fail"); // Fail on HTTP errors
+           .arg("-w").arg("\\n%{http_code}"); // Add status code to output
 
         if let Some(b) = body {
             let json = serde_json::to_string(b)?;
@@ -213,7 +293,9 @@ impl VmmManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("API request {} failed: {}", endpoint, stderr));
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            error!("API {} failed. stderr: {}, stdout: {}", endpoint, stderr, stdout);
+            return Err(anyhow!("API request {} failed: {} | response: {}", endpoint, stderr, stdout));
         }
 
         Ok(())

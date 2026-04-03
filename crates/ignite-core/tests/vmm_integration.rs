@@ -30,7 +30,7 @@ async fn test_firecracker_lifecycle() -> Result<()> {
     }
 
     let mut vmm = VmmManager::new(socket_str);
-    vmm.start_daemon(fc_path)?;
+    vmm.start_daemon(fc_path, None, false)?;
 
     // Create dummy kernel and rootfs just to pass API validation (Firecracker checks file existence)
     let kernel_path = dir.path().join("vmlinux");

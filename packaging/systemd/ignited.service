@@ -5,13 +5,15 @@ After=network.target
 
 [Service]
 Type=simple
+# Run as ignite user with kernel capabilities
 User=ignite
 Group=ignite
+WorkingDirectory=/
 RuntimeDirectory=ignite
 RuntimeDirectoryMode=0775
-AmbientCapabilities=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE
-CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE
-ExecStart=/usr/bin/ignited --socket-path /run/ignite/ignite.sock --http-port 3000
+AmbientCapabilities=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE CAP_SETUID CAP_SETGID
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE CAP_SETUID CAP_SETGID
+ExecStart=/usr/bin/ignited --socket-path /run/ignite/ignite.sock --http-port 3000 --data-dir /var/lib/ignite
 Restart=on-failure
 RestartSec=5s
 Environment=RUST_LOG=info
