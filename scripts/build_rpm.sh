@@ -17,6 +17,16 @@ if [ ! -f "firecracker" ]; then
     chmod +x firecracker
 fi
 
+# Fetch CNI plugins
+CNI_VERSION="v1.5.1"
+CNI_DIR="${WORK_DIR}/SOURCES/cni"
+echo "Fetching CNI plugins..."
+mkdir -p "${CNI_DIR}/bin"
+if [ ! -f "cni-plugins.tgz" ]; then
+    wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz"
+fi
+tar -xzf cni-plugins.tgz -C "${CNI_DIR}/bin/"
+
 # Fetch virtiofsd with fallback URLs
 VIRTIOFSD_VERSION="1.11.1"
 
@@ -55,10 +65,30 @@ else
     echo "Warning: virtiofsd not available - volume mounts may not work"
 fi
 
+# Build UI (optional - requires Node.js)
+echo "Building UI..."
+if command -v npm &> /dev/null; then
+    cd ui
+    npm install
+    npm run build
+    cd ..
+    mkdir -p "${WORK_DIR}/SOURCES/ui"
+    cp -r ui/dist "${WORK_DIR}/SOURCES/ui/dist"
+    echo "UI bundled successfully"
+else
+    echo "Skipping UI build (npm not found)"
+fi
+
 # 3. Create Source Tarball
 TAR_SOURCES="-C target/release ign ignited -C ../../packaging/systemd ignited.service -C ../../ firecracker"
 if [ -f "virtiofsd_bin" ]; then
     TAR_SOURCES="$TAR_SOURCES virtiofsd_bin"
+fi
+# Add CNI plugins
+TAR_SOURCES="$TAR_SOURCES -C ${WORK_DIR}/SOURCES cni"
+# Add UI if built
+if [ -d "${WORK_DIR}/SOURCES/ui/dist" ]; then
+    TAR_SOURCES="$TAR_SOURCES -C ${WORK_DIR}/SOURCES/ui dist"
 fi
 tar -czf "${WORK_DIR}/SOURCES/ignite-${VERSION}.tar.gz" $TAR_SOURCES
 
@@ -74,7 +104,7 @@ Source0:    ignite-${VERSION}.tar.gz
 %description
 Ignite is a lightweight MicroVM runtime for running containers
 as lightweight virtual machines. Combines Firecracker speed with Docker UX.
-Includes CLI, Daemon, Web UI, and virtiofsd for volume mounts.
+Includes CLI, Daemon, Web UI, CNI plugins, and virtiofsd for volume mounts.
 
 %prep
 %setup -c
@@ -86,7 +116,15 @@ mkdir -p %{buildroot}/etc/systemd/system
 install -m 755 ignited %{buildroot}/usr/bin/ignited
 install -m 755 ign %{buildroot}/usr/bin/ign
 install -m 755 firecracker %{buildroot}/usr/bin/firecracker
-install -m 644 ignited.service %{buildroot}/etc/systemd/system/ignited.service"
+install -m 644 ignited.service %{buildroot}/etc/systemd/system/ignited.service
+
+# Install CNI plugins
+cp -r cni %{buildroot}/usr/lib/ignite/cni
+
+# Install UI if available
+if [ -d dist ]; then
+    cp -r dist %{buildroot}/usr/lib/ignite/ui
+fi"
 
 if [ -f "virtiofsd_bin" ]; then
     SPEC_CONTENT="$SPEC_CONTENT
@@ -99,7 +137,13 @@ SPEC_CONTENT="$SPEC_CONTENT
 /usr/bin/ignited
 /usr/bin/ign
 /usr/bin/firecracker
-/etc/systemd/system/ignited.service"
+/etc/systemd/system/ignited.service
+/usr/lib/ignite/cni"
+
+if [ -d "${WORK_DIR}/SOURCES/ui/dist" ]; then
+    SPEC_CONTENT="$SPEC_CONTENT
+/usr/lib/ignite/ui"
+fi
 
 if [ -f "virtiofsd_bin" ]; then
     SPEC_CONTENT="$SPEC_CONTENT
@@ -115,9 +159,14 @@ if ! getent passwd ignite > /dev/null 2>&1; then
 fi
 
 # Add installing user to ignite and kvm groups
-if [ -n \"\$USER\" ]; then
+if [ -n \"\$SUDO_USER\" ]; then
+    usermod -aG ignite \$SUDO_USER 2>/dev/null || true
+    usermod -aG kvm \$SUDO_USER 2>/dev/null || true
+    echo \"Added \$SUDO_USER to ignite and kvm groups. Log out and back in to use CLI.\"
+elif [ -n \"\$USER\" ]; then
     usermod -aG ignite \$USER 2>/dev/null || true
     usermod -aG kvm \$USER 2>/dev/null || true
+    echo \"Added \$USER to ignite and kvm groups. Log out and back in to use CLI.\"
 fi
 
 # Add ignite daemon user to kvm group (for /dev/kvm access)
@@ -129,10 +178,14 @@ fi
 chmod 0660 /dev/kvm 2>/dev/null || true
 chown root:kvm /dev/kvm 2>/dev/null || true
 
-# Create runtime directory
+# Create runtime directory - owned by root:ignite, group writable (0775)
 mkdir -p /run/ignite
 chown root:ignite /run/ignite 2>/dev/null || true
-chmod 0755 /run/ignite 2>/dev/null || true
+chmod 0775 /run/ignite 2>/dev/null || true
+
+# Setup CNI plugins directory (symlink from system data dir to package location)
+rm -rf /var/lib/ignite/.ignite/cni/bin 2>/dev/null || true
+ln -sf /usr/lib/ignite/cni/bin /var/lib/ignite/.ignite/cni/bin 2>/dev/null || true
 
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable ignited.service 2>/dev/null || true
@@ -155,6 +208,9 @@ fi
 - Run daemon as root with capabilities (no sudo needed)
 - Remove sudoers configuration
 - Fix socket and KVM permissions
+- Bundle CNI plugins for networking
+- Bundle UI in package
+- Fix /run/ignite directory permissions (0775)
 "
 
 echo "$SPEC_CONTENT" > "${WORK_DIR}/SPECS/ignite.spec"
@@ -167,7 +223,7 @@ mkdir -p dist
 mv ${WORK_DIR}/RPMS/x86_64/*.rpm dist/
 
 # 7. Cleanup
-rm -f firecracker firecracker.tgz virtiofsd.zip virtiofsd virtiofsd_bin
+rm -f firecracker firecracker.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
 rm -rf release-v1.7.0-x86_64
 rm -rf "${WORK_DIR}"
 

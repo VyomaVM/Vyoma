@@ -16,13 +16,14 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 *   **Ignite Compose**: Orchestrate stacks with `ignite-compose.yml`.
 *   **Web Dashboard**: Built-in visual management UI (bundled in Daemon, accessible at `http://localhost:3000`).
 *   **VS Code Extension**: Manage VMs directly from VS Code.
-*   **Self-Contained**: `.deb` package bundles primary dependencies (Firecracker).
+*   **Self-Contained**: `.deb` and `.rpm` packages bundle all dependencies (Firecracker, CNI plugins, UI).
 *   **Persistence**: Volume mounts (`virtiofs`) and Port Mapping.
 *   **Snapshotting**: Instant VM snapshots and State Teleportation.
+*   **Secure by Default**: Daemon runs as `ignite` user with kernel capabilities, socket permissions 0660.
 
 ---
 
-## � Installation
+## 📦 Installation
 
 ### 1. Download Package
 Go to the [Releases Page](https://github.com/Subeshrock/micro-vm-ecosystem/releases) and download the latest package for your distro.
@@ -39,10 +40,14 @@ sudo dpkg -i ignite_2.1.2_amd64.deb
 sudo rpm -i ignite-2.1.2-1.x86_64.rpm
 ```
 
+**Important:** After installation, **log out and log back in** once for your user to be added to the `ignite` group. This is required for the CLI to connect to the daemon.
+
 **What's Installed:**
 *   `/usr/bin/ignited`: The Daemon (Run via Systemd).
 *   `/usr/bin/ign`: The CLI Tool.
 *   `/usr/bin/firecracker`: Bundled VMM binary.
+*   `/usr/lib/ignite/cni/bin/`: CNI plugins for networking.
+*   `/usr/lib/ignite/ui/`: Web dashboard (served at `http://localhost:3000`).
 *   `/etc/systemd/system/ignited.service`: Service definition.
 
 ### 3. Verify Installation
@@ -66,6 +71,7 @@ For a complete reference of all 20+ commands, see [COMMANDS.md](COMMANDS.md).
 *   **Logs**: `ign logs -f <vm_id>`
 *   **Shell Access**: `ign exec <vm_id> /bin/bash`
 *   **Stop/Remove**: `ign stop <vm_id>`, `ign rm <vm_id>`
+*   **Pause/Resume**: `ign pause <vm_id>`, `ign resume <vm_id>`
 
 ### Networking
 Ignite uses CNI for robust networking.
@@ -156,8 +162,10 @@ services:
 
 Ignite is designed to be "Batteries Included", but some advanced features need helpers.
 
-**Primary Dependencies (Bundled in Packet):**
+**Primary Dependencies (Bundled in Package):**
 *   **Firecracker**: The VMM (Virtual Machine Monitor).
+*   **CNI Plugins**: For VM networking (bridge, host-local IPAM).
+*   **Web UI**: Dashboard bundled at `/usr/lib/ignite/ui`.
 *   **KVM**: Kernel-based Virtual Machine. **MUST be enabled in BIOS/OS** (`/dev/kvm`).
 *   **Systemd**: Manages the `ignited` daemon lifecycle.
 
@@ -168,8 +176,10 @@ Ignite is designed to be "Batteries Included", but some advanced features need h
     *   **Manual**: Download binary from [GitLab](https://gitlab.com/virtio-fs/virtiofsd/-/releases) and place in `$PATH` or `/usr/bin`.
 
 **Privilege Model:**
-*   **Daemon (`ignited`)**: Runs as **Root**.
-*   **Client (`ign`)**: Runs as **User**.
+*   **Daemon (`ignited`)**: Runs as **`ignite` user** with kernel capabilities (`CAP_NET_ADMIN`, `CAP_SYS_ADMIN`, `CAP_NET_RAW`, `CAP_SETUID`, `CAP_SETGID`).
+*   **Socket**: `/run/ignite/ignite.sock` with permissions `0660` (root:ignite).
+*   **Client (`ign`)**: Runs as **User** (must be in `ignite` group).
+*   **User Must Logout/Login Once**: After installation, log out and back in for group membership to take effect.
 
 ---
 
