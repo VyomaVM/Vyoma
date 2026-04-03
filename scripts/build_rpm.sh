@@ -32,7 +32,6 @@ VIRTIOFSD_VERSION="1.11.1"
 
 echo "Fetching virtiofsd..."
 if [ ! -f "virtiofsd_bin" ]; then
-    # Primary: GitLab releases
     PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-x86_64-musl.zip"
     if wget -q -O virtiofsd.zip "$PRIMARY_URL" 2>/dev/null; then
         unzip -q -o virtiofsd.zip
@@ -41,7 +40,6 @@ if [ ! -f "virtiofsd_bin" ]; then
     fi
 fi
 
-# Fallback 1: Try QEMU GitHub raw
 if [ ! -f "virtiofsd_bin" ]; then
     FALLBACK_URL1="https://github.com/qemu/qemu/raw/main/contrib/virtiofsd/virtiofsd-x86_64"
     if wget -q -O virtiofsd "$FALLBACK_URL1" 2>/dev/null; then
@@ -50,7 +48,6 @@ if [ ! -f "virtiofsd_bin" ]; then
     fi
 fi
 
-# Fallback 2: Try another mirror
 if [ ! -f "virtiofsd_bin" ]; then
     FALLBACK_URL2="https://raw.githubusercontent.com/qemu/qemu/master/contrib/virtiofsd/virtiofsd-x86_64"
     if wget -q -O virtiofsd "$FALLBACK_URL2" 2>/dev/null; then
@@ -65,18 +62,14 @@ else
     echo "Warning: virtiofsd not available - volume mounts may not work"
 fi
 
-# Build UI (optional - requires Node.js)
-echo "Building UI..."
-if command -v npm &> /dev/null; then
-    cd ui
-    npm install
-    npm run build
-    cd ..
+# Copy UI (built by workflow step or locally)
+echo "Bundling UI..."
+if [ -d "ui/dist" ]; then
     mkdir -p "${WORK_DIR}/SOURCES/ui"
     cp -r ui/dist "${WORK_DIR}/SOURCES/ui/dist"
     echo "UI bundled successfully"
 else
-    echo "Skipping UI build (npm not found)"
+    echo "Warning: UI not found - dashboard will not be available"
 fi
 
 # 3. Create Source Tarball
@@ -86,7 +79,7 @@ if [ -f "virtiofsd_bin" ]; then
 fi
 # Add CNI plugins
 TAR_SOURCES="$TAR_SOURCES -C ${WORK_DIR}/SOURCES cni"
-# Add UI if built
+# Add UI if available
 if [ -d "${WORK_DIR}/SOURCES/ui/dist" ]; then
     TAR_SOURCES="$TAR_SOURCES -C ${WORK_DIR}/SOURCES/ui dist"
 fi
