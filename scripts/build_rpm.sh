@@ -64,10 +64,12 @@ fi
 
 # Copy UI (built by workflow step or locally)
 echo "Bundling UI..."
+UI_AVAILABLE=false
 if [ -d "ui/dist" ]; then
-    mkdir -p "${WORK_DIR}/SOURCES/ui"
-    cp -r ui/dist "${WORK_DIR}/SOURCES/ui/dist"
+    mkdir -p "${WORK_DIR}/SOURCES/ui/dist"
+    cp -r ui/dist/* "${WORK_DIR}/SOURCES/ui/dist/"
     echo "UI bundled successfully"
+    UI_AVAILABLE=true
 else
     echo "Warning: UI not found - dashboard will not be available"
 fi
@@ -80,7 +82,7 @@ fi
 # Add CNI plugins
 TAR_SOURCES="$TAR_SOURCES -C ${WORK_DIR}/SOURCES cni"
 # Add UI if available
-if [ -d "${WORK_DIR}/SOURCES/ui/dist" ]; then
+if [ "$UI_AVAILABLE" = true ]; then
     TAR_SOURCES="$TAR_SOURCES -C ${WORK_DIR}/SOURCES/ui dist"
 fi
 tar -czf "${WORK_DIR}/SOURCES/ignite-${VERSION}.tar.gz" $TAR_SOURCES
@@ -133,7 +135,7 @@ SPEC_CONTENT="$SPEC_CONTENT
 /etc/systemd/system/ignited.service
 /usr/lib/ignite/cni"
 
-if [ -d "${WORK_DIR}/SOURCES/ui/dist" ]; then
+if [ "$UI_AVAILABLE" = true ]; then
     SPEC_CONTENT="$SPEC_CONTENT
 /usr/lib/ignite/ui"
 fi
