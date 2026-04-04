@@ -98,6 +98,32 @@ cp target/release/ign "${WORK_DIR}/usr/bin/"
 cp firecracker "${WORK_DIR}/usr/bin/firecracker"
 cp packaging/systemd/ignited.service "${WORK_DIR}/etc/systemd/system/"
 
+# Copy kernel and firecracker to data directory
+mkdir -p "${WORK_DIR}/var/lib/ignite/bin"
+if [ -f "bin/vmlinux" ]; then
+    cp bin/vmlinux "${WORK_DIR}/var/lib/ignite/bin/vmlinux"
+    echo "Kernel binary bundled"
+else
+    echo "Warning: bin/vmlinux not found - VMs will not start"
+fi
+
+# Bundle virtiofsd (from system or project bin)
+if [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
+    cp bin/virtiofsd "${WORK_DIR}/usr/lib/ignite/virtiofsd"
+    chmod +x "${WORK_DIR}/usr/lib/ignite/virtiofsd"
+    echo "virtiofsd bundled from project bin"
+elif [ -f "/usr/libexec/virtiofsd" ]; then
+    cp /usr/libexec/virtiofsd "${WORK_DIR}/usr/lib/ignite/virtiofsd"
+    chmod +x "${WORK_DIR}/usr/lib/ignite/virtiofsd"
+    echo "virtiofsd bundled from system"
+elif [ -f "/usr/bin/virtiofsd" ]; then
+    cp /usr/bin/virtiofsd "${WORK_DIR}/usr/lib/ignite/virtiofsd"
+    chmod +x "${WORK_DIR}/usr/lib/ignite/virtiofsd"
+    echo "virtiofsd bundled from /usr/bin"
+else
+    echo "Warning: virtiofsd not found - volume mounts may not work"
+fi
+
 # 5. Create Control File
 cat <<EOF > "${WORK_DIR}/DEBIAN/control"
 Package: ${PKG_NAME}

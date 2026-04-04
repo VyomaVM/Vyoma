@@ -38,42 +38,6 @@ if [ ! -f "cni-plugins.tgz" ]; then
 fi
 tar -xzf cni-plugins.tgz -C "${CNI_DIR}/"
 
-# Fetch virtiofsd with fallback URLs
-VIRTIOFSD_VERSION="1.11.1"
-echo "Fetching virtiofsd..."
-if [ ! -f "virtiofsd_bin" ]; then
-    PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-x86_64-musl.zip"
-    if wget -q -O virtiofsd.zip "$PRIMARY_URL" 2>/dev/null; then
-        unzip -q -o virtiofsd.zip
-        mv virtiofsd virtiofsd_bin 2>/dev/null || true
-        chmod +x virtiofsd_bin 2>/dev/null || true
-    fi
-fi
-
-if [ ! -f "virtiofsd_bin" ]; then
-    FALLBACK_URL1="https://github.com/qemu/qemu/raw/main/contrib/virtiofsd/virtiofsd-x86_64"
-    if wget -q -O virtiofsd "$FALLBACK_URL1" 2>/dev/null; then
-        mv virtiofsd virtiofsd_bin
-        chmod +x virtiofsd_bin
-    fi
-fi
-
-if [ ! -f "virtiofsd_bin" ]; then
-    FALLBACK_URL2="https://raw.githubusercontent.com/qemu/qemu/master/contrib/virtiofsd/virtiofsd-x86_64"
-    if wget -q -O virtiofsd "$FALLBACK_URL2" 2>/dev/null; then
-        mv virtiofsd virtiofsd_bin
-        chmod +x virtiofsd_bin
-    fi
-fi
-
-if [ -f "virtiofsd_bin" ]; then
-    echo "virtiofsd fetched successfully"
-    cp virtiofsd_bin "${SOURCES_DIR}/virtiofsd"
-    chmod +x "${SOURCES_DIR}/virtiofsd"
-else
-    echo "Warning: virtiofsd not available - volume mounts may not work"
-fi
-
 # Copy UI (built by workflow step or locally)
 echo "Bundling UI..."
 UI_AVAILABLE=false
@@ -84,6 +48,32 @@ if [ -d "ui/dist" ]; then
     UI_AVAILABLE=true
 else
     echo "Warning: UI not found - dashboard will not be available"
+fi
+
+# Copy kernel binary
+if [ -f "bin/vmlinux" ]; then
+    mkdir -p "${SOURCES_DIR}/bin"
+    cp bin/vmlinux "${SOURCES_DIR}/bin/vmlinux"
+    echo "Kernel binary bundled"
+else
+    echo "Warning: bin/vmlinux not found - VMs will not start"
+fi
+
+# Bundle virtiofsd (from system or project bin)
+if [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
+    cp bin/virtiofsd "${SOURCES_DIR}/virtiofsd"
+    chmod +x "${SOURCES_DIR}/virtiofsd"
+    echo "virtiofsd bundled from project bin"
+elif [ -f "/usr/libexec/virtiofsd" ]; then
+    cp /usr/libexec/virtiofsd "${SOURCES_DIR}/virtiofsd"
+    chmod +x "${SOURCES_DIR}/virtiofsd"
+    echo "virtiofsd bundled from system"
+elif [ -f "/usr/bin/virtiofsd" ]; then
+    cp /usr/bin/virtiofsd "${SOURCES_DIR}/virtiofsd"
+    chmod +x "${SOURCES_DIR}/virtiofsd"
+    echo "virtiofsd bundled from /usr/bin"
+else
+    echo "Warning: virtiofsd not found - volume mounts may not work"
 fi
 
 # 4. Create Source Tarball
@@ -118,7 +108,11 @@ install -m 755 firecracker %{buildroot}/usr/bin/firecracker
 install -m 644 ignited.service %{buildroot}/etc/systemd/system/ignited.service
 
 # Install CNI plugins
-cp -r cni %{buildroot}/usr/lib/ignite/cni"
+cp -r cni %{buildroot}/usr/lib/ignite/cni
+
+# Install kernel binary
+mkdir -p %{buildroot}/var/lib/ignite/bin
+install -m 755 bin/vmlinux %{buildroot}/var/lib/ignite/bin/vmlinux"
 
 if [ "$UI_AVAILABLE" = true ]; then
     SPEC_CONTENT="$SPEC_CONTENT
@@ -139,7 +133,8 @@ SPEC_CONTENT="$SPEC_CONTENT
 /usr/bin/ign
 /usr/bin/firecracker
 /etc/systemd/system/ignited.service
-/usr/lib/ignite/cni"
+/usr/lib/ignite/cni
+/var/lib/ignite/bin/vmlinux"
 
 if [ "$UI_AVAILABLE" = true ]; then
     SPEC_CONTENT="$SPEC_CONTENT

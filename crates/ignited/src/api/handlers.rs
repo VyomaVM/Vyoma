@@ -438,7 +438,7 @@ pub async fn run_vm(
         slirp_mgr = Some(slirp);
 
         // Config FC
-        if let Err(e) = vmm.set_boot_source(kernel_path, &boot_args).await {
+        if let Err(e) = vmm.set_boot_source(&kernel_path, &boot_args).await {
             let _ = vmm.kill();
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -472,7 +472,7 @@ pub async fn run_vm(
         }
 
         // Config
-        if let Err(e) = vmm.set_boot_source(kernel_path, &boot_args).await {
+        if let Err(e) = vmm.set_boot_source(&kernel_path, &boot_args).await {
             let _ = vmm.kill();
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
