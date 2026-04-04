@@ -391,12 +391,19 @@ pub async fn run_vm(
     let socket_path = format!("/tmp/firecracker_{}.socket", vm_id);
     let mut vmm = VmmManager::new(&socket_path);
 
-    // Kernel path: bin/vmlinux (relative to CWD of daemon)
-    let kernel_path = "bin/vmlinux";
-    if !std::path::Path::new(kernel_path).exists() {
+    // Kernel and Firecracker paths from data_dir
+    let kernel_path = format!("{}/bin/vmlinux", state.data_dir);
+    let firecracker_path = format!("{}/bin/firecracker", state.data_dir);
+    if !std::path::Path::new(&kernel_path).exists() {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Kernel binary (bin/vmlinux) not found".into(),
+            format!("Kernel binary not found at {}", kernel_path).into(),
+        ));
+    }
+    if !std::path::Path::new(&firecracker_path).exists() {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Firecracker binary not found at {}", firecracker_path).into(),
         ));
     }
 
@@ -405,7 +412,7 @@ pub async fn run_vm(
     if state.rootless {
         // Rootless Start
         info!("Spawning Firecracker in Rootless Mode (unshare -r -n)...");
-        if let Err(e) = vmm.start_daemon("bin/firecracker", None, true) {
+        if let Err(e) = vmm.start_daemon(&firecracker_path, None, true) {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to start FC (Rootless): {}", e),
@@ -457,7 +464,7 @@ pub async fn run_vm(
         }
     } else {
         // Root/CNI Start (Hybrid Mode)
-        if let Err(e) = vmm.start_daemon("bin/firecracker", None, false) {
+        if let Err(e) = vmm.start_daemon(&firecracker_path, None, false) {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to start FC: {}", e),
@@ -848,7 +855,7 @@ pub async fn restore_vm(
     let socket_path = format!("/tmp/firecracker_{}.socket", vm_id);
     let mut vmm = VmmManager::new(&socket_path);
 
-    if let Err(e) = vmm.start_daemon("bin/firecracker", None, state.rootless) {
+    if let Err(e) = vmm.start_daemon(&format!("{}/bin/firecracker", state.data_dir), None, state.rootless) {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to start FC: {}", e),
