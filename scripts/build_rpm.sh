@@ -3,12 +3,21 @@ set -e
 
 VERSION="2.1.2"
 WORK_DIR="target/rpm"
+SOURCES_DIR="${WORK_DIR}/SOURCES/ignite-${VERSION}"
+
+# Clean up any previous build
+rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+mkdir -p "${SOURCES_DIR}"
 
 # 1. Build Binaries
 cargo build --release --bin ignited --bin ign
 
-# 2. Fetch Dependencies
+# 2. Copy binaries to source dir
+cp target/release/ignited "${SOURCES_DIR}/"
+cp target/release/ign "${SOURCES_DIR}/"
+
+# 3. Fetch Dependencies
 echo "Fetching dependencies..."
 if [ ! -f "firecracker" ]; then
     wget -q -O firecracker.tgz https://github.com/firecracker-microvm/firecracker/releases/download/v1.7.0/firecracker-v1.7.0-x86_64.tgz
@@ -16,20 +25,21 @@ if [ ! -f "firecracker" ]; then
     mv release-v1.7.0-x86_64/firecracker-v1.7.0-x86_64 firecracker
     chmod +x firecracker
 fi
+cp firecracker "${SOURCES_DIR}/"
+cp packaging/systemd/ignited.service "${SOURCES_DIR}/"
 
 # Fetch CNI plugins
 CNI_VERSION="v1.5.1"
-CNI_DIR="${WORK_DIR}/SOURCES/cni"
+CNI_DIR="${SOURCES_DIR}/cni/bin"
 echo "Fetching CNI plugins..."
-mkdir -p "${CNI_DIR}/bin"
+mkdir -p "${CNI_DIR}"
 if [ ! -f "cni-plugins.tgz" ]; then
     wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz"
 fi
-tar -xzf cni-plugins.tgz -C "${CNI_DIR}/bin/"
+tar -xzf cni-plugins.tgz -C "${CNI_DIR}/"
 
 # Fetch virtiofsd with fallback URLs
 VIRTIOFSD_VERSION="1.11.1"
-
 echo "Fetching virtiofsd..."
 if [ ! -f "virtiofsd_bin" ]; then
     PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-x86_64-musl.zip"
@@ -58,34 +68,30 @@ fi
 
 if [ -f "virtiofsd_bin" ]; then
     echo "virtiofsd fetched successfully"
+    cp virtiofsd_bin "${SOURCES_DIR}/virtiofsd"
+    chmod +x "${SOURCES_DIR}/virtiofsd"
 else
     echo "Warning: virtiofsd not available - volume mounts may not work"
 fi
 
 # Copy UI (built by workflow step or locally)
 echo "Bundling UI..."
+UI_AVAILABLE=false
 if [ -d "ui/dist" ]; then
-    mkdir -p "${WORK_DIR}/SOURCES/ui"
-    cp -r ui/dist "${WORK_DIR}/SOURCES/ui/dist"
+    mkdir -p "${SOURCES_DIR}/ui/dist"
+    cp -r ui/dist/* "${SOURCES_DIR}/ui/dist/"
     echo "UI bundled successfully"
+    UI_AVAILABLE=true
 else
     echo "Warning: UI not found - dashboard will not be available"
 fi
 
-# 3. Create Source Tarball
-TAR_SOURCES="-C target/release ign ignited -C ../../packaging/systemd ignited.service -C ../../ firecracker"
-if [ -f "virtiofsd_bin" ]; then
-    TAR_SOURCES="$TAR_SOURCES virtiofsd_bin"
-fi
-# Add CNI plugins
-TAR_SOURCES="$TAR_SOURCES -C ${WORK_DIR}/SOURCES cni"
-# Add UI if available
-if [ -d "${WORK_DIR}/SOURCES/ui/dist" ]; then
-    TAR_SOURCES="$TAR_SOURCES -C ${WORK_DIR}/SOURCES/ui dist"
-fi
-tar -czf "${WORK_DIR}/SOURCES/ignite-${VERSION}.tar.gz" $TAR_SOURCES
+# 4. Create Source Tarball
+cd "${WORK_DIR}/SOURCES"
+tar -czf "ignite-${VERSION}.tar.gz" "ignite-${VERSION}"
+cd ../../..
 
-# 4. Create SPEC File
+# 5. Create SPEC File
 SPEC_CONTENT="Name:       ignite
 Version:    ${VERSION}
 Release:    1%{?dist}
@@ -100,7 +106,7 @@ as lightweight virtual machines. Combines Firecracker speed with Docker UX.
 Includes CLI, Daemon, Web UI, CNI plugins, and virtiofsd for volume mounts.
 
 %prep
-%setup -c
+%setup -q
 
 %install
 mkdir -p %{buildroot}/usr/bin
@@ -112,16 +118,18 @@ install -m 755 firecracker %{buildroot}/usr/bin/firecracker
 install -m 644 ignited.service %{buildroot}/etc/systemd/system/ignited.service
 
 # Install CNI plugins
-cp -r cni %{buildroot}/usr/lib/ignite/cni
+cp -r cni %{buildroot}/usr/lib/ignite/cni"
 
-# Install UI if available
-if [ -d dist ]; then
-    cp -r dist %{buildroot}/usr/lib/ignite/ui
-fi"
-
-if [ -f "virtiofsd_bin" ]; then
+if [ "$UI_AVAILABLE" = true ]; then
     SPEC_CONTENT="$SPEC_CONTENT
-install -m 755 virtiofsd_bin %{buildroot}/usr/lib/ignite/virtiofsd"
+
+# Install UI
+cp -r ui %{buildroot}/usr/lib/ignite/ui"
+fi
+
+if [ -f "${SOURCES_DIR}/virtiofsd" ]; then
+    SPEC_CONTENT="$SPEC_CONTENT
+install -m 755 virtiofsd %{buildroot}/usr/lib/ignite/virtiofsd"
 fi
 
 SPEC_CONTENT="$SPEC_CONTENT
@@ -133,12 +141,12 @@ SPEC_CONTENT="$SPEC_CONTENT
 /etc/systemd/system/ignited.service
 /usr/lib/ignite/cni"
 
-if [ -d "${WORK_DIR}/SOURCES/ui/dist" ]; then
+if [ "$UI_AVAILABLE" = true ]; then
     SPEC_CONTENT="$SPEC_CONTENT
 /usr/lib/ignite/ui"
 fi
 
-if [ -f "virtiofsd_bin" ]; then
+if [ -f "${SOURCES_DIR}/virtiofsd" ]; then
     SPEC_CONTENT="$SPEC_CONTENT
 /usr/lib/ignite/virtiofsd"
 fi
@@ -208,14 +216,14 @@ fi
 
 echo "$SPEC_CONTENT" > "${WORK_DIR}/SPECS/ignite.spec"
 
-# 5. Build RPM
+# 6. Build RPM
 rpmbuild --define "_topdir $(pwd)/${WORK_DIR}" -bb "${WORK_DIR}/SPECS/ignite.spec"
 
-# 6. Move to dist
+# 7. Move to dist
 mkdir -p dist
 mv ${WORK_DIR}/RPMS/x86_64/*.rpm dist/
 
-# 7. Cleanup
+# 8. Cleanup
 rm -f firecracker firecracker.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
 rm -rf release-v1.7.0-x86_64
 rm -rf "${WORK_DIR}"
