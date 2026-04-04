@@ -26,24 +26,18 @@ EOF
 # 2. Build
 echo "Building Image..."
 # Output parsing needed? ign build currently prints to stdout?
-$IGN build $CTX
+OUTPUT=$($IGN build $CTX 2>&1)
+echo "$OUTPUT"
 assert_success "Build Command"
 
-# 3. Verify Image Exists
-# Requires `ign images` command
-echo "Listing Images..."
-IMAGES=$($IGN images)
-echo "$IMAGES"
-# Check for... what tag?
-# ign build currently doesn't tag? or uses Ignitefile name?
-# Phase 10: "ign build" (context tarball + POST).
-# Does it Create a new image ID?
-# Assuming generic success for now.
-
-# 4. Run Built Image?
-# Requires knowing the ID of built image.
-# If CLI doesn't output ID cleanly, this is hard.
-# Skipping Run for now, just checking Build success.
+# 3. Verify Build Succeeded
+# Check output contains "Build complete" or image ID
+if echo "$OUTPUT" | grep -q "Build complete"; then
+    echo -e "${GREEN}Pass: Build completed successfully${NC}"
+else
+    echo -e "${RED}Fail: Build did not complete${NC}"
+    exit 1
+fi
 
 cleanup_env $DAEMON_PID
 echo "=== Test 03 Passed ==="
