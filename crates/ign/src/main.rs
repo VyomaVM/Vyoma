@@ -1137,19 +1137,22 @@ async fn build_image_with_client(context_path: &str, client: &Client, daemon_url
         ));
     }
 
-    // Create tarball in memory (or temp file if large, memory for now)
-    // Actually, reqwest Body can take a File.
-    // Let's tar to a temp file.
+    // Create tarball to temp file
     let temp_dir = tempfile::tempdir()?;
     let tar_path = temp_dir.path().join("context.tar.gz");
-    let tar_file = File::create(&tar_path)?;
-
-    let enc = GzEncoder::new(tar_file, Compression::default());
-    let mut tar = tar::Builder::new(enc);
-
-    // Add directory content to tar (recursively)
-    tar.append_dir_all(".", context_path)?;
-    tar.finish()?;
+    
+    // Create tar.gz using subprocess for reliability
+    let status = std::process::Command::new("tar")
+        .arg("-czf")
+        .arg(&tar_path)
+        .arg("-C")
+        .arg(context_path)
+        .arg(".")
+        .status()?;
+    
+    if !status.success() {
+        return Err(anyhow::anyhow!("Failed to create tarball"));
+    }
 
     // Send to daemon
     let file = tokio::fs::File::open(&tar_path).await?;
