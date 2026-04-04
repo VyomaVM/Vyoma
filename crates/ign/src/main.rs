@@ -1104,6 +1104,10 @@ fn check_binary(name: &str) -> Result<bool> {
     if Path::new(&format!("/usr/libexec/ignite/{}", name)).exists() {
         return Ok(true);
     }
+    // Check bundled path from package
+    if Path::new(&format!("/usr/lib/ignite/{}", name)).exists() {
+        return Ok(true);
+    }
 
     // Check local development path
     if Path::new(&format!("bin/{}", name)).exists() {
