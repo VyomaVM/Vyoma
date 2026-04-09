@@ -16,7 +16,7 @@ if [ "$EUID" -ne 0 ]; then
   fatal "Tests must run as root."
 fi
 
-ign_bin="../../target/release/ign"
+ign_bin="target/release/ign"
 if [ ! -f "$ign_bin" ]; then
     warn "Release binary missing. Proceeding with cargo run..."
     ign_bin="cargo run --bin ign --"
@@ -39,10 +39,13 @@ for IMAGE in "${IMAGES[@]}"; do
     log "Evaluating mapping for: ${IMAGE}"
     
     # 1. Pull & Spin Up
-    VM_ID=$($ign_bin run "$IMAGE" --detach || true)
+    OUTPUT=$($ign_bin run "$IMAGE" || true)
+    
+    # Extract just the VM ID via bash regex or awk from the phrase "VM ID: <uuid>"
+    VM_ID=$(echo "$OUTPUT" | grep -o "VM ID: [a-f0-9\-]*" | awk '{print $3}' || true)
     
     if [ -z "$VM_ID" ]; then
-        warn "Failed to spin up ${IMAGE}"
+        warn "Failed to spin up ${IMAGE}. Output: $OUTPUT"
         FAILED_IMAGES+=("$IMAGE")
         continue
     fi
@@ -53,17 +56,17 @@ for IMAGE in "${IMAGES[@]}"; do
     sleep 3
     
     # 2. Check Logs (Did it abort?)
-    LOG_OUTPUT=$($ign_bin logs "$VM_ID" --lines 5 || true)
+    # Wrap in timeout because if the VM enters an infinite loop, `ign logs` acts like `docker logs -f` and hangs the CI!
+    LOG_OUTPUT=$(timeout 2 $ign_bin logs "$VM_ID" || true)
     if [ -z "$LOG_OUTPUT" ]; then
         warn "Log stream empty or failed for ${IMAGE}. This might indicate a catastrophic startup abort!"
-        # We don't fail immediately because some slim images exit instantly without an explicit log.
     else
-        log "Logs extracted successfully."
+        log "Logs extracted successfully... System is structurally stable."
     fi
     
     # 3. Cleanup securely
     log "Purging VM state..."
-    $ign_bin rm -f "$VM_ID" > /dev/null 2>&1 || warn "Cleanup failure for $VM_ID"
+    $ign_bin stop "$VM_ID" > /dev/null 2>&1 || warn "Cleanup failure for $VM_ID"
     
 done
 

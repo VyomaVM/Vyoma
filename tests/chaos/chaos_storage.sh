@@ -16,20 +16,21 @@ if [ "$EUID" -ne 0 ]; then
   fatal "Chaos tests must run as root."
 fi
 
-ign_bin="../../target/release/ign"
+ign_bin="target/release/ign"
 if [ ! -f "$ign_bin" ]; then
     ign_bin="cargo run --bin ign --"
 fi
 
 log "Starting Chaos Storage Simulation..."
 
-VM_ID=$($ign_bin run alpine:latest --detach)
+OUTPUT=$($ign_bin run alpine:latest || true)
+VM_ID=$(echo "$OUTPUT" | grep -o "VM ID: [a-f0-9\-]*" | awk '{print $3}' || true)
 log "Launched victim VM: $VM_ID"
 
 sleep 2
 
 # Hunt for the Devicemapper backing loop
-DM_NAME="ignite_snap_${VM_ID}"
+DM_NAME="ign-${VM_ID}"
 log "Checking for dmsetup mapping: ${DM_NAME}"
 
 if dmsetup info "$DM_NAME" > /dev/null 2>&1; then
@@ -49,6 +50,6 @@ else
 fi
 
 log "Cleaning up victim VM."
-$ign_bin rm -f "$VM_ID" > /dev/null 2>&1 || true
+$ign_bin stop "$VM_ID" > /dev/null 2>&1 || true
 
 log "Chaos Storage sequence completed!"
