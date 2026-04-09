@@ -112,6 +112,15 @@ impl SnapshotTree {
         Ok(())
     }
     
+    pub fn update(&self, node: &SnapshotNode) -> Result<()> {
+        info!("Updating snapshot metadata for {}", node.id);
+        let key = node.id.as_bytes();
+        let value = serde_json::to_vec(node).map_err(|e| StorageError::Json(e))?;
+        self.snapshots.insert(key, value)?;
+        self.snapshots.flush()?;
+        Ok(())
+    }
+    
     pub fn get(&self, id: &str) -> Result<SnapshotNode> {
         let key = id.as_bytes();
         let value = self.snapshots
