@@ -1,5 +1,9 @@
+use tracing::{info, warn, error};
+use rtnetlink::{new_connection, Handle};
+use netlink_packet_route::link::State;
+use netlink_packet_route::link::LinkAttribute;
+use futures::stream::TryStreamExt;
 use std::process::Command;
-use tracing::{info, warn};
 
 use crate::error::{NetworkError, Result};
 
@@ -11,28 +15,26 @@ pub struct TapInfo {
 }
 
 pub struct TapManager {
-    // In production, this would hold the rtnetlink Handle
-    _phantom: std::marker::PhantomData<()>,
+    handle: Handle,
 }
 
 impl TapManager {
-    pub fn new() -> Result<Self> {
-        info!("Initializing TAP manager");
-        Ok(Self {
-            _phantom: std::marker::PhantomData,
-        })
+    pub async fn new() -> Result<Self> {
+        info!("Initializing native TAP manager via rtnetlink");
+        let (connection, handle, _) = new_connection().map_err(|e| NetworkError::Io(e))?;
+        tokio::spawn(connection);
+        
+        Ok(Self { handle })
     }
     
-    /// Create a TAP device
     pub async fn create_tap(&self, name: &str) -> Result<String> {
         info!("Creating TAP device: {}", name);
         
-        // Validate name
         if name.is_empty() {
             return Err(NetworkError::InvalidInput("TAP name cannot be empty".to_string()));
         }
         
-        // Use ip command to create TAP
+        // Use ip tuntap natively-ish via fallback, because rust rtnetlink does not fully map the tuntap TUNSETIFF ioctls cleanly yet without nix/libc crates.
         let output = Command::new("ip")
             .args(&["tuntap", "add", name, "mode", "tap"])
             .output()
@@ -49,105 +51,102 @@ impl TapManager {
         Ok(name.to_string())
     }
     
-    /// Delete a TAP device
     pub async fn delete_tap(&self, name: &str) -> Result<()> {
-        info!("Deleting TAP device: {}", name);
+        info!("Deleting native TAP device: {}", name);
         
-        let output = Command::new("ip")
-            .args(&["tuntap", "del", name, "mode", "tap"])
-            .output()
-            .map_err(|e| NetworkError::Io(e))?;
-        
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("No such device") {
-                return Ok(()); // Already deleted
+        match self.get_interface_index(name).await {
+            Ok(index) => {
+                if let Err(e) = self.handle.link().del(index).execute().await {
+                    return Err(NetworkError::Netlink(e.to_string()));
+                }
             }
-            return Err(NetworkError::Netlink(stderr.to_string()));
+            Err(_) => return Ok(()), // Already deleted
         }
         
         Ok(())
     }
     
-    /// Set TAP up
     pub async fn set_up(&self, name: &str) -> Result<()> {
-        info!("Setting TAP {} up", name);
+        info!("Setting TAP {} up natively", name);
         
-        let output = Command::new("ip")
-            .args(&["link", "set", name, "up"])
-            .output()
-            .map_err(|e| NetworkError::Io(e))?;
-        
-        if !output.status.success() {
-            return Err(NetworkError::Netlink("Failed to set TAP up".to_string()));
+        let index = self.get_interface_index(name).await?;
+        if let Err(e) = self.handle.link().set(index).up().execute().await {
+            return Err(NetworkError::Netlink(format!("Failed to set TAP up: {}", e)));
         }
         
         Ok(())
     }
     
-    /// Get TAP interface info
     pub async fn get_info(&self, name: &str) -> Result<TapInfo> {
-        info!("Getting TAP info: {}", name);
+        info!("Getting TAP info natively: {}", name);
         
-        let output = Command::new("ip")
-            .args(&["link", "show", name])
-            .output()
-            .map_err(|e| NetworkError::Io(e))?;
+        let mut links = self.handle.link().get().match_name(name.to_string()).execute();
         
-        if !output.status.success() {
-            return Err(NetworkError::NotFound(format!("TAP {} not found", name)));
-        }
-        
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut index = 0u32;
-        let mut state = "unknown".to_string();
-        
-        for line in stdout.lines() {
-            if line.contains(":") && !line.starts_with(" ") {
-                let parts: Vec<&str> = line.split(':').collect();
-                if parts.len() >= 1 {
-                    index = parts[0].trim().parse().unwrap_or(0);
+        if let Ok(Some(link)) = links.try_next().await {
+            let index = link.header.index;
+            let mut state = "unknown".to_string();
+            
+            for nla in link.attributes.into_iter() {
+                if let LinkAttribute::OperState(s) = nla {
+                    state = match s {
+                        State::Up => "up".to_string(),
+                        State::Down => "down".to_string(),
+                        _ => "unknown".to_string(),
+                    };
                 }
             }
-            if line.contains("state") {
-                if let Some(s) = line.split("state").nth(1) {
-                    state = s.trim().split_whitespace().next().unwrap_or("unknown").to_string();
-                }
-            }
+            
+            return Ok(TapInfo { name: name.to_string(), index, state });
         }
         
-        Ok(TapInfo { name: name.to_string(), index, state })
+        Err(NetworkError::NotFound(format!("TAP {} not found", name)))
     }
     
-    /// List all TAP devices
     pub async fn list_taps(&self) -> Result<Vec<TapInfo>> {
-        info!("Listing TAP devices");
+        info!("Listing TAP devices natively");
         
-        let output = Command::new("ip")
-            .args(&["link", "show"])
-            .output()
-            .map_err(|e| NetworkError::Io(e))?;
-        
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut links = self.handle.link().get().execute();
         let mut taps = Vec::new();
         
-        for line in stdout.lines() {
-            if line.contains(":") && !line.starts_with(" ") {
-                let parts: Vec<&str> = line.split(':').collect();
-                if parts.len() >= 2 {
-                    let name = parts[1].trim().to_string();
-                    if name.starts_with("tap") {
-                        taps.push(TapInfo {
-                            name,
-                            index: 0,
-                            state: "unknown".to_string(),
-                        });
+        while let Ok(Some(link)) = links.try_next().await {
+            let index = link.header.index;
+            let mut name = String::new();
+            let mut state = "unknown".to_string();
+            
+            for nla in link.attributes.into_iter() {
+                match nla {
+                    LinkAttribute::IfName(n) => name = n,
+                    LinkAttribute::OperState(s) => {
+                        state = match s {
+                            State::Up => "up".to_string(),
+                            State::Down => "down".to_string(),
+                            _ => "unknown".to_string(),
+                        };
                     }
+                    _ => {}
                 }
+            }
+            
+            if name.starts_with("tap") {
+                taps.push(TapInfo {
+                    name,
+                    index,
+                    state,
+                });
             }
         }
         
         Ok(taps)
+    }
+    
+    async fn get_interface_index(&self, name: &str) -> Result<u32> {
+        let mut links = self.handle.link().get().match_name(name.to_string()).execute();
+        
+        if let Ok(Some(link)) = links.try_next().await {
+            return Ok(link.header.index);
+        }
+        
+        Err(NetworkError::NotFound(format!("Interface {} not found", name)))
     }
 }
 
@@ -157,8 +156,8 @@ mod tests {
     
     #[tokio::test]
     async fn test_tap_manager_creation() {
-        let tm = TapManager::new().unwrap();
+        let tm = TapManager::new().await.unwrap();
         let taps = tm.list_taps().await.unwrap();
-        println!("Found {} TAP devices", taps.len());
+        println!("Found {} TAP devices natively", taps.len());
     }
 }

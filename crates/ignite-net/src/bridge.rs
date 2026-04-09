@@ -1,5 +1,10 @@
-use std::collections::HashMap;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
+use rtnetlink::{new_connection, Handle, Error as RtNetlinkError};
+use netlink_packet_route::link::State;
+use netlink_packet_route::link::LinkAttribute;
+use netlink_packet_route::link::LinkInfo;
+use netlink_packet_route::link::InfoKind;
+use futures::stream::TryStreamExt;
 
 use crate::error::{NetworkError, Result};
 
@@ -12,156 +17,131 @@ pub struct BridgeInfo {
 }
 
 pub struct BridgeManager {
-    // In production, this would hold the rtnetlink Handle
-    _phantom: std::marker::PhantomData<()>,
+    handle: Handle,
 }
 
 impl BridgeManager {
-    pub fn new() -> Result<Self> {
-        info!("Initializing Bridge manager");
-        Ok(Self {
-            _phantom: std::marker::PhantomData,
-        })
+    pub async fn new() -> Result<Self> {
+        info!("Initializing native Bridge manager via rtnetlink");
+        let (connection, handle, _) = new_connection().map_err(|e| NetworkError::Io(e))?;
+        tokio::spawn(connection);
+        
+        Ok(Self { handle })
     }
     
-    /// Create a bridge interface (placeholder)
     pub async fn create_bridge(&self, name: &str) -> Result<u32> {
-        info!("Creating bridge: {}", name);
+        info!("Creating native bridge: {}", name);
         
-        // Validate name
         if name.is_empty() {
             return Err(NetworkError::InvalidInput("Bridge name cannot be empty".to_string()));
         }
         
-        // In production: use rtnetlink to create bridge
-        // For now: use ip command as fallback
-        let output = std::process::Command::new("ip")
-            .args(&["link", "add", name, "type", "bridge"])
-            .output()
-            .map_err(|e| NetworkError::Io(e))?;
-        
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("File exists") {
-                return Err(NetworkError::AlreadyExists(format!("Bridge {} already exists", name)));
+        let req = self.handle.link().add().bridge(name.to_string());
+        if let Err(e) = req.execute().await {
+            match e {
+                RtNetlinkError::NetlinkError(ref msg) if msg.code.map_or(0, |c| c.get()) == -17 => { // EEXIST
+                    return Err(NetworkError::AlreadyExists(format!("Bridge {} already exists", name)));
+                }
+                _ => return Err(NetworkError::Netlink(e.to_string())),
             }
-            return Err(NetworkError::Netlink(stderr.to_string()));
         }
         
-        // Get interface index
         let index = self.get_interface_index(name).await?;
-        
-        info!("Bridge {} created with index {}", name, index);
+        info!("Bridge {} created natively with index {}", name, index);
         Ok(index)
     }
     
-    /// Delete a bridge interface
     pub async fn delete_bridge(&self, name: &str) -> Result<()> {
-        info!("Deleting bridge: {}", name);
+        info!("Deleting native bridge: {}", name);
         
-        let output = std::process::Command::new("ip")
-            .args(&["link", "del", name])
-            .output()
-            .map_err(|e| NetworkError::Io(e))?;
-        
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("No such device") {
-                return Err(NetworkError::NotFound(format!("Bridge {} not found", name)));
-            }
-            return Err(NetworkError::Netlink(stderr.to_string()));
+        let index = self.get_interface_index(name).await?;
+        if let Err(e) = self.handle.link().del(index).execute().await {
+            return Err(NetworkError::Netlink(e.to_string()));
         }
         
         Ok(())
     }
     
-    /// Set bridge up
     pub async fn set_up(&self, name: &str) -> Result<()> {
-        info!("Setting bridge {} up", name);
+        info!("Setting bridge {} up natively", name);
+        let index = self.get_interface_index(name).await?;
         
-        let output = std::process::Command::new("ip")
-            .args(&["link", "set", name, "up"])
-            .output()
-            .map_err(|e| NetworkError::Io(e))?;
-        
-        if !output.status.success() {
-            return Err(NetworkError::Netlink("Failed to set bridge up".to_string()));
+        if let Err(e) = self.handle.link().set(index).up().execute().await {
+            return Err(NetworkError::Netlink(format!("Failed to set bridge up: {}", e)));
         }
         
         Ok(())
     }
     
-    /// Add a TAP device to bridge
     pub async fn add_tap_to_bridge(&self, tap_name: &str, bridge_name: &str) -> Result<()> {
-        info!("Adding {} to bridge {}", tap_name, bridge_name);
+        info!("Adding {} to bridge {} natively", tap_name, bridge_name);
         
-        // First ensure TAP exists
-        let _ = std::process::Command::new("ip")
-            .args(&["link", "show", tap_name])
-            .output()
-            .map_err(|e| NetworkError::Io(e))?;
+        let tap_index = self.get_interface_index(tap_name).await?;
+        let bridge_index = self.get_interface_index(bridge_name).await?;
         
-        // Add TAP to bridge
-        let output = std::process::Command::new("ip")
-            .args(&["link", "set", tap_name, "master", bridge_name])
-            .output()
-            .map_err(|e| NetworkError::Io(e))?;
-        
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(NetworkError::Netlink(stderr.to_string()));
+        if let Err(e) = self.handle.link().set(tap_index).controller(bridge_index).execute().await {
+            return Err(NetworkError::Netlink(e.to_string()));
         }
         
         Ok(())
     }
     
-    /// List all bridges
     pub async fn list_bridges(&self) -> Result<Vec<BridgeInfo>> {
-        info!("Listing bridges");
+        info!("Listing bridges natively");
         
-        let output = std::process::Command::new("ip")
-            .args(&["link", "show", "type", "bridge"])
-            .output()
-            .map_err(|e| NetworkError::Io(e))?;
-        
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut links = self.handle.link().get().execute();
         let mut bridges = Vec::new();
         
-        for line in stdout.lines() {
-            if line.contains(":") && !line.starts_with(" ") {
-                let parts: Vec<&str> = line.split(':').collect();
-                if parts.len() >= 2 {
-                    let name = parts[1].trim().to_string();
-                    if !name.is_empty() && name != "lo" {
-                        let index = self.get_interface_index(&name).await.unwrap_or(0);
-                        bridges.push(BridgeInfo {
-                            name,
-                            index,
-                            state: "unknown".to_string(),
-                            mac_address: None,
-                        });
+        while let Ok(Some(link)) = links.try_next().await {
+            let index = link.header.index;
+            let mut name = String::new();
+            let mut state = "unknown".to_string();
+            let mut is_bridge = false;
+            let mut mac = None;
+            
+            for nla in link.attributes.into_iter() {
+                match nla {
+                    LinkAttribute::IfName(n) => name = n,
+                    LinkAttribute::OperState(s) => {
+                        state = match s {
+                            State::Up => "up".to_string(),
+                            State::Down => "down".to_string(),
+                            _ => "unknown".to_string(),
+                        };
                     }
+                    LinkAttribute::Address(addr) => {
+                        mac = Some(addr.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join(":"));
+                    }
+                    LinkAttribute::LinkInfo(infos) => {
+                        for info in infos {
+                            if let LinkInfo::Kind(kind) = info {
+                                if let InfoKind::Bridge = kind {
+                                    is_bridge = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
+            }
+            if is_bridge {
+                bridges.push(BridgeInfo {
+                    name,
+                    index,
+                    state,
+                    mac_address: mac,
+                });
             }
         }
         
         Ok(bridges)
     }
     
-    async fn get_interface_index(&self, name: &str) -> Result<u32> {
-        let output = std::process::Command::new("ip")
-            .args(&["link", "show", name])
-            .output()
-            .map_err(|e| NetworkError::Io(e))?;
+    pub async fn get_interface_index(&self, name: &str) -> Result<u32> {
+        let mut links = self.handle.link().get().match_name(name.to_string()).execute();
         
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            if line.contains(":") {
-                let parts: Vec<&str> = line.split(':').collect();
-                if parts.len() >= 1 {
-                    return Ok(parts[0].trim().parse().unwrap_or(0));
-                }
-            }
+        if let Ok(Some(link)) = links.try_next().await {
+            return Ok(link.header.index);
         }
         
         Err(NetworkError::NotFound(format!("Interface {} not found", name)))
@@ -174,9 +154,8 @@ mod tests {
     
     #[tokio::test]
     async fn test_bridge_manager_creation() {
-        let bm = BridgeManager::new().unwrap();
+        let bm = BridgeManager::new().await.unwrap();
         let bridges = bm.list_bridges().await.unwrap();
-        // May or may not have bridges depending on system
-        println!("Found {} bridges", bridges.len());
+        println!("Found {} bridges natively", bridges.len());
     }
 }
