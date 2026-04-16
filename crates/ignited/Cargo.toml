@@ -40,3 +40,4 @@ chrono = { version = "0.4", features = ["serde"] }
 tonic = "0.11"
 prost = "0.12"
 ignite-proto = { path = "../ignite-proto" }
+openraft = "0.9.22"
