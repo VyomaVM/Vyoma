@@ -122,6 +122,27 @@ async fn main() {
 
     let (events_tx, _rx) = broadcast::channel(100);
 
+    // Initialize Raft Swarm
+    let node_id = 1; // Default to node 1 for now
+    let raft_config = std::sync::Arc::new(openraft::Config {
+        heartbeat_interval: 500,
+        election_timeout_min: 1500,
+        election_timeout_max: 3000,
+        ..Default::default()
+    }.validate().unwrap_or_default());
+    let raft_network = crate::swarm::raft_network::SwarmNetwork::new();
+    let raft_store = crate::swarm::raft_store::SwarmStore::new(wal.clone());
+    let (log_store, state_machine) = openraft::storage::Adaptor::new(raft_store);
+    let raft = openraft::Raft::new(node_id, raft_config.clone(), raft_network, log_store, state_machine).await;
+    
+    let raft = match raft {
+        Ok(r) => Some(r),
+        Err(e) => {
+            error!("Failed to initialize Raft: {}", e);
+            None
+        }
+    };
+
     let state = AppState {
         vms: Arc::new(StdMutex::new(HashMap::new())),
         cgroups,
@@ -131,6 +152,7 @@ async fn main() {
         events_tx,
         wal,
         data_dir: args.data_dir.clone(),
+        raft,
     };
 
     api::handlers::initialize_state(&state).await;

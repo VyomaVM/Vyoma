@@ -10,6 +10,7 @@ use ignite_core::fs::VirtioFsManager;
 use ignite_core::vmm::VmmManager;
 
 use crate::cluster;
+use crate::swarm::raft_types::SwarmConfig;
 
 pub mod wal;
 pub mod recovery;
@@ -24,6 +25,7 @@ pub struct AppState {
     pub events_tx: broadcast::Sender<String>,
     pub wal: Arc<wal::Wal>,
     pub data_dir: String,
+    pub raft: Option<openraft::Raft<SwarmConfig>>,
 }
 
 #[derive(Debug)]
