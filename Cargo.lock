@@ -1830,6 +1830,7 @@ name = "ignited"
 version = "2.1.2"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum 0.7.9",
  "chrono",
  "clap",
