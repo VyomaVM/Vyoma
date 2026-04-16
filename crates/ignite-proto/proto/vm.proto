@@ -4,6 +4,8 @@ package ignite.v1;
 
 option go_package = "ignite/v1;ignitev1";
 
+import "google/protobuf/empty.proto";
+
 service VmService {
     rpc CreateVm (CreateVmRequest) returns (CreateVmResponse);
     rpc StartVm (VmIdRequest) returns (VmStatusResponse);
@@ -119,6 +121,5 @@ message MigrationProgress {
     uint64 bytes_transferred = 4;
     bool completed = 5;
     string error = 6;
-}
 
-message google.protobuf.Empty {}
+}

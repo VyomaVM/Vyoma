@@ -37,3 +37,6 @@ hyper = "1.8.1"
 tower-service = "0.3.3"
 prometheus.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
+tonic = "0.11"
+prost = "0.12"
+ignite-proto = { path = "../ignite-proto" }

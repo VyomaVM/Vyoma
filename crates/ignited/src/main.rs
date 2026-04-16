@@ -27,6 +27,7 @@ mod metrics;
 mod timemachine;
 mod auto_snapshot;
 mod hibernation;
+mod grpc;
 
 use state::{AppState, wal::Wal, recovery::Recovery};
 use api::handlers;
@@ -171,7 +172,7 @@ async fn main() {
         .route("/swarm/nodes", get(handlers::swarm_nodes_handler))
         .fallback(ui::ui_handler)
         .layer(CorsLayer::permissive())
-        .with_state(state);
+        .with_state(state.clone());
 
     let socket_path = args.socket_path;
     let path = std::path::Path::new(&socket_path);
@@ -250,6 +251,22 @@ async fn main() {
             }
         });
     }
+
+    let grpc_state = state.clone();
+    tokio::spawn(async move {
+        let addr = "[::1]:7071".parse().unwrap();
+        info!("gRPC interface available at {}", addr);
+        use ignite_proto::v1::vm_service_server::VmServiceServer;
+        
+        let svc = VmServiceServer::new(grpc::GrpcVmService::new(grpc_state));
+        if let Err(e) = tonic::transport::Server::builder()
+            .add_service(svc)
+            .serve(addr)
+            .await
+        {
+            error!("gRPC server error: {}", e);
+        }
+    });
 
     let shutdown_rx = handlers::shutdown_signal(shutdown_state);
     let mut shutdown_flag = Box::pin(shutdown_rx);
