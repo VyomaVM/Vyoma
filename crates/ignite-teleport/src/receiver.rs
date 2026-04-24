@@ -1,166 +1,124 @@
-use std::net::SocketAddr;
-use tracing::info;
-use bytes::Bytes;
-use tokio::io::AsyncReadExt;
+use std::path::PathBuf;
+use tokio::fs::{File, OpenOptions};
+use tokio::io::{AsyncWriteExt, BufWriter};
+use tracing::{error, info};
 
-use crate::sender::{MigrationHeader, MigrationSignal, MigrationStats};
+use async_compression::tokio::write::ZstdDecoder;
+use tonic::{Request, Response, Status, Streaming};
 
-pub struct MigrationReceiver {
-    vm_id: String,
-    memory_buffer: Bytes,
-    snapshot_buffer: Bytes,
+use ignite_proto::teleport::v1::teleport_chunk::Content;
+use ignite_proto::teleport::v1::{TeleportAck, TeleportChunk};
+
+pub struct TeleportReceiver {
+    session_id: String,
+    memory_file: PathBuf,
+    state_file: PathBuf,
 }
 
-impl MigrationReceiver {
-    pub fn new(vm_id: String) -> Self {
-        info!("Creating MigrationReceiver for VM {}", vm_id);
-        
+impl TeleportReceiver {
+    pub fn new(memory_file: PathBuf, state_file: PathBuf) -> Self {
         Self {
-            vm_id,
-            memory_buffer: Bytes::new(),
-            snapshot_buffer: Bytes::new(),
+            session_id: String::new(),
+            memory_file,
+            state_file,
         }
     }
 
-    pub async fn receive(&mut self, listen_addr: SocketAddr) -> Result<MigrationStats, String> {
-        info!("Starting migration receiver on {}", listen_addr);
-        
-        let listener = tokio::net::TcpListener::bind(listen_addr)
-            .await
-            .map_err(|e| format!("Failed to bind: {}", e))?;
-        
-        let (mut stream, addr) = listener.accept()
-            .await
-            .map_err(|e| format!("Failed to accept connection: {}", e))?;
-        
-        info!("Accepted migration connection from {}", addr);
-        
-        let mut total_bytes: u64 = 0;
-        
-        let mut header_len_buf = [0u8; 4];
-        stream.read_exact(&mut header_len_buf).await
-            .map_err(|e| format!("Failed to read header length: {}", e))?;
-        let header_len = u32::from_be_bytes(header_len_buf) as usize;
-        
-        let mut header_buf = vec![0u8; header_len];
-        stream.read_exact(&mut header_buf).await
-            .map_err(|e| format!("Failed to read header: {}", e))?;
-        
-        let header: MigrationHeader = serde_json::from_slice(&header_buf)
-            .map_err(|e| format!("Failed to parse header: {}", e))?;
-        
-        info!("Receiving VM {} ({} bytes)", header.vm_id, header.memory_bytes);
-        
-        let mut page_count_buf = [0u8; 8];
-        stream.read_exact(&mut page_count_buf).await
-            .map_err(|e| format!("Failed to read page count: {}", e))?;
-        let page_count = u64::from_be_bytes(page_count_buf) as usize;
-        
-        let mut page_data = vec![0u8; page_count];
-        stream.read_exact(&mut page_data).await
-            .map_err(|e| format!("Failed to read pages: {}", e))?;
-        
-        self.memory_buffer = Bytes::from(page_data.clone());
-        total_bytes += page_count as u64;
-        
-        info!("Phase 1: Received initial {} pages", page_count);
-        
-        let mut rounds: u32 = 0;
-        
-        loop {
-            let mut size_buf = [0u8; 8];
-            match stream.read_exact(&mut size_buf).await {
-                Ok(_) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+    pub async fn process_stream(
+        &mut self,
+        request: Request<Streaming<TeleportChunk>>,
+    ) -> Result<Response<tokio_stream::wrappers::ReceiverStream<Result<TeleportAck, Status>>>, Status> {
+        let mut in_stream = request.into_inner();
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
+
+        let mem_path = self.memory_file.clone();
+        let state_path = self.state_file.clone();
+
+        tokio::spawn(async move {
+            let mut state_writer: Option<BufWriter<File>> = None;
+            let mut mem_decoder: Option<ZstdDecoder<BufWriter<File>>> = None;
+
+            while let Ok(Some(chunk)) = in_stream.message().await {
+                let seq = chunk.chunk_sequence;
+                let session = chunk.session_id;
+
+                let mut ack = TeleportAck {
+                    session_id: session.clone(),
+                    processed_sequence: seq,
+                    received: true,
+                    error_msg: "".to_string(),
+                };
+
+                if let Some(content) = chunk.content {
+                    match content {
+                        Content::Metadata(meta) => {
+                            info!("Initializing reception for VM {} (Session {})", meta.id, session);
+                            
+                            // Prepare state file
+                            match OpenOptions::new().create(true).write(true).open(&state_path).await {
+                                Ok(f) => state_writer = Some(BufWriter::new(f)),
+                                Err(e) => {
+                                    ack.received = false;
+                                    ack.error_msg = format!("Failed to create state file: {}", e);
+                                    let _ = tx.send(Ok(ack)).await;
+                                    return;
+                                }
+                            }
+
+                            // Prepare memory file with ZSTD decompression pipeline
+                            match OpenOptions::new().create(true).write(true).open(&mem_path).await {
+                                Ok(f) => {
+                                    let buf_w = BufWriter::new(f);
+                                    mem_decoder = Some(ZstdDecoder::new(buf_w));
+                                }
+                                Err(e) => {
+                                    ack.received = false;
+                                    ack.error_msg = format!("Failed to create memory file: {}", e);
+                                    let _ = tx.send(Ok(ack)).await;
+                                    return;
+                                }
+                            }
+                        }
+                        Content::StateChunk(data) => {
+                            if let Some(w) = state_writer.as_mut() {
+                                if let Err(e) = w.write_all(&data).await {
+                                    ack.received = false;
+                                    ack.error_msg = format!("State write failed: {}", e);
+                                    let _ = tx.send(Ok(ack)).await;
+                                    return;
+                                }
+                            }
+                        }
+                        Content::MemoryChunk(data) => {
+                            if let Some(dec) = mem_decoder.as_mut() {
+                                if let Err(e) = dec.write_all(&data).await {
+                                    ack.received = false;
+                                    ack.error_msg = format!("Memory chunk decomp/write failed: {}", e);
+                                    let _ = tx.send(Ok(ack)).await;
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if tx.send(Ok(ack)).await.is_err() {
+                    error!("Ack stream broken");
                     break;
                 }
-                Err(e) => return Err(format!("Failed to read: {}", e)),
             }
             
-            let size = u64::from_be_bytes(size_buf) as usize;
-            let mut data = vec![0u8; size];
-            stream.read_exact(&mut data).await
-                .map_err(|e| format!("Failed to read data: {}", e))?;
-            
-            total_bytes += size as u64;
-            rounds += 1;
-            
-            info!("Phase 2: Received dirty data round {}", rounds);
-        }
-        
-        let pause_signal = self.receive_signal(&mut stream).await?;
-        if !matches!(pause_signal, MigrationSignal::Pause) {
-            return Err("Expected pause signal".to_string());
-        }
-        
-        info!("Phase 3: Received pause signal, finalizing migration");
-        
-        let mut snapshot_size_buf = [0u8; 8];
-        stream.read_exact(&mut snapshot_size_buf).await
-            .map_err(|e| format!("Failed to read snapshot size: {}", e))?;
-        let snapshot_size = u64::from_be_bytes(snapshot_size_buf) as usize;
-        
-        let mut snapshot_data = vec![0u8; snapshot_size];
-        stream.read_exact(&mut snapshot_data).await
-            .map_err(|e| format!("Failed to read snapshot: {}", e))?;
-        
-        self.snapshot_buffer = Bytes::from(snapshot_data);
-        total_bytes += snapshot_size as u64;
-        
-        let resume_signal = self.receive_signal(&mut stream).await?;
-        if !matches!(resume_signal, MigrationSignal::Resume) {
-            return Err("Expected resume signal".to_string());
-        }
-        
-        info!("Phase 3: Received resume signal, VM ready on destination");
-        
-        Ok(MigrationStats {
-            rounds,
-            total_pages: header.memory_bytes / 4096,
-            bytes_transferred: total_bytes,
-        })
-    }
+            // Flush cleanly
+            if let Some(mut w) = state_writer {
+                let _ = w.flush().await;
+            }
+            if let Some(mut d) = mem_decoder {
+                let _ = d.shutdown().await;
+            }
 
-    async fn receive_signal(
-        &self,
-        stream: &mut tokio::net::TcpStream,
-    ) -> Result<MigrationSignal, String> {
-        let mut len_buf = [0u8; 4];
-        stream.read_exact(&mut len_buf).await
-            .map_err(|e| format!("Failed to read signal length: {}", e))?;
-        let len = u32::from_be_bytes(len_buf) as usize;
-        
-        let mut buf = vec![0u8; len];
-        stream.read_exact(&mut buf).await
-            .map_err(|e| format!("Failed to read signal: {}", e))?;
-        
-        serde_json::from_slice(&buf)
-            .map_err(|e| format!("Failed to parse signal: {}", e))
-    }
+            info!("Teleportation stream processing completed cleanly");
+        });
 
-    pub fn get_memory_buffer(&self) -> &Bytes {
-        &self.memory_buffer
-    }
-
-    pub fn get_snapshot_buffer(&self) -> &Bytes {
-        &self.snapshot_buffer
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_receiver_creation() {
-        let receiver = MigrationReceiver::new("test-vm".to_string());
-        assert!(receiver.memory_buffer.is_empty());
-    }
-
-    #[test]
-    fn test_buffers_empty_initially() {
-        let receiver = MigrationReceiver::new("test-vm".to_string());
-        assert_eq!(receiver.get_memory_buffer().len(), 0);
-        assert_eq!(receiver.get_snapshot_buffer().len(), 0);
+        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
     }
 }
