@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use ignite_proto::{
+use ignite_proto::v1::{
     CreateVmRequest, CreateVmResponse, ExecOutput, ExecRequest, ListVmsResponse,
     LogLine, LogRequest, MigrateRequest, MigrationProgress, RestoreRequest,
     SnapshotInfo, SnapshotRequest, VmIdRequest, VmInfo, VmStatusResponse,
@@ -101,7 +101,7 @@ impl IgniteClient {
     }
 
     pub async fn list_vms(&self) -> Result<ListVmsResponse> {
-        self.send_request("list_vms", &ignite_proto::ListVmsRequest {})
+        self.send_request("list_vms", &ignite_proto::v1::ListVmsRequest {})
             .await
     }
 
@@ -173,7 +173,7 @@ impl<T> Response<T> {
 
 pub mod mock {
     use anyhow::Result;
-    use ignite_proto::{
+    use ignite_proto::v1::{
         CreateVmRequest, CreateVmResponse, ExecOutput, ListVmsResponse, LogLine,
         MigrationProgress, SnapshotInfo, VmInfo, VmStatusResponse,
     };
@@ -308,7 +308,7 @@ pub mod mock {
                 total_pages: 65536,
                 bytes_transferred: 0,
                 completed: true,
-                error: None,
+                error: String::new(),
             })
         }
     }
@@ -323,7 +323,7 @@ pub mod mock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ignite_proto::{PortMapping, VolumeMapping};
+    use ignite_proto::v1::{PortMapping, VolumeMapping};
 
     #[test]
     fn test_sdk_config() {
