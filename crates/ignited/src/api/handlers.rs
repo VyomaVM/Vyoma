@@ -1861,3 +1861,67 @@ pub async fn list_volumes_handler() -> Json<Vec<VolumeInfo>> {
     }
     Json(vols)
 }
+
+#[derive(Deserialize)]
+pub struct TeleportRequest {
+    pub vm_id: String,
+    pub target_node_ip: String,
+}
+
+pub async fn teleport_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<TeleportRequest>,
+) -> Result<String, (StatusCode, String)> {
+    info!("Handling POST /teleport for VM {} to {}", payload.vm_id, payload.target_node_ip);
+    
+    // 1. Get VM
+    let vm_arc = {
+        let vms = state.vms.lock().unwrap();
+        vms.get(&payload.vm_id).cloned()
+    };
+
+    if let Some(vm_mutex) = vm_arc {
+        let vm = vm_mutex.lock().await;
+
+        let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+        let vm_dir = home.join(".ignite").join("vms").join(&payload.vm_id);
+        let snapshot_path = vm_dir.join("snapshot.snap");
+        let mem_path = vm_dir.join("memory.mem");
+        let fc_socket = vm.fc_socket_path.clone();
+
+        // Pause and snapshot
+        info!("Pausing VM {} for teleportation...", payload.vm_id);
+        vm.vmm.pause_instance_with_socket(&fc_socket).await.map_err(|e| {
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to pause: {}", e))
+        })?;
+
+        info!("Creating memory snapshot...");
+        vm.vmm.create_snapshot(
+            snapshot_path.to_string_lossy().as_ref(),
+            mem_path.to_string_lossy().as_ref(),
+        ).await.map_err(|e| {
+            // Attempt to resume if snapshot fails
+            let _ = futures::executor::block_on(vm.vmm.resume_instance_with_socket(&fc_socket));
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Snapshot failed: {}", e))
+        })?;
+        
+        let mem_size = vm.mem_size_mib as u64 * 1024 * 1024;
+        
+        // Spawn Teleport Sender
+        let target_url = format!("http://{}:7071", payload.target_node_ip);
+        let teleporter = ignite_teleport::sender::Teleporter::new(payload.vm_id.clone(), target_url, mem_size);
+        
+        // Teleport the VM memory & state asynchronously
+        let teleport_vm_id = payload.vm_id.clone();
+        tokio::spawn(async move {
+            match teleporter.teleport_vm(mem_path, snapshot_path).await {
+                Ok(_) => info!("Teleportation of VM {} succeeded!", teleport_vm_id),
+                Err(e) => error!("Teleportation of VM {} failed: {}", teleport_vm_id, e),
+            }
+        });
+
+        Ok(format!("Teleportation initiated for VM {}", payload.vm_id))
+    } else {
+        Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
+    }
+}

@@ -192,6 +192,7 @@ async fn main() {
         .route("/swarm/join", post(handlers::swarm_join_handler))
         .route("/swarm/register", post(handlers::swarm_register_handler))
         .route("/swarm/nodes", get(handlers::swarm_nodes_handler))
+        .route("/teleport", post(handlers::teleport_handler))
         .fallback(ui::ui_handler)
         .layer(CorsLayer::permissive())
         .with_state(state.clone());
@@ -279,10 +280,14 @@ async fn main() {
         let addr = "[::1]:7071".parse().unwrap();
         info!("gRPC interface available at {}", addr);
         use ignite_proto::v1::vm_service_server::VmServiceServer;
+        use ignite_proto::teleport::v1::teleport_service_server::TeleportServiceServer;
         
-        let svc = VmServiceServer::new(grpc::GrpcVmService::new(grpc_state));
+        let svc = VmServiceServer::new(grpc::GrpcVmService::new(grpc_state.clone()));
+        let teleport_svc = TeleportServiceServer::new(grpc::GrpcTeleportService::new(grpc_state));
+        
         if let Err(e) = tonic::transport::Server::builder()
             .add_service(svc)
+            .add_service(teleport_svc)
             .serve(addr)
             .await
         {

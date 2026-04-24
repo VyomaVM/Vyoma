@@ -42,3 +42,4 @@ prost = "0.12"
 ignite-proto = { path = "../ignite-proto" }
 openraft = { version = "0.9.22", features = ["serde"] }
 async-trait = "0.1.89"
+ignite-teleport = { path = "../ignite-teleport" }

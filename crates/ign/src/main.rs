@@ -137,6 +137,13 @@ enum Commands {
         /// Input file path (e.g. my-vm.tar.gz)
         input: String,
     },
+    /// Live Teleport a VM to another Swarm node
+    Teleport {
+        /// VM ID to teleport
+        id: String,
+        /// Target Node IP (must expose gRPC on 7071)
+        target: String,
+    },
     /// Stream logs from a VM
     Logs {
         /// VM ID
@@ -565,6 +572,19 @@ async fn main() -> Result<()> {
         Commands::Import { input } => {
             info!("Importing VM from {}", input);
             import_vm(&input, &daemon_url).await?;
+        }
+        Commands::Teleport { id, target } => {
+            info!("Initiating Live Teleportation for VM {} to target {}", id, target);
+            let payload = serde_json::json!({
+                "vm_id": id,
+                "target_node_ip": target
+            });
+            let resp = client
+                .post(format!("{}/teleport", daemon_url))
+                .json(&payload)
+                .send()
+                .await;
+            handle_simple_response(resp, &daemon_url).await?;
         }
         Commands::Logs { id, follow: _ } => {
             // 1. Resolve ID (if Name provided)

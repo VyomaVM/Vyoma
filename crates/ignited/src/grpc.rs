@@ -178,3 +178,43 @@ impl VmService for GrpcVmService {
         Err(Status::unimplemented("Not implemented"))
     }
 }
+
+use ignite_proto::teleport::v1::teleport_service_server::TeleportService;
+use ignite_proto::teleport::v1::{TeleportChunk, TeleportAck};
+use ignite_teleport::TeleportReceiver;
+use std::path::PathBuf;
+
+pub struct GrpcTeleportService {
+    state: AppState,
+}
+
+impl GrpcTeleportService {
+    pub fn new(state: AppState) -> Self {
+        Self { state }
+    }
+}
+
+#[tonic::async_trait]
+impl TeleportService for GrpcTeleportService {
+    type TeleportVmStream = tokio_stream::wrappers::ReceiverStream<Result<TeleportAck, Status>>;
+
+    async fn teleport_vm(
+        &self,
+        request: Request<tonic::Streaming<TeleportChunk>>,
+    ) -> Result<Response<Self::TeleportVmStream>, Status> {
+        info!("Receiving incoming Teleportation Request...");
+        
+        // Prepare temporary staging paths for the decompression
+        let temp_dir = std::env::temp_dir().join("ignite-teleport");
+        tokio::fs::create_dir_all(&temp_dir).await
+            .map_err(|e| Status::internal(format!("Failed to create temp dir: {}", e)))?;
+            
+        let mem_file = temp_dir.join("teleport_mem.zstd");
+        let state_file = temp_dir.join("teleport_state.bin");
+        
+        let mut receiver = TeleportReceiver::new(mem_file, state_file);
+        
+        // Let the receiver process the stream
+        receiver.process_stream(request).await
+    }
+}
