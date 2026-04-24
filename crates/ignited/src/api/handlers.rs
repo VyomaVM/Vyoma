@@ -10,6 +10,8 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 // use tokio_stream::StreamExt;
 use futures::stream::Stream;
+use openraft::raft::{AppendEntriesRequest, InstallSnapshotRequest, VoteRequest};
+use openraft::Raft;
 use ignite_core::api::{PortMapping, VolumeMount};
 use ignite_core::cgroups::CgroupManager;
 use ignite_core::fs::VirtioFsManager;
@@ -1767,20 +1769,39 @@ pub struct JoinRequest {
 }
 
 pub async fn swarm_init_handler(State(state): State<AppState>) -> Result<String, (StatusCode, String)> {
-    let id = state.cluster_manager.init();
-    Ok(format!("Initialized Swarm Node: {}", id))
+    if let Some(raft) = &state.raft {
+        let mut nodes = std::collections::BTreeMap::new();
+        nodes.insert(
+            1, 
+            crate::swarm::raft_types::SwarmNode {
+                addr: "127.0.0.1:8080".to_string(), // In reality we'd get this from config
+                public_key: "init_key".to_string(),
+            }
+        );
+        raft.initialize(nodes).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Raft Init Error: {}", e)))?;
+        Ok("Initialized Swarm Node via Raft".to_string())
+    } else {
+        Err((StatusCode::INTERNAL_SERVER_ERROR, "Raft is not enabled".to_string()))
+    }
 }
 
 pub async fn swarm_join_handler(
     State(state): State<AppState>,
     Json(payload): Json<JoinRequest>,
 ) -> Result<String, (StatusCode, String)> {
-    state
-        .cluster_manager
-        .join(&payload.seed_ip)
-        .await
-        .map(|_| format!("Joined swarm via seed {}", payload.seed_ip))
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+    // In a real openraft setup, we'd send an RPC to the leader to add_learner and change_membership
+    if let Some(raft) = &state.raft {
+        // Here we pretend we're the leader and adding a learner
+        // A full implementation requires forwarding this to the leader node
+        let node = crate::swarm::raft_types::SwarmNode {
+            addr: payload.seed_ip.clone(),
+            public_key: "joined_key".to_string(),
+        };
+        raft.add_learner(2, node, true).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Add Learner Error: {}", e)))?;
+        Ok(format!("Joined swarm via seed {}", payload.seed_ip))
+    } else {
+        Err((StatusCode::INTERNAL_SERVER_ERROR, "Raft is not enabled".to_string()))
+    }
 }
 
 #[derive(Serialize)]
@@ -1923,5 +1944,43 @@ pub async fn teleport_handler(
         Ok(format!("Teleportation initiated for VM {}", payload.vm_id))
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
+    }
+}
+
+// --- Raft Core API Handlers ---
+
+pub async fn raft_append_handler(
+    State(state): State<AppState>,
+    Json(req): Json<AppendEntriesRequest<crate::swarm::raft_types::SwarmConfig>>,
+) -> Result<Json<openraft::raft::AppendEntriesResponse<crate::swarm::raft_types::NodeId>>, (StatusCode, String)> {
+    if let Some(raft) = &state.raft {
+        let resp = raft.append_entries(req).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        Ok(Json(resp))
+    } else {
+        Err((StatusCode::INTERNAL_SERVER_ERROR, "Raft not running".into()))
+    }
+}
+
+pub async fn raft_snapshot_handler(
+    State(state): State<AppState>,
+    Json(req): Json<InstallSnapshotRequest<crate::swarm::raft_types::SwarmConfig>>,
+) -> Result<Json<openraft::raft::InstallSnapshotResponse<crate::swarm::raft_types::NodeId>>, (StatusCode, String)> {
+    if let Some(raft) = &state.raft {
+        let resp = raft.install_snapshot(req).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        Ok(Json(resp))
+    } else {
+        Err((StatusCode::INTERNAL_SERVER_ERROR, "Raft not running".into()))
+    }
+}
+
+pub async fn raft_vote_handler(
+    State(state): State<AppState>,
+    Json(req): Json<VoteRequest<crate::swarm::raft_types::NodeId>>,
+) -> Result<Json<openraft::raft::VoteResponse<crate::swarm::raft_types::NodeId>>, (StatusCode, String)> {
+    if let Some(raft) = &state.raft {
+        let resp = raft.vote(req).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        Ok(Json(resp))
+    } else {
+        Err((StatusCode::INTERNAL_SERVER_ERROR, "Raft not running".into()))
     }
 }

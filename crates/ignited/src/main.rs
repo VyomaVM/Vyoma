@@ -131,7 +131,9 @@ async fn main() {
         ..Default::default()
     }.validate().unwrap_or_default());
     let raft_network = crate::swarm::raft_network::SwarmNetwork::new();
-    let raft_store = crate::swarm::raft_store::SwarmStore::new(wal.clone());
+    let db_path = std::path::Path::new(&args.data_dir).join("raft_db");
+    let sled_db = sled::open(&db_path).expect("Failed to open Sled DB for Raft");
+    let raft_store = crate::swarm::raft_store::SwarmStore::new(wal.clone(), sled_db);
     let (log_store, state_machine) = openraft::storage::Adaptor::new(raft_store);
     let raft = openraft::Raft::new(node_id, raft_config.clone(), raft_network, log_store, state_machine).await;
     
@@ -192,6 +194,9 @@ async fn main() {
         .route("/swarm/join", post(handlers::swarm_join_handler))
         .route("/swarm/register", post(handlers::swarm_register_handler))
         .route("/swarm/nodes", get(handlers::swarm_nodes_handler))
+        .route("/raft/append", post(handlers::raft_append_handler))
+        .route("/raft/snapshot", post(handlers::raft_snapshot_handler))
+        .route("/raft/vote", post(handlers::raft_vote_handler))
         .route("/teleport", post(handlers::teleport_handler))
         .fallback(ui::ui_handler)
         .layer(CorsLayer::permissive())
