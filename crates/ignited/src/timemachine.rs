@@ -1,10 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SnapshotEntry {
     pub id: String,
     pub vm_id: String,
@@ -39,50 +38,64 @@ impl SnapshotEntry {
 }
 
 pub struct TimeMachine {
-    snapshots: BTreeMap<String, Vec<SnapshotEntry>>,
+    tree: sled::Tree,
 }
 
 impl TimeMachine {
-    pub fn new() -> Self {
-        Self {
-            snapshots: BTreeMap::new(),
+    pub fn new(db: &sled::Db) -> Self {
+        let tree = db.open_tree("timemachine_tree").expect("Failed to open timemachine tree");
+        Self { tree }
+    }
+
+    fn get_snapshots(&self, vm_id: &str) -> Vec<SnapshotEntry> {
+        if let Ok(Some(bytes)) = self.tree.get(vm_id) {
+            serde_json::from_slice(&bytes).unwrap_or_default()
+        } else {
+            Vec::new()
         }
     }
 
-    pub fn create_snapshot(&mut self, vm_id: String, label: Option<String>) -> SnapshotEntry {
-        let snapshots = self.snapshots.entry(vm_id.clone()).or_insert_with(Vec::new);
+    fn save_snapshots(&self, vm_id: &str, snapshots: &Vec<SnapshotEntry>) {
+        if let Ok(bytes) = serde_json::to_vec(snapshots) {
+            let _ = self.tree.insert(vm_id, bytes);
+            let _ = self.tree.flush();
+        }
+    }
+
+    pub fn create_snapshot(&self, vm_id: String, label: Option<String>) -> SnapshotEntry {
+        let mut snapshots = self.get_snapshots(&vm_id);
 
         let parent_id = snapshots.last().map(|s| s.id.clone());
-
-        let entry = SnapshotEntry::new(vm_id, label, parent_id);
+        let entry = SnapshotEntry::new(vm_id.clone(), label, parent_id);
 
         info!("Created snapshot {} for VM {}", entry.id, entry.vm_id);
 
         snapshots.push(entry.clone());
+        self.save_snapshots(&vm_id, &snapshots);
 
         entry
     }
 
     pub fn get_snapshot_history(&self, vm_id: &str) -> Option<Vec<SnapshotEntry>> {
-        self.snapshots.get(vm_id).cloned()
+        let snaps = self.get_snapshots(vm_id);
+        if snaps.is_empty() { None } else { Some(snaps) }
     }
 
     pub fn get_snapshot(&self, vm_id: &str, snapshot_id: &str) -> Option<SnapshotEntry> {
-        self.snapshots
-            .get(vm_id)
-            .and_then(|snaps| snaps.iter().find(|s| s.id == snapshot_id))
-            .cloned()
+        self.get_snapshots(vm_id)
+            .into_iter()
+            .find(|s| s.id == snapshot_id)
     }
 
     pub fn get_latest_snapshot(&self, vm_id: &str) -> Option<SnapshotEntry> {
-        self.snapshots
-            .get(vm_id)
-            .and_then(|snaps| snaps.last())
-            .cloned()
+        self.get_snapshots(vm_id).into_iter().last()
     }
 
-    pub fn delete_snapshot(&mut self, vm_id: &str, snapshot_id: &str) -> Result<(), String> {
-        let snapshots = self.snapshots.get_mut(vm_id).ok_or("VM not found")?;
+    pub fn delete_snapshot(&self, vm_id: &str, snapshot_id: &str) -> Result<(), String> {
+        let mut snapshots = self.get_snapshots(vm_id);
+        if snapshots.is_empty() {
+            return Err("VM not found".to_string());
+        }
 
         let index = snapshots
             .iter()
@@ -91,8 +104,7 @@ impl TimeMachine {
 
         snapshots.remove(index);
 
-        if let Some(next) = snapshots.get(index) {
-            let next = next.clone();
+        if let Some(next) = snapshots.get(index).cloned() {
             let next_next = snapshots.get(index + 1).cloned();
             if let Some(mut np) = next_next {
                 np.parent_id = Some(next.id);
@@ -100,23 +112,20 @@ impl TimeMachine {
             }
         }
 
+        self.save_snapshots(vm_id, &snapshots);
         info!("Deleted snapshot {} for VM {}", snapshot_id, vm_id);
 
         Ok(())
     }
 
     pub fn list_all_vms(&self) -> Vec<String> {
-        self.snapshots.keys().cloned().collect()
+        self.tree.iter().filter_map(|res| {
+            res.ok().map(|(k, _)| String::from_utf8_lossy(&k).to_string())
+        }).collect()
     }
 
     pub fn get_snapshot_count(&self, vm_id: &str) -> usize {
-        self.snapshots.get(vm_id).map(|s| s.len()).unwrap_or(0)
-    }
-}
-
-impl Default for TimeMachine {
-    fn default() -> Self {
-        Self::new()
+        self.get_snapshots(vm_id).len()
     }
 }
 
@@ -131,10 +140,17 @@ pub fn parse_snapshot_ref(reference: &str) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    fn test_tm() -> TimeMachine {
+        let dir = tempdir().unwrap();
+        let db = sled::open(dir.path()).unwrap();
+        TimeMachine::new(&db)
+    }
 
     #[test]
     fn test_create_snapshot() {
-        let mut tm = TimeMachine::new();
+        let tm = test_tm();
         let entry = tm.create_snapshot("vm-1".to_string(), Some("initial".to_string()));
 
         assert_eq!(entry.vm_id, "vm-1");
@@ -144,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_snapshot_chain() {
-        let mut tm = TimeMachine::new();
+        let tm = test_tm();
 
         let snap1 = tm.create_snapshot("vm-1".to_string(), Some("snap1".to_string()));
         let snap2 = tm.create_snapshot("vm-1".to_string(), Some("snap2".to_string()));
@@ -156,7 +172,7 @@ mod tests {
 
     #[test]
     fn test_get_snapshot_history() {
-        let mut tm = TimeMachine::new();
+        let tm = test_tm();
         tm.create_snapshot("vm-1".to_string(), Some("first".to_string()));
         tm.create_snapshot("vm-1".to_string(), Some("second".to_string()));
 
@@ -166,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_get_latest_snapshot() {
-        let mut tm = TimeMachine::new();
+        let tm = test_tm();
         tm.create_snapshot("vm-1".to_string(), Some("first".to_string()));
         tm.create_snapshot("vm-1".to_string(), Some("second".to_string()));
 
@@ -176,7 +192,7 @@ mod tests {
 
     #[test]
     fn test_delete_snapshot() {
-        let mut tm = TimeMachine::new();
+        let tm = test_tm();
         let snap1 = tm.create_snapshot("vm-1".to_string(), Some("first".to_string()));
         tm.create_snapshot("vm-1".to_string(), Some("second".to_string()));
 
@@ -207,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_list_all_vms() {
-        let mut tm = TimeMachine::new();
+        let tm = test_tm();
         tm.create_snapshot("vm-1".to_string(), None);
         tm.create_snapshot("vm-2".to_string(), None);
 
@@ -217,7 +233,7 @@ mod tests {
 
     #[test]
     fn test_get_snapshot_count() {
-        let mut tm = TimeMachine::new();
+        let tm = test_tm();
         assert_eq!(tm.get_snapshot_count("vm-1"), 0);
 
         tm.create_snapshot("vm-1".to_string(), None);

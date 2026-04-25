@@ -206,7 +206,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_manager_task_lifecycle() {
-        let timemachine = Arc::new(RwLock::new(TimeMachine::new()));
+        let dir = tempfile::tempdir().unwrap();
+        let db = sled::open(dir.path()).unwrap();
+        let timemachine = Arc::new(RwLock::new(TimeMachine::new(&db)));
         let manager = AutoSnapshotManager::new();
 
         let config = AutoSnapshotConfig {
@@ -227,7 +229,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_duplicate_task_prevention() {
-        let timemachine = Arc::new(RwLock::new(TimeMachine::new()));
+        let dir = tempfile::tempdir().unwrap();
+        let db = sled::open(dir.path()).unwrap();
+        let timemachine = Arc::new(RwLock::new(TimeMachine::new(&db)));
         let manager = AutoSnapshotManager::new();
 
         let config = AutoSnapshotConfig {

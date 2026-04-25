@@ -116,14 +116,18 @@ enum Commands {
         /// VM ID
         id: String,
     },
-    /// Restore a VM from a snapshot
-    Restore {
-        /// Path to snapshot file
-        snapshot_path: String,
-        /// Path to memory file
-        mem_path: String,
-        /// Path to COW file
-        cow_path: String,
+    /// Show snapshot history of a VM
+    History {
+        /// VM ID
+        id: String,
+    },
+    /// Time travel a VM to a specific snapshot
+    TimeTravel {
+        /// VM ID
+        id: String,
+        /// Snapshot ID to travel to
+        #[arg(long)]
+        to: String,
     },
     /// Export a VM snapshot to a file (Teleportation)
     Export {
@@ -262,6 +266,12 @@ struct RestoreRequest {
     mem_path: String,
     cow_path: String,
     original_vm_id: String,
+}
+
+#[derive(Serialize)]
+struct TimeTravelRequest {
+    vm_id: String,
+    snapshot_id: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -544,21 +554,29 @@ async fn main() -> Result<()> {
                 .await;
             handle_simple_response(resp, &daemon_url).await?;
         }
-        Commands::Restore {
-            snapshot_path,
-            mem_path,
-            cow_path,
-        } => {
-            info!("Requesting to restore VM from: {}", snapshot_path);
-            let payload = RestoreRequest {
-                snapshot_path,
-                mem_path,
-                cow_path,
-                original_vm_id: "unknown".to_string(),
+        Commands::History { id } => {
+            let resp = client.get(format!("{}/history/{}", daemon_url, id)).send().await;
+            match resp {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let json: serde_json::Value = response.json().await?;
+                        println!("{}", serde_json::to_string_pretty(&json)?);
+                    } else {
+                        error!("Daemon returned error: {}", response.status());
+                    }
+                }
+                Err(e) => error!("Failed to connect: {}", e),
+            }
+        }
+        Commands::TimeTravel { id, to } => {
+            info!("Requesting to time-travel VM {} to snapshot: {}", id, to);
+            let payload = TimeTravelRequest {
+                vm_id: id,
+                snapshot_id: to,
             };
 
             let resp = client
-                .post(format!("{}/restore", daemon_url))
+                .post(format!("{}/time-travel", daemon_url))
                 .json(&payload)
                 .send()
                 .await;

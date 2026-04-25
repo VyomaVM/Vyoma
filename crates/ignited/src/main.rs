@@ -133,7 +133,7 @@ async fn main() {
     let raft_network = crate::swarm::raft_network::SwarmNetwork::new();
     let db_path = std::path::Path::new(&args.data_dir).join("raft_db");
     let sled_db = sled::open(&db_path).expect("Failed to open Sled DB for Raft");
-    let raft_store = crate::swarm::raft_store::SwarmStore::new(wal.clone(), sled_db);
+    let raft_store = crate::swarm::raft_store::SwarmStore::new(wal.clone(), sled_db.clone());
     let (log_store, state_machine) = openraft::storage::Adaptor::new(raft_store);
     let raft = openraft::Raft::new(node_id, raft_config.clone(), raft_network, log_store, state_machine).await;
     
@@ -145,6 +145,8 @@ async fn main() {
         }
     };
 
+    let timemachine = Arc::new(tokio::sync::RwLock::new(timemachine::TimeMachine::new(&sled_db)));
+
     let state = AppState {
         vms: Arc::new(StdMutex::new(HashMap::new())),
         cgroups,
@@ -155,6 +157,7 @@ async fn main() {
         wal,
         data_dir: args.data_dir.clone(),
         raft,
+        timemachine,
     };
 
     api::handlers::initialize_state(&state).await;
@@ -175,6 +178,8 @@ async fn main() {
         .route("/resume/:id", post(handlers::resume_vm))
         .route("/ps", get(handlers::list_vms))
         .route("/snapshot/:id", post(handlers::snapshot_vm))
+        .route("/history/:id", get(handlers::history_vm))
+        .route("/time-travel", post(handlers::time_travel_vm))
         .route("/restore", post(handlers::restore_vm))
         .route("/logs/:id", get(handlers::stream_logs))
         .route("/build", post(handlers::build_image))

@@ -718,12 +718,22 @@ pub async fn snapshot_vm(
     if let Some(vm_mutex) = vm_arc {
         let vm = vm_mutex.lock().await;
 
+        let entry = {
+            let tm = state.timemachine.write().await;
+            tm.create_snapshot(id.clone(), Some(format!("Manual snapshot for {}", id)))
+        };
+
         // Define paths
-        let home =
-            dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+        let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
         let vm_dir = home.join(".ignite").join("vms").join(&id);
-        let snapshot_path = vm_dir.join("snapshot.snap");
-        let mem_path = vm_dir.join("memory.mem");
+        let snaps_dir = vm_dir.join("snapshots").join(&entry.id);
+        
+        std::fs::create_dir_all(&snaps_dir).map_err(|e| {
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create snapshot dir: {}", e))
+        })?;
+
+        let snapshot_path = snaps_dir.join("snapshot.snap");
+        let mem_path = snaps_dir.join("memory.mem");
         let fc_socket = vm.fc_socket_path.clone();
 
         // 1. Pause VM (Required for snapshot)
@@ -755,12 +765,18 @@ pub async fn snapshot_vm(
             )
         })?;
 
-        // Commit snapshot to Git
-        if let Err(e) = git_commit(&vm_dir, &format!("Snapshot {}", id)) {
+        // Also copy the current COW file state to freeze it for time travel
+        let cow_backup = snaps_dir.join("diff.cow");
+        if let Err(e) = std::fs::copy(&vm.cow_file_path, &cow_backup) {
+            error!("Failed to backup COW file: {}", e);
+        }
+
+        // Commit snapshot to Git (Optional, maybe skip if we use TimeMachine?)
+        if let Err(e) = git_commit(&vm_dir, &format!("Snapshot {} - {}", id, entry.id)) {
             error!("Failed to git commit snapshot: {}", e);
         }
 
-        Ok(format!("Snapshot created for VM {}", id))
+        Ok(format!("Snapshot {} created for VM {}", entry.id, id))
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
     }
@@ -768,12 +784,16 @@ pub async fn snapshot_vm(
 
 #[derive(Deserialize)]
 pub struct RestoreRequest {
-    snapshot_path: String,
-    mem_path: String,
-    cow_path: String, // Path to the existing COW file to restore from
-    // For MVP, we presume the disk state (COW) is already in a known location or passed here.
-    #[allow(dead_code)]
-    original_vm_id: String, // To find the original disk resources
+    pub snapshot_path: String,
+    pub mem_path: String,
+    pub cow_path: String,
+    pub original_vm_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct TimeTravelRequest {
+    pub vm_id: String,
+    pub snapshot_id: String,
 }
 
 pub async fn restore_vm(
@@ -785,28 +805,17 @@ pub async fn restore_vm(
         payload.snapshot_path
     );
 
-    // 1. Setup New VM State
-    // We need to CLONE the disk state or reusing it?
-    // "Teleportation" usually implies moving.
-    // "Restoration" (Backup) implies reusing.
-
-    // Let's implement a "Clone from Snapshot" flow.
-    // We need a backing disk. We can look up the original VM's base image path if we had persistence.
-    // Since we don't have DB persistence, this is tricky.
-    // HACK: We will assume we are restoring `alpine:latest` for this MVP demo,
-    // reusing the same base image path logic as run_vm.
-
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
     let ignite_root = home.join(".ignite");
     let images_root = ignite_root.join("images");
     let vms_root = ignite_root.join("vms");
 
-    // Assume alpine:latest base for now (Simplification for MVP Validation)
+    // We still assume alpine:latest base for MVP clone
     let safe_image_name = "alpine_latest";
     let image_store_path = images_root.join(&safe_image_name);
     let base_image_file = image_store_path.join("base.ext4");
 
-    // 2. New VM ID & Dir
+    // 2. New VM ID & Dir (Clone from Snapshot)
     let vm_id = uuid::Uuid::new_v4().to_string();
     let vm_dir = vms_root.join(&vm_id);
     std::fs::create_dir_all(&vm_dir)
@@ -815,8 +824,7 @@ pub async fn restore_vm(
     // 3. New COW File
     let cow_file = vm_dir.join("diff.cow");
 
-    // Copy existing COW state directly
-    info!("Restoring disk state from {}", payload.cow_path);
+    info!("Restoring disk state from {:?}", payload.cow_path);
     std::fs::copy(&payload.cow_path, &cow_file).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -966,6 +974,55 @@ pub async fn restore_vm(
         status: "Restored".to_string(),
         ip_address: vm_ip,
     }))
+}
+
+
+
+pub async fn time_travel_vm(
+    State(state): State<AppState>,
+    Json(payload): Json<TimeTravelRequest>,
+) -> Result<Json<RunResponse>, (StatusCode, String)> {
+    info!(
+        "Request to time-travel VM {} to snapshot: {}",
+        payload.vm_id, payload.snapshot_id
+    );
+
+    let tm = state.timemachine.read().await;
+    let _snapshot = tm.get_snapshot(&payload.vm_id, &payload.snapshot_id)
+        .ok_or((StatusCode::NOT_FOUND, "Snapshot not found".to_string()))?;
+
+    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+    let vms_root = home.join(".ignite").join("vms");
+    let source_vm_dir = vms_root.join(&payload.vm_id);
+    let snaps_dir = source_vm_dir.join("snapshots").join(&payload.snapshot_id);
+
+    let snapshot_path = snaps_dir.join("snapshot.snap");
+    let mem_path = snaps_dir.join("memory.mem");
+    let cow_path = snaps_dir.join("diff.cow");
+
+    let restore_req = RestoreRequest {
+        snapshot_path: snapshot_path.to_string_lossy().to_string(),
+        mem_path: mem_path.to_string_lossy().to_string(),
+        cow_path: cow_path.to_string_lossy().to_string(),
+        original_vm_id: payload.vm_id.clone(),
+    };
+
+    // Forward to existing restore logic
+    restore_vm(State(state.clone()), Json(restore_req)).await
+}
+
+#[derive(Serialize)]
+pub struct HistoryResponse {
+    pub snapshots: Vec<crate::timemachine::SnapshotEntry>,
+}
+
+pub async fn history_vm(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<HistoryResponse>, (StatusCode, String)> {
+    let tm = state.timemachine.read().await;
+    let history = tm.get_snapshot_history(&id).unwrap_or_default();
+    Ok(Json(HistoryResponse { snapshots: history }))
 }
 
 #[derive(Serialize)]

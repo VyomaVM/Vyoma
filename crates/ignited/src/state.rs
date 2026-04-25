@@ -26,6 +26,7 @@ pub struct AppState {
     pub wal: Arc<wal::Wal>,
     pub data_dir: String,
     pub raft: Option<openraft::Raft<SwarmConfig>>,
+    pub timemachine: Arc<tokio::sync::RwLock<crate::timemachine::TimeMachine>>,
 }
 
 #[derive(Debug)]
