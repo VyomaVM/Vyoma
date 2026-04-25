@@ -272,6 +272,9 @@ pub async fn run_vm(
     init_script.push_str("mount -t sysfs sys /sys || true\n");
     init_script.push_str("mount -t devtmpfs dev /dev || true\n");
 
+    // Start ignite-agent in background
+    init_script.push_str("/sbin/ignite-agent &\n\n");
+
     for e in &envs {
         init_script.push_str(&format!("export \"{}\"\n", e.replace('"', "\\\"")));
     }
@@ -287,13 +290,28 @@ pub async fn run_vm(
     if let Err(e) = std::fs::write(&temp_init_path, init_script) {
         warn!("Failed to write ignite-init.sh: {}", e);
     } else {
+        // Find ignite-agent binary
+        let agent_path = std::env::current_exe()
+            .map(|p| p.parent().unwrap().join("ignite-agent"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("/usr/bin/ignite-agent"));
+
+        let agent_path = if !agent_path.exists() {
+            std::path::PathBuf::from("target/x86_64-unknown-linux-musl/release/ignite-agent")
+        } else {
+            agent_path
+        };
+
         // debugfs Injection
-        let write_debugfs = format!("cd /sbin\nrm ignite-init\nwrite {} ignite-init\nsif ignite-init mode 0755\n", temp_init_path.to_string_lossy());
+        let write_debugfs = format!(
+            "cd /sbin\nrm ignite-init\nwrite {} ignite-init\nsif ignite-init mode 0755\nrm ignite-agent\nwrite {} ignite-agent\nsif ignite-agent mode 0755\n", 
+            temp_init_path.to_string_lossy(),
+            agent_path.to_string_lossy()
+        );
         let _ = Command::new("sudo")
             .args(&["debugfs", "-w", "-R", &write_debugfs.replace('\n', " -R "), &dm_path])
             .status();
         
-        info!("Injected /sbin/ignite-init for {}. CMD: {}", vm_id, cmd_str);
+        info!("Injected /sbin/ignite-init and /sbin/ignite-agent for {}. CMD: {}", vm_id, cmd_str);
     }
     // -------------------------------------
 

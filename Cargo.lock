@@ -1698,9 +1698,12 @@ version = "2.1.2"
 dependencies = [
  "anyhow",
  "bytes",
+ "futures",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
+ "tokio-vsock",
  "tracing",
  "tracing-subscriber",
 ]
@@ -4067,6 +4070,19 @@ dependencies = [
  "futures-sink",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "tokio-vsock"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b319ef9394889dab2e1b4f0085b45ba11d0c79dc9d1a9d1afc057d009d0f1c7"
+dependencies = [
+ "bytes",
+ "futures",
+ "libc",
+ "tokio",
+ "vsock",
 ]
 
 [[package]]
