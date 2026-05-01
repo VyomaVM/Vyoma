@@ -96,4 +96,34 @@ impl StorageManager {
         
         Ok(child)
     }
+
+    /// Commits an active snapshot (block device) into a fresh independent base image.
+    /// This performs native block I/O rather than shelling out to dd.
+    pub fn commit_snapshot(&self, snap_id: &str, new_base_name: &str) -> Result<SnapshotNode> {
+        info!("Committing snapshot {} to new base image {}", snap_id, new_base_name);
+        
+        let node = self.tree.get(snap_id)?;
+        let src_device = &node.snapshot_path;
+        
+        if !src_device.exists() {
+            return Err(StorageError::Path(format!("Source device does not exist: {:?}", src_device)));
+        }
+
+        let new_vol_dir = self.base_path.join(new_base_name);
+        fs::create_dir_all(&new_vol_dir).map_err(StorageError::Io)?;
+        
+        let new_base_file = new_vol_dir.join("root.ext4");
+        
+        // Native block I/O copy
+        let mut src_file = fs::File::open(src_device).map_err(StorageError::Io)?;
+        let mut dst_file = fs::File::create(&new_base_file).map_err(StorageError::Io)?;
+        std::io::copy(&mut src_file, &mut dst_file).map_err(StorageError::Io)?;
+        
+        let mut new_node = SnapshotNode::new(new_base_name, None);
+        new_node.snapshot_path = new_base_file.clone();
+        
+        self.tree.create(&new_node)?;
+        
+        Ok(new_node)
+    }
 }

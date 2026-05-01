@@ -15,11 +15,11 @@ pub enum Instruction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IgniteFile {
+pub struct Vyomafile {
     pub instructions: Vec<Instruction>,
 }
 
-impl IgniteFile {
+impl Vyomafile {
     pub fn parse(path: &Path) -> Result<Self> {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
@@ -112,7 +112,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_parse_ignitefile() {
+    fn test_parse_vyomafile() {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "FROM alpine:latest").unwrap();
         writeln!(file, "RUN apk add curl").unwrap();
@@ -120,21 +120,21 @@ mod tests {
         writeln!(file, "# This is a comment").unwrap();
         writeln!(file, "").unwrap(); // Empty line
 
-        let ignite_file = IgniteFile::parse(file.path()).unwrap();
+        let vyoma_file = Vyomafile::parse(file.path()).unwrap();
         
-        assert_eq!(ignite_file.instructions.len(), 3);
+        assert_eq!(vyoma_file.instructions.len(), 3);
         
-        match &ignite_file.instructions[0] {
+        match &vyoma_file.instructions[0] {
             Instruction::From(img) => assert_eq!(img, "alpine:latest"),
             _ => panic!("Expected FROM"),
         }
         
-        match &ignite_file.instructions[1] {
+        match &vyoma_file.instructions[1] {
             Instruction::Run(cmd) => assert_eq!(cmd, "apk add curl"),
             _ => panic!("Expected RUN"),
         }
         
-        match &ignite_file.instructions[2] {
+        match &vyoma_file.instructions[2] {
             Instruction::Copy { src, dest } => {
                 assert_eq!(src, ".");
                 assert_eq!(dest, "/app");

@@ -177,5 +177,17 @@ impl VmInstance {
                 error!("Failed to kill virtiofsd: {}", e);
             }
         }
+
+        // 9. Remove VM Directory
+        if let Some(home) = dirs::home_dir() {
+            let vm_dir = home.join(".ignite").join("vms").join(&self.id);
+            if vm_dir.exists() {
+                if let Err(e) = std::fs::remove_dir_all(&vm_dir) {
+                    error!("Failed to remove VM directory {}: {}", vm_dir.display(), e);
+                } else {
+                    info!("Removed VM directory: {}", vm_dir.display());
+                }
+            }
+        }
     }
 }

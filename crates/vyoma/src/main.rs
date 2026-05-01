@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use tar::Archive; // Removed Builder since we will use tar::Builder inline
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use vyoma_compose::VyomaCompose;
 use vyoma_core::api::PortMapping;
@@ -109,6 +109,13 @@ enum Commands {
         /// VM ID
         id: String,
     },
+    /// Commit an active VM into a new image
+    Commit {
+        /// VM ID or Name
+        id: String,
+        /// New image name (e.g., custom-img:latest)
+        new_image_name: String,
+    },
     /// List active VMs
     Ps,
     /// Create a snapshot of a VM
@@ -129,15 +136,15 @@ enum Commands {
         #[arg(long)]
         to: String,
     },
-    /// Export a VM snapshot to a file (Teleportation)
-    Export {
-        /// VM ID to export (must be snapshot first)
+    /// Save a VM snapshot to a file (Export/Teleportation)
+    Save {
+        /// VM ID to save
         id: String,
         /// Output file path (e.g. my-vm.tar.gz)
         output: String,
     },
-    /// Import a VM from a file (Teleportation)
-    Import {
+    /// Load a VM from a file (Import/Teleportation)
+    Load {
         /// Input file path (e.g. my-vm.tar.gz)
         input: String,
     },
@@ -380,6 +387,18 @@ async fn main() -> Result<()> {
 
             handle_response(resp, &daemon_url).await?;
         }
+        Commands::Commit { id, new_image_name } => {
+            info!("Requesting to commit VM {} to image {}", id, new_image_name);
+            let payload = serde_json::json!({
+                "new_image_name": new_image_name
+            });
+            let resp = client
+                .post(format!("{}/commit/{}", daemon_url, id))
+                .json(&payload)
+                .send()
+                .await;
+            handle_simple_response(resp, &daemon_url).await?;
+        }
         Commands::Stop { id } => {
             info!("Requesting to stop VM: {}", id);
             let resp = client
@@ -583,12 +602,12 @@ async fn main() -> Result<()> {
 
             handle_response(resp, &daemon_url).await?;
         }
-        Commands::Export { id, output } => {
-            info!("Exporting VM {} to {}", id, output);
+        Commands::Save { id, output } => {
+            info!("Saving VM {} to {}", id, output);
             export_vm(&id, &output)?;
         }
-        Commands::Import { input } => {
-            info!("Importing VM from {}", input);
+        Commands::Load { input } => {
+            info!("Loading VM from {}", input);
             import_vm(&input, &daemon_url).await?;
         }
         Commands::Teleport { id, target } => {
@@ -749,6 +768,32 @@ async fn main() -> Result<()> {
                     };
 
                     println!("Services found: {}", service_order.len());
+
+                    // Provision Networks
+                    let mut created_networks = HashMap::new();
+                    for (net_name, net_config) in &compose.networks {
+                        let full_net_name = format!("{}_{}", stack_name, net_name);
+                        
+                        let req = serde_json::json!({
+                            "name": full_net_name,
+                            "subnet": net_config.ipam.config.first().and_then(|c| c.subnet.clone()).unwrap_or_else(|| "".to_string()),
+                            "driver": net_config.driver.clone().unwrap_or_else(|| "bridge".to_string())
+                        });
+
+                        let resp = client.post(format!("{}/networks", daemon_url))
+                            .json(&req)
+                            .send()
+                            .await;
+                            
+                        if let Ok(r) = resp {
+                            if r.status().is_success() {
+                                info!("Network {} provisioned", full_net_name);
+                            } else {
+                                warn!("Failed to provision network {}: {}", full_net_name, r.text().await.unwrap_or_default());
+                            }
+                        }
+                        created_networks.insert(net_name.clone(), full_net_name);
+                    }
 
                     // Pre-check running services via Daemon
                     let mut service_ids = HashMap::new();

@@ -283,5 +283,21 @@ impl StorageManager {
         
         Ok(())
     }
+    /// Commits an active snapshot (block device) into a fresh independent base image.
+    /// Performs native block I/O without shelling out to `dd`.
+    pub fn commit_snapshot(src_device: &Path, dst_file: &Path) -> Result<()> {
+        info!("Committing block device {:?} to file {:?}", src_device, dst_file);
+        
+        if !src_device.exists() {
+            return Err(anyhow!("Source device does not exist: {:?}", src_device));
+        }
+
+        // Native block I/O copy
+        let mut src_f = std::fs::File::open(src_device).map_err(|e| anyhow!("Failed to open src: {}", e))?;
+        let mut dst_f = std::fs::File::create(dst_file).map_err(|e| anyhow!("Failed to create dst: {}", e))?;
+        std::io::copy(&mut src_f, &mut dst_f).map_err(|e| anyhow!("Failed to copy blocks: {}", e))?;
+        
+        Ok(())
+    }
 }
 

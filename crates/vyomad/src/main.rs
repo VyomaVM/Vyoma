@@ -177,6 +177,7 @@ async fn main() {
         .route("/pause/:id", post(handlers::pause_vm))
         .route("/resume/:id", post(handlers::resume_vm))
         .route("/ps", get(handlers::list_vms))
+        .route("/commit/:id", post(handlers::commit_vm))
         .route("/snapshot/:id", post(handlers::snapshot_vm))
         .route("/history/:id", get(handlers::history_vm))
         .route("/time-travel", post(handlers::time_travel_vm))
@@ -250,7 +251,7 @@ async fn main() {
         }
     };
 
-    // Set socket permissions: root:ignite (0660) - users in ignite group can access
+    // Set socket permissions: root:vyoma (0660) - users in vyoma group can access
     let permissions = std::fs::Permissions::from_mode(0o660);
     if let Err(e) = std::fs::set_permissions(&actual_socket_path, permissions) {
         warn!("Could not set 0660 permissions on socket: {}", e);

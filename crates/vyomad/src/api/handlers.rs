@@ -30,7 +30,7 @@ use crate::dns;
 use crate::ui;
 use axum::body::Body;
 use flate2::read::GzDecoder;
-use vyoma_core::builder::{IgniteFile, Instruction};
+use vyoma_core::builder::{Vyomafile, Instruction};
 use std::process::Command;
 use tar::Archive;
 use tokio::task::JoinHandle;
@@ -246,7 +246,7 @@ pub async fn run_vm(
     };
 
     // --- Inject OCI Config via debugfs ---
-    let config_path = base_image_file.parent().unwrap().join("ignite-config.json");
+    let config_path = base_image_file.parent().unwrap().join("vyoma-config.json");
     let mut envs = vec![];
     let mut oci_cmd = vec!["/bin/sh".to_string()];
     let mut workdir = "/".to_string();
@@ -286,9 +286,9 @@ pub async fn run_vm(
     let cmd_str = oci_cmd.into_iter().map(|s| format!("\"{}\"", s.replace('"', "\\\""))).collect::<Vec<_>>().join(" ");
     init_script.push_str(&format!("exec {}\n", cmd_str));
 
-    let temp_init_path = vm_dir.join("ignite-init.sh");
+    let temp_init_path = vm_dir.join("vyoma-init.sh");
     if let Err(e) = std::fs::write(&temp_init_path, init_script) {
-        warn!("Failed to write ignite-init.sh: {}", e);
+        warn!("Failed to write vyoma-init.sh: {}", e);
     } else {
         // Find vyoma-agent binary
         let agent_path = std::env::current_exe()
@@ -303,7 +303,7 @@ pub async fn run_vm(
 
         // debugfs Injection
         let write_debugfs = format!(
-            "cd /sbin\nrm ignite-init\nwrite {} ignite-init\nsif ignite-init mode 0755\nrm vyoma-agent\nwrite {} vyoma-agent\nsif vyoma-agent mode 0755\n", 
+            "cd /sbin\nrm vyoma-init\nwrite {} vyoma-init\nsif vyoma-init mode 0755\nrm vyoma-agent\nwrite {} vyoma-agent\nsif vyoma-agent mode 0755\n", 
             temp_init_path.to_string_lossy(),
             agent_path.to_string_lossy()
         );
@@ -311,7 +311,7 @@ pub async fn run_vm(
             .args(&["debugfs", "-w", "-R", &write_debugfs.replace('\n', " -R "), &dm_path])
             .status();
         
-        info!("Injected /sbin/ignite-init and /sbin/vyoma-agent for {}. CMD: {}", vm_id, cmd_str);
+        info!("Injected /sbin/vyoma-init and /sbin/vyoma-agent for {}. CMD: {}", vm_id, cmd_str);
     }
     // -------------------------------------
 
@@ -402,7 +402,7 @@ pub async fn run_vm(
         info!("Rootless: Skipping ProxyManager. Ports are mapped by slirp4netns.");
     }
 
-    let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0:{}:eth0:off:{} init=/sbin/ignite-init", 
+    let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0:{}:eth0:off:{} init=/sbin/vyoma-init", 
         vm_ip, "172.16.0.1", vm_id, "172.16.0.1");
     // "ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>:<dns0-ip>"
     // Correct kernel format: ip=172.16.0.X::172.16.0.1:255.255.255.0:myvm:eth0:off:172.16.0.1
@@ -655,6 +655,53 @@ pub async fn stop_vm(
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
     }
+}
+
+#[derive(Deserialize)]
+pub struct CommitRequest {
+    new_image_name: String,
+}
+
+pub async fn commit_vm(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<CommitRequest>,
+) -> Result<String, (StatusCode, String)> {
+    info!("Request to commit VM: {} to new image: {}", id, payload.new_image_name);
+
+    let vm_arc = {
+        let vms = state.vms.lock().unwrap();
+        vms.get(&id).cloned()
+    };
+
+    let dm_name = if let Some(vm_mutex) = vm_arc {
+        let vm = vm_mutex.lock().await;
+        vm.dm_name.clone()
+    } else {
+        return Err((StatusCode::NOT_FOUND, "VM not found or not running".to_string()));
+    };
+
+    let src_device = std::path::PathBuf::from(format!("/dev/mapper/{}", dm_name));
+    
+    // Save to ~/.ignite/images/<new_image_name>
+    let home = dirs::home_dir().ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "No home dir".to_string()))?;
+    let images_dir = home.join(".ignite").join("images").join(&payload.new_image_name);
+    
+    std::fs::create_dir_all(&images_dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let dst_file = images_dir.join("root.ext4");
+
+    vyoma_core::storage::StorageManager::commit_snapshot(&src_device, &dst_file)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Save empty config for it
+    let config = vyoma_core::oci::OciImageConfig::default();
+    let config_path = images_dir.join("vyoma-config.json");
+    let config_json = serde_json::to_string_pretty(&config)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    std::fs::write(&config_path, config_json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(format!("VM {} committed to image {}", id, payload.new_image_name))
 }
 
 pub async fn pause_vm(
@@ -1254,7 +1301,7 @@ pub async fn build_image(
         ));
     }
 
-    let ignite_file = IgniteFile::parse(&ignitefile_path)
+    let ignite_file = Vyomafile::parse(&ignitefile_path)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Parse error: {}", e)))?;
 
     // 4. Build Process
@@ -1457,10 +1504,10 @@ pub async fn build_image(
     }
 
     // Save the built configuration
-    let config_path = image_store_path.join("ignite-config.json");
+    let config_path = image_store_path.join("vyoma-config.json");
     if let Ok(json_str) = serde_json::to_string_pretty(&oci_config) {
         if let Err(e) = std::fs::write(&config_path, json_str) {
-            warn!("Failed to write ignite-config.json: {}", e);
+            warn!("Failed to write vyoma-config.json: {}", e);
         }
     }
 
@@ -1500,10 +1547,10 @@ pub async fn ensure_image_locally(
         if let Ok(config_digest) = oci.parse_config_digest(&manifest_json) {
             info!("Fetching OCI config blob: {}", config_digest);
             if let Ok(config) = oci.pull_config_blob(image_name, &config_digest).await {
-                let config_path = image_store_path.join("ignite-config.json");
+                let config_path = image_store_path.join("vyoma-config.json");
                 if let Ok(json_str) = serde_json::to_string_pretty(&config) {
                     if let Err(e) = std::fs::write(&config_path, json_str) {
-                        warn!("Failed to write ignite-config.json: {}", e);
+                        warn!("Failed to write vyoma-config.json: {}", e);
                     } else {
                         info!("Saved OCI configuration to {:?}", config_path);
                     }
