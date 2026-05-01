@@ -1,0 +1,11 @@
+[package]
+name = "vyoma-compose"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+vyoma-core = { path = "../vyoma-core" }
+serde = { workspace = true, features = ["derive"] }
+serde_yaml = "0.9.34"

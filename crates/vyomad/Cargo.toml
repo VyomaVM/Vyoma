@@ -1,0 +1,45 @@
+[package]
+name = "vyomad"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+vyoma-core = { path = "../vyoma-core" }
+serde.workspace = true
+serde_json.workspace = true
+axum = "0.7"
+anyhow.workspace = true
+tempfile.workspace = true
+uuid = { version = "1.7", features = ["v4"] }
+rand = "0.8"
+dirs = "5.0"
+futures.workspace = true
+tokio-stream = { version = "0.1.17", features = ["sync"] }
+tar.workspace = true
+flate2.workspace = true
+tokio-util = { version = "0.7.17", features = ["io"] }
+simple-dns = "0.11.0"
+rust-embed = "8.2"
+mime_guess = "2.0"
+tower-http = { version = "0.5", features = ["cors"] }
+libc = "0.2.180"
+reqwest = { version = "0.13.1", features = ["json"] }
+clap = { version = "4.4", features = ["derive"] }
+
+
+sled = "0.34"
+hyper-util = { version = "0.1.20", features = ["server-auto", "tokio"] }
+hyper = "1.8.1"
+tower-service = "0.3.3"
+prometheus.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+tonic = "0.11"
+prost = "0.12"
+vyoma-proto = { path = "../vyoma-proto" }
+openraft = { version = "0.9.22", features = ["serde"] }
+async-trait = "0.1.89"
+vyoma-teleport = { path = "../vyoma-teleport" }

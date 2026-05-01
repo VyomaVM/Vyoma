@@ -1,9 +1,9 @@
-# Ignite 🔥: The Micro-VM Ecosystem
+# Vyoma 🔥: The Micro-VM Ecosystem
 
-[![Release Badge](https://img.shields.io/github/v/release/Subeshrock/micro-vm-ecosystem?style=flat-square)](https://github.com/Subeshrock/micro-vm-ecosystem/releases)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/Subeshrock/micro-vm-ecosystem/release.yml?style=flat-square)](https://github.com/Subeshrock/micro-vm-ecosystem/actions)
+[![Release Badge](https://img.shields.io/github/v/release/Subeshrock/vyoma?style=flat-square)](https://github.com/Subeshrock/vyoma/releases)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/Subeshrock/vyoma/release.yml?style=flat-square)](https://github.com/Subeshrock/vyoma/actions)
 
-**Ignite** is a production-grade Micro-VM manager. It combines the blazing speed and security of **Firecracker** with the beloved developer experience of **Docker**.
+**Vyoma** is a production-grade Micro-VM manager. It combines the blazing speed and security of **Cloud Hypervisor** with the beloved developer experience of **Docker**.
 
 Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images. No heavy kernels, no complex QEMU flags—just code.
 
@@ -12,47 +12,47 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 ## 🚀 Key Features (v2.1.2)
 
 *   **Docker UX**: Familiar commands: `run`, `ps`, `logs`, `exec`.
-*   **Ignite Swarm**: Built-in clustering with **Mesh Networking** (VXLAN) and deterministic IP allocation.
-*   **Ignite Compose**: Orchestrate stacks with `ignite-compose.yml`.
+*   **Vyoma Swarm**: Built-in clustering with **Mesh Networking** (VXLAN) and deterministic IP allocation.
+*   **Vyoma Compose**: Orchestrate stacks with `vyoma-compose.yml`.
 *   **Web Dashboard**: Built-in visual management UI (bundled in Daemon, accessible at `http://localhost:3000`).
 *   **VS Code Extension**: Manage VMs directly from VS Code.
-*   **Self-Contained**: `.deb` and `.rpm` packages bundle all dependencies (Firecracker, CNI plugins, UI).
+*   **Self-Contained**: `.deb` and `.rpm` packages bundle all dependencies (Cloud Hypervisor, CNI plugins, UI).
 *   **Persistence**: Volume mounts (`virtiofs`) and Port Mapping.
 *   **Snapshotting**: Instant VM snapshots and State Teleportation.
-*   **Secure by Default**: Daemon runs as `ignite` user with kernel capabilities, socket permissions 0660.
+*   **Secure by Default**: Daemon runs as `vyoma` user with kernel capabilities, socket permissions 0660.
 
 ---
 
 ## 📦 Installation
 
 ### 1. Download Package
-Go to the [Releases Page](https://github.com/Subeshrock/micro-vm-ecosystem/releases) and download the latest package for your distro.
+Go to the [Releases Page](https://github.com/Subeshrock/vyoma/releases) and download the latest package for your distro.
 
 ### 2. Install
 
 **Debian/Ubuntu:**
 ```bash
-sudo dpkg -i ignite_2.1.2_amd64.deb
+sudo dpkg -i vyoma_2.1.2_amd64.deb
 ```
 
 **Fedora/RHEL/CentOS:**
 ```bash
-sudo rpm -i ignite-2.1.2-1.x86_64.rpm
+sudo rpm -i vyoma-2.1.2-1.x86_64.rpm
 ```
 
-**Important:** After installation, **log out and log back in** once for your user to be added to the `ignite` group. This is required for the CLI to connect to the daemon.
+**Important:** After installation, **log out and log back in** once for your user to be added to the `vyoma` group. This is required for the CLI to connect to the daemon.
 
 **What's Installed:**
-*   `/usr/bin/ignited`: The Daemon (Run via Systemd).
+*   `/usr/bin/vyomad`: The Daemon (Run via Systemd).
 *   `/usr/bin/ign`: The CLI Tool.
-*   `/usr/bin/firecracker`: Bundled VMM binary.
-*   `/usr/lib/ignite/cni/bin/`: CNI plugins for networking.
-*   `/usr/lib/ignite/ui/`: Web dashboard (served at `http://localhost:3000`).
-*   `/etc/systemd/system/ignited.service`: Service definition.
+*   `/usr/bin/cloud-hypervisor`: Bundled VMM binary.
+*   `/usr/lib/vyoma/cni/bin/`: CNI plugins for networking.
+*   `/usr/lib/vyoma/ui/`: Web dashboard (served at `http://localhost:3000`).
+*   `/etc/systemd/system/vyomad.service`: Service definition.
 
 ### 3. Verify Installation
 ```bash
-ign doctor
+vyoma doctor
 ```
 This utility checks for KVM (`/dev/kvm`), tun/tap support, and daemon connectivity.
 
@@ -65,36 +65,36 @@ For a complete reference of all 20+ commands, see [COMMANDS.md](COMMANDS.md).
 ### Lifecycle
 *   **Run a VM**:
     ```bash
-    ign run ubuntu:latest --vcpu 2 --memory 1024 -p 8080:80
+    vyoma run ubuntu:latest --vcpu 2 --memory 1024 -p 8080:80
     ```
-*   **List VMs**: `ign ps`
-*   **Logs**: `ign logs -f <vm_id>`
-*   **Shell Access**: `ign exec <vm_id> /bin/bash`
-*   **Stop/Remove**: `ign stop <vm_id>`, `ign rm <vm_id>`
-*   **Pause/Resume**: `ign pause <vm_id>`, `ign resume <vm_id>`
+*   **List VMs**: `vyoma ps`
+*   **Logs**: `vyoma logs -f <vm_id>`
+*   **Shell Access**: `vyoma exec <vm_id> /bin/bash`
+*   **Stop/Remove**: `vyoma stop <vm_id>`, `vyoma rm <vm_id>`
+*   **Pause/Resume**: `vyoma pause <vm_id>`, `vyoma resume <vm_id>`
 
 ### Networking
-Ignite uses CNI for robust networking.
-*   **List Networks**: `ign network ls`
-*   **Create Network**: `ign network create my-net --subnet 10.10.0.0/16`
+Vyoma uses CNI for robust networking.
+*   **List Networks**: `vyoma network ls`
+*   **Create Network**: `vyoma network create my-net --subnet 10.10.0.0/16`
 
-### Clustering (Ignite Swarm)
+### Clustering (Vyoma Swarm)
 Turn multiple machines into a single mesh.
 1.  **Initialize Seed (Leader)**:
     ```bash
-    ign swarm init
-    # OR specify IP: ign swarm init --advertise-addr 192.168.1.10
+    vyoma swarm init
+    # OR specify IP: vyoma swarm init --advertise-addr 192.168.1.10
     ```
 2.  **Join Worker**:
     ```bash
-    ign swarm join <SEED_IP>
+    vyoma swarm join <SEED_IP>
     ```
-3.  **List Nodes**: `ign swarm ls`
+3.  **List Nodes**: `vyoma swarm ls`
 
 Swarm ensures unique Subnet Leases (e.g., `10.42.1.0/24` for Node 1) and routes traffic transparently over VXLAN.
 
-### Orchestration (Ignite Compose)
-Define complex stacks using `ignite-compose.yml`:
+### Orchestration (Vyoma Compose)
+Define complex stacks using `vyoma-compose.yml`:
 ```yaml
 version: "1.0"
 services:
@@ -105,14 +105,14 @@ services:
     image: postgres:15
     cpus: 2
 ```
-*   **Deploy**: `ign up -d`
-*   **Teardown**: `ign down`
+*   **Deploy**: `vyoma up -d`
+*   **Teardown**: `vyoma down`
 
 ---
 
-## 📘 Ignitefile Reference (Build)
+## 📘 Vyomafile Reference (Build)
 
-The `Ignitefile` is used to build custom images via `ign build`.
+The `Vyomafile` is used to build custom images via `vyoma build`.
 
 ```dockerfile
 # Start from a base image (Docker Hub or local)
@@ -129,9 +129,9 @@ COPY config.json /etc/config.json
 
 ---
 
-## 📘 Ignite Compose Reference
+## 📘 Vyoma Compose Reference
 
-Use `ignite-compose.yml` to orchestrate multi-VM stacks.
+Use `vyoma-compose.yml` to orchestrate multi-VM stacks.
 
 ```yaml
 version: "1.0"
@@ -150,7 +150,7 @@ services:
   db:
     build: 
       context: ./database
-      ignitefile: Ignitefile
+      vyomafile: Vyomafile
     environment:         # Environment variables (WIP)
       POSTGRES_PASSWORD: secret
 ```
@@ -160,14 +160,14 @@ services:
 
 ## 🔧 Architecture & Dependencies
 
-Ignite is designed to be "Batteries Included", but some advanced features need helpers.
+Vyoma is designed to be "Batteries Included", but some advanced features need helpers.
 
 **Primary Dependencies (Bundled in Package):**
-*   **Firecracker**: The VMM (Virtual Machine Monitor).
+*   **Cloud Hypervisor**: The VMM (Virtual Machine Monitor).
 *   **CNI Plugins**: For VM networking (bridge, host-local IPAM).
-*   **Web UI**: Dashboard bundled at `/usr/lib/ignite/ui`.
+*   **Web UI**: Dashboard bundled at `/usr/lib/vyoma/ui`.
 *   **KVM**: Kernel-based Virtual Machine. **MUST be enabled in BIOS/OS** (`/dev/kvm`).
-*   **Systemd**: Manages the `ignited` daemon lifecycle.
+*   **Systemd**: Manages the `vyomad` daemon lifecycle.
 
 **Optional Dependencies (Install Manually):**
 *   **Virtiofsd**: REQUIRED for Volume Mounts (`-v`).
@@ -176,16 +176,16 @@ Ignite is designed to be "Batteries Included", but some advanced features need h
     *   **Manual**: Download binary from [GitLab](https://gitlab.com/virtio-fs/virtiofsd/-/releases) and place in `$PATH` or `/usr/bin`.
 
 **Privilege Model:**
-*   **Daemon (`ignited`)**: Runs as **`ignite` user** with kernel capabilities (`CAP_NET_ADMIN`, `CAP_SYS_ADMIN`, `CAP_NET_RAW`, `CAP_SETUID`, `CAP_SETGID`).
-*   **Socket**: `/run/ignite/ignite.sock` with permissions `0660` (root:ignite).
-*   **Client (`ign`)**: Runs as **User** (must be in `ignite` group).
+*   **Daemon (`vyomad`)**: Runs as **`vyoma` user** with kernel capabilities (`CAP_NET_ADMIN`, `CAP_SYS_ADMIN`, `CAP_NET_RAW`, `CAP_SETUID`, `CAP_SETGID`).
+*   **Socket**: `/run/vyoma/vyoma.sock` with permissions `0660` (root:vyoma).
+*   **Client (`vyoma`)**: Runs as **User** (must be in `vyoma` group).
 *   **User Must Logout/Login Once**: After installation, log out and back in for group membership to take effect.
 
 ---
 
 ## 🧪 Testing & Development
 
-For developers contributing to Ignite, please refer to:
+For developers contributing to Vyoma, please refer to:
 *   [CLI Reference](COMMANDS.md) for full CLI reference.
 
 ## 🤝 Contributing

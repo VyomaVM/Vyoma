@@ -3,7 +3,7 @@ set -e
 
 VERSION="2.1.2"
 WORK_DIR="target/rpm"
-SOURCES_DIR="${WORK_DIR}/SOURCES/ignite-${VERSION}"
+SOURCES_DIR="${WORK_DIR}/SOURCES/vyoma-${VERSION}"
 
 # Clean up any previous build
 rm -rf "${WORK_DIR}"
@@ -11,22 +11,20 @@ mkdir -p "${WORK_DIR}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 mkdir -p "${SOURCES_DIR}"
 
 # 1. Build Binaries
-cargo build --release --bin ignited --bin ign
+cargo build --release --bin vyomad --bin ign
 
 # 2. Copy binaries to source dir
-cp target/release/ignited "${SOURCES_DIR}/"
-cp target/release/ign "${SOURCES_DIR}/"
+cp target/release/vyomad "${SOURCES_DIR}/"
+cp target/release/vyoma "${SOURCES_DIR}/"
 
 # 3. Fetch Dependencies
 echo "Fetching dependencies..."
-if [ ! -f "firecracker" ]; then
-    wget -q -O firecracker.tgz https://github.com/firecracker-microvm/firecracker/releases/download/v1.7.0/firecracker-v1.7.0-x86_64.tgz
-    tar -xzf firecracker.tgz
-    mv release-v1.7.0-x86_64/firecracker-v1.7.0-x86_64 firecracker
-    chmod +x firecracker
+if [ ! -f "cloud-hypervisor" ]; then
+    wget -q -O cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v41.0/cloud-hypervisor
+    chmod +x cloud-hypervisor
 fi
-cp firecracker "${SOURCES_DIR}/"
-cp packaging/systemd/ignited.service "${SOURCES_DIR}/"
+cp cloud-hypervisor "${SOURCES_DIR}/"
+cp packaging/systemd/vyomad.service "${SOURCES_DIR}/"
 
 # Fetch CNI plugins
 CNI_VERSION="v1.5.1"
@@ -78,21 +76,21 @@ fi
 
 # 4. Create Source Tarball
 cd "${WORK_DIR}/SOURCES"
-tar -czf "ignite-${VERSION}.tar.gz" "ignite-${VERSION}"
+tar -czf "vyoma-${VERSION}.tar.gz" "vyoma-${VERSION}"
 cd ../../..
 
 # 5. Create SPEC File
-SPEC_CONTENT="Name:       ignite
+SPEC_CONTENT="Name:       vyoma
 Version:    ${VERSION}
 Release:    1%{?dist}
 Summary:    MicroVM Ecosystem
 License:    MIT
 URL:        https://github.com/Subeshrock/micro-vm-ecosystem
-Source0:    ignite-${VERSION}.tar.gz
+Source0:    vyoma-${VERSION}.tar.gz
 
 %description
-Ignite is a lightweight MicroVM runtime for running containers
-as lightweight virtual machines. Combines Firecracker speed with Docker UX.
+Vyoma is a lightweight MicroVM runtime for running containers
+as lightweight virtual machines. Combines Cloud Hypervisor speed with Docker UX.
 Includes CLI, Daemon, Web UI, CNI plugins, and virtiofsd for volume mounts.
 
 %prep
@@ -100,102 +98,102 @@ Includes CLI, Daemon, Web UI, CNI plugins, and virtiofsd for volume mounts.
 
 %install
 mkdir -p %{buildroot}/usr/bin
-mkdir -p %{buildroot}/usr/lib/ignite
+mkdir -p %{buildroot}/usr/lib/vyoma
 mkdir -p %{buildroot}/etc/systemd/system
-install -m 755 ignited %{buildroot}/usr/bin/ignited
-install -m 755 ign %{buildroot}/usr/bin/ign
-install -m 755 firecracker %{buildroot}/usr/bin/firecracker
-install -m 644 ignited.service %{buildroot}/etc/systemd/system/ignited.service
+install -m 755 vyomad %{buildroot}/usr/bin/vyomad
+install -m 755 vyoma %{buildroot}/usr/bin/ign
+install -m 755 cloud-hypervisor %{buildroot}/usr/bin/cloud-hypervisor
+install -m 644 vyomad.service %{buildroot}/etc/systemd/system/vyomad.service
 
 # Install CNI plugins
-cp -r cni %{buildroot}/usr/lib/ignite/cni
+cp -r cni %{buildroot}/usr/lib/vyoma/cni
 
 # Install kernel binary
-mkdir -p %{buildroot}/var/lib/ignite/bin
-install -m 755 bin/vmlinux %{buildroot}/var/lib/ignite/bin/vmlinux"
+mkdir -p %{buildroot}/var/lib/vyoma/bin
+install -m 755 bin/vmlinux %{buildroot}/var/lib/vyoma/bin/vmlinux"
 
 if [ "$UI_AVAILABLE" = true ]; then
     SPEC_CONTENT="$SPEC_CONTENT
 
 # Install UI
-cp -r ui %{buildroot}/usr/lib/ignite/ui"
+cp -r ui %{buildroot}/usr/lib/vyoma/ui"
 fi
 
 if [ -f "${SOURCES_DIR}/virtiofsd" ]; then
     SPEC_CONTENT="$SPEC_CONTENT
-install -m 755 virtiofsd %{buildroot}/usr/lib/ignite/virtiofsd"
+install -m 755 virtiofsd %{buildroot}/usr/lib/vyoma/virtiofsd"
 fi
 
 SPEC_CONTENT="$SPEC_CONTENT
 
 %files
-/usr/bin/ignited
+/usr/bin/vyomad
 /usr/bin/ign
-/usr/bin/firecracker
-/etc/systemd/system/ignited.service
-/usr/lib/ignite/cni
-/var/lib/ignite/bin/vmlinux"
+/usr/bin/cloud-hypervisor
+/etc/systemd/system/vyomad.service
+/usr/lib/vyoma/cni
+/var/lib/vyoma/bin/vmlinux"
 
 if [ "$UI_AVAILABLE" = true ]; then
     SPEC_CONTENT="$SPEC_CONTENT
-/usr/lib/ignite/ui"
+/usr/lib/vyoma/ui"
 fi
 
 if [ -f "${SOURCES_DIR}/virtiofsd" ]; then
     SPEC_CONTENT="$SPEC_CONTENT
-/usr/lib/ignite/virtiofsd"
+/usr/lib/vyoma/virtiofsd"
 fi
 
 SPEC_CONTENT="$SPEC_CONTENT
 
 %post
-# Create ignite user (for socket ownership)
-if ! getent passwd ignite > /dev/null 2>&1; then
-    useradd -r -s /sbin/nologin -c \"Ignite MicroVM Daemon\" -d /var/lib/ignite ignite 2>/dev/null || true
+# Create vyoma user (for socket ownership)
+if ! getent passwd vyoma > /dev/null 2>&1; then
+    useradd -r -s /sbin/nologin -c \"Vyoma MicroVM Daemon\" -d /var/lib/vyoma vyoma 2>/dev/null || true
 fi
 
-# Add installing user to ignite and kvm groups
+# Add installing user to vyoma and kvm groups
 if [ -n \"\$SUDO_USER\" ]; then
-    usermod -aG ignite \$SUDO_USER 2>/dev/null || true
+    usermod -aG vyoma \$SUDO_USER 2>/dev/null || true
     usermod -aG kvm \$SUDO_USER 2>/dev/null || true
-    echo \"Added \$SUDO_USER to ignite and kvm groups. Log out and back in to use CLI.\"
+    echo \"Added \$SUDO_USER to vyoma and kvm groups. Log out and back in to use CLI.\"
 elif [ -n \"\$USER\" ]; then
-    usermod -aG ignite \$USER 2>/dev/null || true
+    usermod -aG vyoma \$USER 2>/dev/null || true
     usermod -aG kvm \$USER 2>/dev/null || true
-    echo \"Added \$USER to ignite and kvm groups. Log out and back in to use CLI.\"
+    echo \"Added \$USER to vyoma and kvm groups. Log out and back in to use CLI.\"
 fi
 
-# Add ignite daemon user to kvm group (for /dev/kvm access)
+# Add vyoma daemon user to kvm group (for /dev/kvm access)
 if getent group kvm > /dev/null 2>&1; then
-    usermod -aG kvm ignite 2>/dev/null || true
+    usermod -aG kvm vyoma 2>/dev/null || true
 fi
 
 # Fix /dev/kvm permissions
 chmod 0660 /dev/kvm 2>/dev/null || true
 chown root:kvm /dev/kvm 2>/dev/null || true
 
-# Create runtime directory - owned by root:ignite, group writable (0775)
-mkdir -p /run/ignite
-chown root:ignite /run/ignite 2>/dev/null || true
-chmod 0775 /run/ignite 2>/dev/null || true
+# Create runtime directory - owned by root:vyoma, group writable (0775)
+mkdir -p /run/vyoma
+chown root:vyoma /run/vyoma 2>/dev/null || true
+chmod 0775 /run/vyoma 2>/dev/null || true
 
 # Setup CNI plugins directory (symlink from system data dir to package location)
-rm -rf /var/lib/ignite/.ignite/cni/bin 2>/dev/null || true
-ln -sf /usr/lib/ignite/cni/bin /var/lib/ignite/.ignite/cni/bin 2>/dev/null || true
+rm -rf /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
+ln -sf /usr/lib/vyoma/cni/bin /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
 
 systemctl daemon-reload 2>/dev/null || true
-systemctl enable ignited.service 2>/dev/null || true
-systemctl start ignited.service 2>/dev/null || true
+systemctl enable vyomad.service 2>/dev/null || true
+systemctl start vyomad.service 2>/dev/null || true
 
-echo \"Ignite v\${VERSION} installed successfully!\"
+echo \"Vyoma v\${VERSION} installed successfully!\"
 echo \"Open http://localhost:3000 for the dashboard\"
-echo \"Run 'ign run nginx:latest' to start your first VM\"
+echo \"Run 'vyoma run nginx:latest' to start your first VM\"
 
 %postun
 if [ \$1 -eq 0 ]; then
     # Package removal - cleanup
-    userdel ignite 2>/dev/null || true
-    rm -rf /var/lib/ignite /run/ignite 2>/dev/null || true
+    userdel vyoma 2>/dev/null || true
+    rm -rf /var/lib/vyoma /run/vyoma 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
 fi
 
@@ -206,20 +204,20 @@ fi
 - Fix socket and KVM permissions
 - Bundle CNI plugins for networking
 - Bundle UI in package
-- Fix /run/ignite directory permissions (0775)
+- Fix /run/vyoma directory permissions (0775)
 "
 
-echo "$SPEC_CONTENT" > "${WORK_DIR}/SPECS/ignite.spec"
+echo "$SPEC_CONTENT" > "${WORK_DIR}/SPECS/vyoma.spec"
 
 # 6. Build RPM
-rpmbuild --define "_topdir $(pwd)/${WORK_DIR}" -bb "${WORK_DIR}/SPECS/ignite.spec"
+rpmbuild --define "_topdir $(pwd)/${WORK_DIR}" -bb "${WORK_DIR}/SPECS/vyoma.spec"
 
 # 7. Move to dist
 mkdir -p dist
 mv ${WORK_DIR}/RPMS/x86_64/*.rpm dist/
 
 # 8. Cleanup
-rm -f firecracker firecracker.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
+rm -f cloud-hypervisor cloud-hypervisor.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
 rm -rf release-v1.7.0-x86_64
 rm -rf "${WORK_DIR}"
 

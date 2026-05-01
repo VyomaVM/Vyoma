@@ -3,32 +3,30 @@ set -e
 
 VERSION="2.1.2"
 ARCH="amd64"
-PKG_NAME="ignite"
+PKG_NAME="vyoma"
 WORK_DIR="target/debian/${PKG_NAME}_${VERSION}_${ARCH}"
 
-echo "Building Ignite v${VERSION} for Debian..."
+echo "Building Vyoma v${VERSION} for Debian..."
 
 # 1. Build Binaries
-cargo build --release --bin ignited --bin ign
+cargo build --release --bin vyomad --bin ign
 
 # 2. Prepare Directory Structure
 mkdir -p "${WORK_DIR}/usr/bin"
-mkdir -p "${WORK_DIR}/usr/lib/ignite"
+mkdir -p "${WORK_DIR}/usr/lib/vyoma"
 mkdir -p "${WORK_DIR}/etc/systemd/system"
 mkdir -p "${WORK_DIR}/DEBIAN"
 
-# 3. Fetch & Copy Dependencies (Firecracker, Virtiofsd, CNI plugins)
+# 3. Fetch & Copy Dependencies (Cloud Hypervisor, Virtiofsd, CNI plugins)
 echo "Fetching dependencies..."
-if [ ! -f "firecracker" ]; then
-    wget -q -O firecracker.tgz https://github.com/firecracker-microvm/firecracker/releases/download/v1.7.0/firecracker-v1.7.0-x86_64.tgz
-    tar -xzf firecracker.tgz
-    mv release-v1.7.0-x86_64/firecracker-v1.7.0-x86_64 firecracker
-    chmod +x firecracker
+if [ ! -f "cloud-hypervisor" ]; then
+    wget -q -O cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v41.0/cloud-hypervisor
+    chmod +x cloud-hypervisor
 fi
 
 # Fetch CNI plugins
 CNI_VERSION="v1.5.1"
-CNI_DIR="${WORK_DIR}/usr/lib/ignite/cni"
+CNI_DIR="${WORK_DIR}/usr/lib/vyoma/cni"
 echo "Fetching CNI plugins..."
 mkdir -p "${CNI_DIR}/bin"
 if [ ! -f "cni-plugins.tgz" ]; then
@@ -38,7 +36,7 @@ tar -xzf cni-plugins.tgz -C "${CNI_DIR}/bin/"
 
 # Fetch virtiofsd with fallback URLs
 VIRTIOFSD_VERSION="1.11.1"
-VIRTIOFSD_DIR="${WORK_DIR}/usr/lib/ignite"
+VIRTIOFSD_DIR="${WORK_DIR}/usr/lib/vyoma"
 
 echo "Fetching virtiofsd..."
 
@@ -49,8 +47,8 @@ if command -v npm &> /dev/null; then
     npm install
     npm run build
     cd ..
-    mkdir -p "${WORK_DIR}/usr/lib/ignite"
-    cp -r ui/dist "${WORK_DIR}/usr/lib/ignite/ui"
+    mkdir -p "${WORK_DIR}/usr/lib/vyoma"
+    cp -r ui/dist "${WORK_DIR}/usr/lib/vyoma/ui"
     echo "UI bundled successfully"
 else
     echo "Skipping UI build (npm not found)"
@@ -93,15 +91,15 @@ else
 fi
 
 # 4. Copy Assets
-cp target/release/ignited "${WORK_DIR}/usr/bin/"
-cp target/release/ign "${WORK_DIR}/usr/bin/"
-cp firecracker "${WORK_DIR}/usr/bin/firecracker"
-cp packaging/systemd/ignited.service "${WORK_DIR}/etc/systemd/system/"
+cp target/release/vyomad "${WORK_DIR}/usr/bin/"
+cp target/release/vyoma "${WORK_DIR}/usr/bin/"
+cp cloud-hypervisor "${WORK_DIR}/usr/bin/cloud-hypervisor"
+cp packaging/systemd/vyomad.service "${WORK_DIR}/etc/systemd/system/"
 
-# Copy kernel and firecracker to data directory
-mkdir -p "${WORK_DIR}/var/lib/ignite/bin"
+# Copy kernel and cloud-hypervisor to data directory
+mkdir -p "${WORK_DIR}/var/lib/vyoma/bin"
 if [ -f "bin/vmlinux" ]; then
-    cp bin/vmlinux "${WORK_DIR}/var/lib/ignite/bin/vmlinux"
+    cp bin/vmlinux "${WORK_DIR}/var/lib/vyoma/bin/vmlinux"
     echo "Kernel binary bundled"
 else
     echo "Warning: bin/vmlinux not found - VMs will not start"
@@ -109,16 +107,16 @@ fi
 
 # Bundle virtiofsd (from system or project bin)
 if [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
-    cp bin/virtiofsd "${WORK_DIR}/usr/lib/ignite/virtiofsd"
-    chmod +x "${WORK_DIR}/usr/lib/ignite/virtiofsd"
+    cp bin/virtiofsd "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
+    chmod +x "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
     echo "virtiofsd bundled from project bin"
 elif [ -f "/usr/libexec/virtiofsd" ]; then
-    cp /usr/libexec/virtiofsd "${WORK_DIR}/usr/lib/ignite/virtiofsd"
-    chmod +x "${WORK_DIR}/usr/lib/ignite/virtiofsd"
+    cp /usr/libexec/virtiofsd "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
+    chmod +x "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
     echo "virtiofsd bundled from system"
 elif [ -f "/usr/bin/virtiofsd" ]; then
-    cp /usr/bin/virtiofsd "${WORK_DIR}/usr/lib/ignite/virtiofsd"
-    chmod +x "${WORK_DIR}/usr/lib/ignite/virtiofsd"
+    cp /usr/bin/virtiofsd "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
+    chmod +x "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
     echo "virtiofsd bundled from /usr/bin"
 else
     echo "Warning: virtiofsd not found - volume mounts may not work"
@@ -133,8 +131,8 @@ Priority: optional
 Architecture: ${ARCH}
 Depends: libc6, openssl, ca-certificates
 Maintainer: Subeshrock <subesh.rock.3@gmail.com>
-Description: Ignite - MicroVM Ecosystem
- Docker-like experience for Firecracker MicroVMs.
+Description: Vyoma - MicroVM Ecosystem
+ Docker-like experience for Cloud Hypervisor MicroVMs.
  Includes Daemon, CLI, Web UI, and virtiofsd for volume mounts.
 EOF
 
@@ -143,44 +141,44 @@ cat <<'POSTINST' > "${WORK_DIR}/DEBIAN/postinst"
 #!/bin/bash
 set -e
 
-# Create ignite user (for socket ownership)
-if ! id ignite >/dev/null 2>&1; then
-    useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Ignite MicroVM Daemon" ignite 2>/dev/null || true
+# Create vyoma user (for socket ownership)
+if ! id vyoma >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Vyoma MicroVM Daemon" vyoma 2>/dev/null || true
 fi
 
-# Add installing user to ignite and kvm groups
+# Add installing user to vyoma and kvm groups
 if [ -n "$SUDO_USER" ]; then
-    usermod -aG ignite "$SUDO_USER" 2>/dev/null || true
+    usermod -aG vyoma "$SUDO_USER" 2>/dev/null || true
     usermod -aG kvm "$SUDO_USER" 2>/dev/null || true
-    echo "Added $SUDO_USER to ignite and kvm groups. Log out and back in to use CLI."
+    echo "Added $SUDO_USER to vyoma and kvm groups. Log out and back in to use CLI."
 fi
 
-# Add ignite daemon user to kvm group (for /dev/kvm access)
+# Add vyoma daemon user to kvm group (for /dev/kvm access)
 if getent group kvm > /dev/null 2>&1; then
-    usermod -aG kvm ignite 2>/dev/null || true
+    usermod -aG kvm vyoma 2>/dev/null || true
 fi
 
 # Fix /dev/kvm permissions
 chmod 0660 /dev/kvm 2>/dev/null || true
 chown root:kvm /dev/kvm 2>/dev/null || true
 
-# Create runtime directory - owned by root:ignite, group writable (0775)
-mkdir -p /run/ignite
-chown root:ignite /run/ignite 2>/dev/null || true
-chmod 0775 /run/ignite 2>/dev/null || true
+# Create runtime directory - owned by root:vyoma, group writable (0775)
+mkdir -p /run/vyoma
+chown root:vyoma /run/vyoma 2>/dev/null || true
+chmod 0775 /run/vyoma 2>/dev/null || true
 
 # Setup CNI plugins directory (symlink from system data dir to package location)
-rm -rf /var/lib/ignite/.ignite/cni/bin 2>/dev/null || true
-ln -sf /usr/lib/ignite/cni/bin /var/lib/ignite/.ignite/cni/bin
+rm -rf /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
+ln -sf /usr/lib/vyoma/cni/bin /var/lib/vyoma/.vyoma/cni/bin
 
 # Enable and start service
 systemctl daemon-reload 2>/dev/null || true
-systemctl enable ignited.service 2>/dev/null || true
-systemctl start ignited.service 2>/dev/null || true
+systemctl enable vyomad.service 2>/dev/null || true
+systemctl start vyomad.service 2>/dev/null || true
 
-echo "Ignite v${VERSION} installed successfully!"
+echo "Vyoma v${VERSION} installed successfully!"
 echo "Open http://localhost:3000 for the dashboard"
-echo "Run 'ign run nginx:latest' to start your first VM"
+echo "Run 'vyoma run nginx:latest' to start your first VM"
 POSTINST
 chmod 755 "${WORK_DIR}/DEBIAN/postinst"
 
@@ -190,8 +188,8 @@ cat <<'POSTRM' > "${WORK_DIR}/DEBIAN/postrm"
 set -e
 systemctl daemon-reload 2>/dev/null || true
 if [ "$1" = "purge" ]; then
-    userdel ignite 2>/dev/null || true
-    rm -rf /var/lib/ignite /run/ignite 2>/dev/null || true
+    userdel vyoma 2>/dev/null || true
+    rm -rf /var/lib/vyoma /run/vyoma 2>/dev/null || true
 fi
 POSTRM
 chmod 755 "${WORK_DIR}/DEBIAN/postrm"
@@ -201,7 +199,7 @@ mkdir -p dist
 dpkg-deb --build "${WORK_DIR}" "dist/${PKG_NAME}_${VERSION}_${ARCH}.deb"
 
 # 9. Cleanup
-rm -f firecracker firecracker.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
+rm -f cloud-hypervisor cloud-hypervisor.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
 rm -rf release-v1.7.0-x86_64
 rm -rf "${WORK_DIR}"
 

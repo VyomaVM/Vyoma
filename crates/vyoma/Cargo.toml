@@ -1,0 +1,24 @@
+[package]
+name = "vyoma"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap = { version = "4.4", features = ["derive"] }
+tokio.workspace = true
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tar = "0.4"
+flate2 = "1.0"
+dirs = "5.0"
+tempfile = "3.8" # To locate .ignite dir
+vyoma-core = { path = "../vyoma-core" }
+futures.workspace = true
+tokio-util = { version = "0.7.17", features = ["codec"] }
+colored = "3.0.0"
+vyoma-compose = { path = "../vyoma-compose" }

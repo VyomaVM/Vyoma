@@ -1,16 +1,16 @@
 [workspace]
 members = [
-    "crates/ignited",
-    "crates/ign",
-    "crates/ignite-core", "crates/ignite-compose",
-    "crates/ignite-storage",
-    "crates/ignite-net",
-    "crates/ignite-teleport",
-    "crates/ignite-proto",
-    "crates/ignite-image",
-    "crates/ignite-agent",
-    "crates/ignite-sdk",
-    "crates/ignite-agent-vm",
+    "crates/vyomad",
+    "crates/vyoma",
+    "crates/vyoma-core", "crates/vyoma-compose",
+    "crates/vyoma-storage",
+    "crates/vyoma-net",
+    "crates/vyoma-teleport",
+    "crates/vyoma-proto",
+    "crates/vyoma-image",
+    "crates/vyoma-agent",
+    "crates/vyoma-sdk",
+    "crates/vyoma-agent-vm",
 ]
 resolver = "2"
 

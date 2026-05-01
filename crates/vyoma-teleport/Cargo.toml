@@ -1,0 +1,24 @@
+[package]
+name = "vyoma-teleport"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+uuid = { version = "1.7", features = ["v4"] }
+bytes = "1.5"
+bitvec = "1.0"
+vyoma-proto = { path = "../vyoma-proto" }
+tonic = "0.11"
+tokio-util = { version = "0.7", features = ["io"] }
+tokio-stream = "0.1"
+async-compression = { version = "0.4.8", features = ["tokio", "zstd"] }
+
+[dev-dependencies]
+tokio-test = "0.4"

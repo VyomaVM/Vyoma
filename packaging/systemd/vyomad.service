@@ -1,0 +1,22 @@
+[Unit]
+Description=Vyoma MicroVM Daemon
+Documentation=https://github.com/Subeshrock/micro-vm-ecosystem
+After=network.target
+
+[Service]
+Type=simple
+# Run as vyoma user with kernel capabilities
+User=vyoma
+Group=vyoma
+WorkingDirectory=/
+RuntimeDirectory=vyoma
+RuntimeDirectoryMode=0775
+AmbientCapabilities=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE CAP_SETUID CAP_SETGID
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE CAP_SETUID CAP_SETGID
+ExecStart=/usr/bin/vyomad --socket-path /run/vyoma/vyoma.sock --http-port 3000 --data-dir /var/lib/vyoma
+Restart=on-failure
+RestartSec=5s
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target

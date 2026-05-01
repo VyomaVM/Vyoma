@@ -1,12 +1,12 @@
-# Ignite CLI Command Reference 📚
+# Vyoma CLI Command Reference 📚
 
-This document lists all available commands for the Ignite CLI (`ign`).
+This document lists all available commands for the Vyoma CLI (`vyoma`).
 
 ## Core Lifecycle
 
-### `ign run`
+### `vyoma run`
 Run a new micro-VM from an image.
-**Usage**: `ign run [OPTIONS] <IMAGE>`
+**Usage**: `vyoma run [OPTIONS] <IMAGE>`
 **Options**:
 - `--vcpu <N>`: Number of vCPUs (Default: 1).
 - `--memory <MB>`: Memory size in MiB (Default: 512).
@@ -15,121 +15,121 @@ Run a new micro-VM from an image.
 - `--name <NAME>`: Custom hostname/name.
 **Example**:
 ```bash
-ign run alpine:latest --vcpu 2 --memory 1024 -p 8080:80
+vyoma run alpine:latest --vcpu 2 --memory 1024 -p 8080:80
 ```
 
-### `ign stop`
+### `vyoma stop`
 Stop a running VM gracefully.
-**Usage**: `ign stop <ID>`
-**Example**: `ign stop a1b2c3d4`
+**Usage**: `vyoma stop <ID>`
+**Example**: `vyoma stop a1b2c3d4`
 
-### `ign start`
+### `vyoma start`
 Start a stopped VM (Resume execution). (Use `restart` to replace).
-**Usage**: `ign start <ID>`
+**Usage**: `vyoma start <ID>`
 
-### `ign restart`
+### `vyoma restart`
 Stop and Restart a VM (Full reboot).
-**Usage**: `ign restart <ID>`
+**Usage**: `vyoma restart <ID>`
 
-### `ign ps`
+### `vyoma ps`
 List all active VMs.
-**Usage**: `ign ps`
+**Usage**: `vyoma ps`
 **Example Output**:
 ```
 ID        IMAGE           IP            STATUS    UPTIME
 a1b2c3    alpine:latest   172.16.0.5    Running   5m
 ```
 
-### `ign logs`
+### `vyoma logs`
 Stream logs from a VM's serial console.
-**Usage**: `ign logs [-f] <ID>`
-**Example**: `ign logs -f web-server`
+**Usage**: `vyoma logs [-f] <ID>`
+**Example**: `vyoma logs -f web-server`
 
-### `ign exec`
+### `vyoma exec`
 Execute a command inside a running VM.
-**Usage**: `ign exec <ID> <COMMAND>`
-**Example**: `ign exec web-server /bin/ls -la`
+**Usage**: `vyoma exec <ID> <COMMAND>`
+**Example**: `vyoma exec web-server /bin/ls -la`
 
 ## Image Management
 
-### `ign pull`
+### `vyoma pull`
 Pull an OCI image from a registry (Docker Hub).
-**Usage**: `ign pull <IMAGE>`
-**Example**: `ign pull nginx:alpine`
+**Usage**: `vyoma pull <IMAGE>`
+**Example**: `vyoma pull nginx:alpine`
 
-### `ign build`
-Build a new image using an `Ignitefile`.
-**Usage**: `ign build -t <TAG> <CONTEXT>`
-**Example**: `ign build -t my-app:v1 .`
+### `vyoma build`
+Build a new image using an `Vyomafile`.
+**Usage**: `vyoma build -t <TAG> <CONTEXT>`
+**Example**: `vyoma build -t my-app:v1 .`
 
 ## Networking
 
-### `ign network ls`
+### `vyoma network ls`
 List available CNI networks.
-**Usage**: `ign network ls`
+**Usage**: `vyoma network ls`
 
-### `ign network create`
+### `vyoma network create`
 Create a new bridge network.
-**Usage**: `ign network create <NAME> --subnet <CIDR>`
-**Example**: `ign network create backend --subnet 10.50.0.0/16`
+**Usage**: `vyoma network create <NAME> --subnet <CIDR>`
+**Example**: `vyoma network create backend --subnet 10.50.0.0/16`
 
 ## Swarm (Cluster)
 
-### `ign swarm init`
+### `vyoma swarm init`
 Initialize this node as a Swarm Seed (Leader).
-**Usage**: `ign swarm init`
+**Usage**: `vyoma swarm init`
 
-### `ign swarm join`
+### `vyoma swarm join`
 Join an existing Swarm.
-**Usage**: `ign swarm join <SEED_IP>`
-**Example**: `ign swarm join 192.168.1.10`
+**Usage**: `vyoma swarm join <SEED_IP>`
+**Example**: `vyoma swarm join 192.168.1.10`
 
-### `ign swarm ls`
+### `vyoma swarm ls`
 List nodes in the swarm.
-**Usage**: `ign swarm ls`
+**Usage**: `vyoma swarm ls`
 
 ## Snapshots & Teleportation
 
-### `ign snapshot`
+### `vyoma snapshot`
 Create a snapshot of a VM.
-**Usage**: `ign snapshot <ID>`
-**Example**: `ign snapshot web-server`
+**Usage**: `vyoma snapshot <ID>`
+**Example**: `vyoma snapshot web-server`
 
-### `ign restore`
+### `vyoma restore`
 Restore a VM from a snapshot ID.
-**Usage**: `ign restore <SNAPSHOT_ID>`
+**Usage**: `vyoma restore <SNAPSHOT_ID>`
 
-### `ign export`
+### `vyoma export`
 Export a snapshot to a tarball.
-**Usage**: `ign export <SNAPSHOT_ID> <FILE>`
-**Example**: `ign export snap_123 backup.tar`
+**Usage**: `vyoma export <SNAPSHOT_ID> <FILE>`
+**Example**: `vyoma export snap_123 backup.tar`
 
-### `ign import`
+### `vyoma import`
 Import a VM from a snapshot tarball.
-**Usage**: `ign import <FILE>`
+**Usage**: `vyoma import <FILE>`
 
-## Orchestration (Ignite Compose)
+## Orchestration (Vyoma Compose)
 
-### `ign up`
-Create and start resources from `ignite-compose.yml`.
-**Usage**: `ign up [-d]`
+### `vyoma up`
+Create and start resources from `vyoma-compose.yml`.
+**Usage**: `vyoma up [-d]`
 **Options**: `-d` (Detached mode).
 
-### `ign down`
-Stop and remove resources defined in `ignite-compose.yml`.
-**Usage**: `ign down`
+### `vyoma down`
+Stop and remove resources defined in `vyoma-compose.yml`.
+**Usage**: `vyoma down`
 
-### `ign scale`
+### `vyoma scale`
 Scale a service to N replicas.
-**Usage**: `ign scale <SERVICE>=<COUNT>`
-**Example**: `ign scale web=3`
+**Usage**: `vyoma scale <SERVICE>=<COUNT>`
+**Example**: `vyoma scale web=3`
 
 ## System
 
-### `ign doctor`
+### `vyoma doctor`
 Check system health (KVM, Dependencies).
-**Usage**: `ign doctor`
+**Usage**: `vyoma doctor`
 
-### `ign help`
+### `vyoma help`
 Show help message.
-**Usage**: `ign help` OR `ign <COMMAND> --help`
+**Usage**: `vyoma help` OR `vyoma <COMMAND> --help`
