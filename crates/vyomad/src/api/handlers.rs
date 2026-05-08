@@ -23,6 +23,7 @@ use std::convert::Infallible;
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
+use std::path::PathBuf;
 use tracing::{error, info, warn};
 
 use crate::cluster;
@@ -407,23 +408,23 @@ pub async fn run_vm(
     // "ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>:<dns0-ip>"
     // Correct kernel format: ip=172.16.0.X::172.16.0.1:255.255.255.0:myvm:eth0:off:172.16.0.1
 
-    // 4. Firecracker VMM
-    let socket_path = format!("/tmp/firecracker_{}.socket", vm_id);
+    // 4. Cloud Hypervisor VMM
+    let socket_path = vm_dir.join("ch.sock").to_string_lossy().to_string();
     let mut vmm = VmmManager::new(&socket_path);
 
-    // Kernel and Firecracker paths from data_dir
+    // Kernel and Cloud Hypervisor paths from data_dir
     let kernel_path = format!("{}/bin/vmlinux", state.data_dir);
-    let firecracker_path = format!("{}/bin/firecracker", state.data_dir);
+    let ch_path = format!("{}/bin/cloud-hypervisor", state.data_dir);
     if !std::path::Path::new(&kernel_path).exists() {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Kernel binary not found at {}", kernel_path).into(),
         ));
     }
-    if !std::path::Path::new(&firecracker_path).exists() {
+    if !std::path::Path::new(&ch_path).exists() {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Firecracker binary not found at {}", firecracker_path).into(),
+            format!("Cloud Hypervisor binary not found at {}", ch_path).into(),
         ));
     }
 
@@ -431,11 +432,11 @@ pub async fn run_vm(
 
     if state.rootless {
         // Rootless Start
-        info!("Spawning Firecracker in Rootless Mode (unshare -r -n)...");
-        if let Err(e) = vmm.start_daemon(&firecracker_path, None, true) {
+        info!("Spawning Cloud Hypervisor in Rootless Mode (unshare -r -n)...");
+        if let Err(e) = vmm.start_daemon(&ch_path, None, true) {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to start FC (Rootless): {}", e),
+                format!("Failed to start Cloud Hypervisor (Rootless): {}", e),
             ));
         }
 
@@ -484,10 +485,10 @@ pub async fn run_vm(
         }
     } else {
         // Root/CNI Start (Hybrid Mode)
-        if let Err(e) = vmm.start_daemon(&firecracker_path, None, false) {
+        if let Err(e) = vmm.start_daemon(&ch_path, None, false) {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to start FC: {}", e),
+                format!("Failed to start Cloud Hypervisor: {}", e),
             ));
         }
 
@@ -568,7 +569,7 @@ pub async fn run_vm(
     let instance = VmInstance {
         vmm,
         id: vm_id.clone(),
-        fc_socket_path: socket_path.clone(),
+        ch_socket_path: socket_path.clone(),
         tap_name: if state.rootless {
             String::new()
         } else {
@@ -717,7 +718,7 @@ pub async fn pause_vm(
 
     if let Some(vm_mutex) = vm_arc {
         let vm = vm_mutex.lock().await;
-        info!("Pause VM {}: fc_socket_path={}", id, vm.fc_socket_path);
+        info!("Pause VM {}: ch_socket_path={}", id, vm.ch_socket_path);
         vm.vmm
             .pause_instance()
             .await
@@ -781,7 +782,7 @@ pub async fn snapshot_vm(
 
         let snapshot_path = snaps_dir.join("snapshot.snap");
         let mem_path = snaps_dir.join("memory.mem");
-        let fc_socket = vm.fc_socket_path.clone();
+        let ch_socket = vm.ch_socket_path.clone();
 
         // 1. Pause VM (Required for snapshot)
         vm.vmm.pause_instance().await.map_err(|e| {
@@ -926,14 +927,14 @@ pub async fn restore_vm(
     let safe_octet = std::cmp::max(2, std::cmp::min(254, random_octet));
     let vm_ip = format!("172.16.0.{}", safe_octet);
 
-    // 6. Firecracker VMM
-    let socket_path = format!("/tmp/firecracker_{}.socket", vm_id);
+    // 6. Cloud Hypervisor VMM
+    let socket_path = vm_dir.join("ch.sock").to_string_lossy().to_string();
     let mut vmm = VmmManager::new(&socket_path);
 
-    if let Err(e) = vmm.start_daemon(&format!("{}/bin/firecracker", state.data_dir), None, state.rootless) {
+    if let Err(e) = vmm.start_daemon(&format!("{}/bin/cloud-hypervisor", state.data_dir), None, state.rootless) {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to start FC: {}", e),
+            format!("Failed to start Cloud Hypervisor: {}", e),
         ));
     }
 
@@ -980,7 +981,7 @@ pub async fn restore_vm(
     let instance = VmInstance {
         vmm,
         id: vm_id.clone(),
-        fc_socket_path: socket_path.clone(),
+        ch_socket_path: socket_path.clone(),
         tap_name: tap_name.clone(),
         dm_name: dm_name.clone(),
         slirp: None,
@@ -1639,7 +1640,7 @@ pub async fn initialize_state(state: &AppState) {
         };
 
         // Reconstruct VmmManager
-        let socket_path = format!("/tmp/firecracker_{}.socket", vm_state.id);
+        let socket_path = entry.path().join("ch.sock").to_string_lossy().to_string();
         let vmm = VmmManager::new(&socket_path);
 
         // Check Alive
@@ -1665,7 +1666,7 @@ pub async fn initialize_state(state: &AppState) {
             let instance = VmInstance {
                 vmm,
                 id: vm_state.id.clone(),
-                fc_socket_path: socket_path.clone(),
+                ch_socket_path: socket_path.clone(),
                 tap_name: vm_state.tap_name,
                 dm_name: vm_state.dm_name,
                 loop_devices: vm_state.loop_devices,
@@ -1699,7 +1700,7 @@ pub async fn initialize_state(state: &AppState) {
             let mut instance = VmInstance {
                 vmm,
                 id: vm_state.id.clone(),
-                fc_socket_path: socket_path,
+                ch_socket_path: socket_path,
                 tap_name: vm_state.tap_name,
                 dm_name: vm_state.dm_name,
                 loop_devices: vm_state.loop_devices,
@@ -1758,11 +1759,11 @@ pub async fn start_process_monitor(state: AppState) {
                 if let Some(vm_mutex) = vm_arc {
                     let mut vm = vm_mutex.lock().await;
 
-                    // 1. Check Firecracker
+                    // 1. Check Cloud Hypervisor
                     match vm.vmm.try_wait() {
                         Ok(Some(status)) => {
                             let mut msg = format!(
-                                "Monitor: VM {} Firecracker process EXITED (Reaped): {}",
+                                "Monitor: VM {} Cloud Hypervisor process EXITED (Reaped): {}",
                                 id, status
                             );
 
@@ -1777,8 +1778,12 @@ pub async fn start_process_monitor(state: AppState) {
                             }
                             error!("{}", msg);
                         }
-                        Err(e) => error!("Monitor Check Error for VMM {}: {}", id, e),
-                        Ok(None) => {}
+                        Ok(None) => {
+                            // Still running
+                        }
+                        Err(e) => {
+                            error!("Monitor: VM {} wait error: {}", id, e);
+                        }
                     }
 
                     // 2. Check VirtioFS
@@ -2030,33 +2035,35 @@ pub async fn teleport_handler(
         let vm_dir = home.join(".ignite").join("vms").join(&payload.vm_id);
         let snapshot_path = vm_dir.join("snapshot.snap");
         let mem_path = vm_dir.join("memory.mem");
-        let fc_socket = vm.fc_socket_path.clone();
+        let ch_socket = vm.ch_socket_path.clone();
 
-        // Pause and snapshot
-        info!("Pausing VM {} for teleportation...", payload.vm_id);
-        vm.vmm.pause_instance().await.map_err(|e| {
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to pause: {}", e))
-        })?;
+        // We do not need to manually pause and snapshot for Cloud Hypervisor live migration.
+        // The hypervisor handles the memory tracking and handoff natively.
+        let target_url = payload.target_node_ip.clone();
+        
+        let client = reqwest::Client::new();
+        let target_api = format!("http://{}:3000/receive-teleport", target_url);
+        
+        info!("Telling target node at {} to prepare for reception...", target_api);
+        
+        let res = client.post(&target_api)
+            .json(&ReceiveTeleportRequest { vm_id: payload.vm_id.clone() })
+            .send()
+            .await;
+            
+        if let Err(e) = res {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Target node unreachable: {}", e)));
+        } else if let Ok(resp) = res {
+            if !resp.status().is_success() {
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Target node refused: {:?}", resp.text().await)));
+            }
+        }
 
-        info!("Creating memory snapshot...");
-        vm.vmm.create_snapshot(
-            snapshot_path.to_string_lossy().as_ref(),
-            mem_path.to_string_lossy().as_ref(),
-        ).await.map_err(|e| {
-            // Attempt to resume if snapshot fails
-            let _ = futures::executor::block_on(vm.vmm.resume_instance());
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Snapshot failed: {}", e))
-        })?;
-        let mem_size = vm.mem_size_mib as u64 * 1024 * 1024;
+        let teleporter = vyoma_teleport::sender::Teleporter::new(payload.vm_id.clone(), target_url, vm.mem_size_mib as u64);
         
-        // Spawn Teleport Sender
-        let target_url = format!("http://{}:7071", payload.target_node_ip);
-        let teleporter = vyoma_teleport::sender::Teleporter::new(payload.vm_id.clone(), target_url, mem_size);
-        
-        // Teleport the VM memory & state asynchronously
         let teleport_vm_id = payload.vm_id.clone();
         tokio::spawn(async move {
-            match teleporter.teleport_vm(mem_path, snapshot_path).await {
+            match teleporter.teleport_vm(PathBuf::new(), PathBuf::new(), &ch_socket).await {
                 Ok(_) => info!("Teleportation of VM {} succeeded!", teleport_vm_id),
                 Err(e) => error!("Teleportation of VM {} failed: {}", teleport_vm_id, e),
             }
@@ -2066,6 +2073,47 @@ pub async fn teleport_handler(
     } else {
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ReceiveTeleportRequest {
+    pub vm_id: String,
+}
+
+pub async fn receive_teleport_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<ReceiveTeleportRequest>,
+) -> Result<String, (StatusCode, String)> {
+    info!("Handling POST /receive-teleport for VM {}", payload.vm_id);
+    
+    // Create directories
+    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+    let vm_dir = home.join(".ignite").join("vms").join(&payload.vm_id);
+    std::fs::create_dir_all(&vm_dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    let ch_socket = vm_dir.join("ch.sock").to_string_lossy().to_string();
+    let mut vmm = VmmManager::new(&ch_socket);
+
+    // Start Cloud Hypervisor
+    if let Err(e) = vmm.start_daemon(&format!("{}/bin/cloud-hypervisor", state.data_dir), None, state.rootless) {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to start Cloud Hypervisor: {}", e),
+        ));
+    }
+
+    // Call Receiver
+    let receiver = vyoma_teleport::receiver::TeleportReceiver::new(PathBuf::new(), PathBuf::new(), "0.0.0.0".to_string());
+    if let Err(e) = receiver.start_receiving(&ch_socket).await {
+        let _ = vmm.kill();
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to set receive-migration mode: {}", e)));
+    }
+
+    // We leave it running. Sender will connect to port 9000 and it will resume automatically.
+    // The VM state should probably be adopted by the daemon after migration completes.
+    // In a complete implementation, we would wait for it and insert into `state.vms`.
+    
+    Ok(format!("Cloud Hypervisor ready to receive VM {} on TCP port 9000", payload.vm_id))
 }
 
 // --- Raft Core API Handlers ---

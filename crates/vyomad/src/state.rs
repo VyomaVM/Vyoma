@@ -33,7 +33,7 @@ pub struct AppState {
 pub struct VmInstance {
     pub vmm: VmmManager,
     pub id: String,
-    pub fc_socket_path: String,
+    pub ch_socket_path: String,
     pub tap_name: String,
     pub dm_name: String,
     pub loop_devices: Vec<String>,

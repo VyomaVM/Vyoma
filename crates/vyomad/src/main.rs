@@ -204,6 +204,7 @@ async fn main() {
         .route("/raft/snapshot", post(handlers::raft_snapshot_handler))
         .route("/raft/vote", post(handlers::raft_vote_handler))
         .route("/teleport", post(handlers::teleport_handler))
+        .route("/receive-teleport", post(handlers::receive_teleport_handler))
         .fallback(ui::ui_handler)
         .layer(CorsLayer::permissive())
         .with_state(state.clone());
@@ -291,14 +292,11 @@ async fn main() {
         let addr = "[::1]:7071".parse().unwrap();
         info!("gRPC interface available at {}", addr);
         use vyoma_proto::v1::vm_service_server::VmServiceServer;
-        use vyoma_proto::teleport::v1::teleport_service_server::TeleportServiceServer;
         
         let svc = VmServiceServer::new(grpc::GrpcVmService::new(grpc_state.clone()));
-        let teleport_svc = TeleportServiceServer::new(grpc::GrpcTeleportService::new(grpc_state));
         
         if let Err(e) = tonic::transport::Server::builder()
             .add_service(svc)
-            .add_service(teleport_svc)
             .serve(addr)
             .await
         {
