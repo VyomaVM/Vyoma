@@ -250,6 +250,15 @@ impl VmmManager {
         Ok(())
     }
 
+    pub async fn add_vsock(&mut self, cid: u32, socket_path: &str) -> Result<()> {
+        let vsock = crate::ch_types::VsockConfig {
+            cid,
+            socket: socket_path.to_string(),
+        };
+        self.config.vsock = Some(vsock);
+        Ok(())
+    }
+
     pub async fn start_instance(&self) -> Result<()> {
         // Step 1: Create VM with config
         info!("Sending VmConfig to Cloud Hypervisor: {:?}", self.config);

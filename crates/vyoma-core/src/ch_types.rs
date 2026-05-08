@@ -27,6 +27,15 @@ pub struct VmConfig {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub console: Option<ConsoleConfig>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vsock: Option<VsockConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VsockConfig {
+    pub cid: u32,
+    pub socket: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

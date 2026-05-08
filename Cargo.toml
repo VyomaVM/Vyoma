@@ -10,7 +10,7 @@ members = [
     "crates/vyoma-image",
     "crates/vyoma-agent",
     "crates/vyoma-sdk",
-    "crates/vyoma-agent-vm",
+    "crates/vyoma-agent-vm", "crates/vyoma-vk8s",
 ]
 resolver = "2"
 

@@ -173,7 +173,9 @@ pub async fn run_vm(
     info!("Using base image at {:?}", base_image_file);
 
     // 3. VM Specific Setup
-    let vm_id = uuid::Uuid::new_v4().to_string();
+    let vm_uuid = uuid::Uuid::new_v4();
+    let vm_id = vm_uuid.to_string();
+    let cid = (vm_uuid.as_fields().0 % 1000000) + 3;
     let vm_dir = vms_root.join(&vm_id);
     std::fs::create_dir_all(&vm_dir)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -533,6 +535,13 @@ pub async fn run_vm(
             let _ = vmm.kill();
             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add net: {}", e)));
         }
+    }
+
+    // Add Vsock for Host-to-Agent communication
+    let vsock_path = vm_dir.join("vsock.sock");
+    if let Err(e) = vmm.add_vsock(cid, vsock_path.to_string_lossy().as_ref()).await {
+        let _ = vmm.kill();
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add vsock: {}", e)));
     }
 
     // Add Volumes

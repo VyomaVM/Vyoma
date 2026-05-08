@@ -3838,6 +3838,33 @@ checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "tonic"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d560933a0de61cf715926b9cac824d4c883c2c43142f787595e48280c40a1d0e"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum 0.6.20",
+ "base64 0.21.7",
+ "bytes",
+ "h2 0.3.27",
+ "http 0.2.12",
+ "http-body 0.4.6",
+ "hyper 0.14.32",
+ "hyper-timeout",
+ "percent-encoding",
+ "pin-project",
+ "prost",
+ "tokio",
+ "tokio-stream",
+ "tower 0.4.13",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "tonic"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76c4eb7a4e9ef9d4763600161f12f5070b92a578e1b634db88a6887844c91a13"
@@ -4293,7 +4320,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-test",
- "tonic",
+ "tonic 0.11.0",
  "tonic-build",
  "tracing",
  "uuid",
@@ -4304,10 +4331,12 @@ name = "vyoma-sdk"
 version = "2.1.2"
 dependencies = [
  "anyhow",
+ "bytes",
  "futures",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
  "tracing",
  "vyoma-proto",
 ]
@@ -4344,10 +4373,23 @@ dependencies = [
  "tokio-stream",
  "tokio-test",
  "tokio-util",
- "tonic",
+ "tonic 0.11.0",
  "tracing",
  "uuid",
  "vyoma-proto",
+]
+
+[[package]]
+name = "vyoma-vk8s"
+version = "2.1.2"
+dependencies = [
+ "anyhow",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.10.2",
+ "tracing",
+ "tracing-subscriber",
+ "vyoma-sdk",
 ]
 
 [[package]]
@@ -4381,7 +4423,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "tonic",
+ "tonic 0.11.0",
  "tower-http 0.5.2",
  "tower-service",
  "tracing",
