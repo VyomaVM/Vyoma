@@ -302,17 +302,36 @@ pub async fn run_vm(
             agent_path
         };
 
-        // debugfs Injection
-        let write_debugfs = format!(
-            "cd /sbin\nrm vyoma-init\nwrite {} vyoma-init\nsif vyoma-init mode 0755\nrm vyoma-agent\nwrite {} vyoma-agent\nsif vyoma-agent mode 0755\n", 
-            temp_init_path.to_string_lossy(),
-            agent_path.to_string_lossy()
-        );
-        let _ = Command::new("sudo")
-            .args(&["debugfs", "-w", "-R", &write_debugfs.replace('\n', " -R "), &dm_path])
+        // Host-Side Ext4 Injection via Mount
+        let mount_point = vm_dir.join("mnt");
+        std::fs::create_dir_all(&mount_point).unwrap_or_default();
+
+        let mount_status = Command::new("sudo")
+            .args(&["mount", &dm_path, &mount_point.to_string_lossy().to_string()])
             .status();
-        
-        info!("Injected /sbin/vyoma-init and /sbin/vyoma-agent for {}. CMD: {}", vm_id, cmd_str);
+
+        if mount_status.map(|s| s.success()).unwrap_or(false) {
+            let sbin_dir = mount_point.join("sbin");
+            std::fs::create_dir_all(&sbin_dir).unwrap_or_default();
+
+            // Inject vyoma-init
+            let target_init = sbin_dir.join("vyoma-init");
+            let _ = Command::new("sudo").args(&["cp", &temp_init_path.to_string_lossy(), &target_init.to_string_lossy()]).status();
+            let _ = Command::new("sudo").args(&["chmod", "+x", &target_init.to_string_lossy()]).status();
+
+            // Inject vyoma-agent
+            let target_agent = sbin_dir.join("vyoma-agent");
+            let _ = Command::new("sudo").args(&["cp", &agent_path.to_string_lossy(), &target_agent.to_string_lossy()]).status();
+            let _ = Command::new("sudo").args(&["chmod", "+x", &target_agent.to_string_lossy()]).status();
+
+            // Unmount
+            let _ = Command::new("sudo").args(&["umount", &mount_point.to_string_lossy().to_string()]).status();
+            let _ = std::fs::remove_dir(&mount_point);
+
+            info!("Injected /sbin/vyoma-init and /sbin/vyoma-agent for {}. CMD: {}", vm_id, cmd_str);
+        } else {
+            error!("Failed to mount {} to inject init script", dm_path);
+        }
     }
     // -------------------------------------
 
