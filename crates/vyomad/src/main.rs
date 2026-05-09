@@ -28,9 +28,16 @@ mod timemachine;
 mod auto_snapshot;
 mod hibernation;
 mod grpc;
+#[cfg(feature = "chaos")]
+mod chaos;
+#[cfg(feature = "chaos")]
+mod chaos_tests;
 
 use state::{AppState, wal::Wal, recovery::Recovery};
 use api::handlers;
+
+#[cfg(feature = "chaos")]
+use chaos::enable_chaos_on_startup;
 
 #[derive(Parser, Debug)]
 #[command(name = "vyomad", about = "Ignite MicroVM Daemon", version)]
@@ -44,6 +51,9 @@ struct Args {
     /// Data directory containing kernel and firecracker binaries
     #[arg(short, long, default_value = "/var/lib/ignite")]
     data_dir: String,
+    /// Enable chaos mode for crash injection testing
+    #[arg(long)]
+    chaos_mode: bool,
 }
 
 #[tokio::main]
@@ -56,6 +66,14 @@ async fn main() {
     // Root requirement stripped in favor of AmbientCapabilities (ADR-022)
 
     info!("vyomad (Ignite Daemon) starting up (Unix Socket: {})...", args.socket_path);
+
+    #[cfg(feature = "chaos")]
+    {
+        if args.chaos_mode {
+            chaos::enable_chaos_on_startup(std::path::Path::new(&args.data_dir));
+            info!("Chaos mode enabled!");
+        }
+    }
 
     let cgroups = CgroupManager::new();
     if let Err(e) = cgroups.init() {
