@@ -18,6 +18,8 @@ pub struct VmifManifest {
     pub firmware: FirmwareInfo,
     #[serde(default)]
     pub measured_boot: MeasuredBootInfo,
+    #[serde(default)]
+    pub confidential_computing: ConfidentialComputingInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -54,6 +56,50 @@ pub struct MeasuredBootInfo {
     pub rootfs_hash: Option<String>,
     #[serde(default)]
     pub trust_policy_key: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct ConfidentialComputingInfo {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub technology: String,
+    #[serde(default)]
+    pub amd_sev_snp: Option<SevSnpInfo>,
+    #[serde(default)]
+    pub intel_tdx: Option<TdxInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct SevSnpInfo {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub policy: Option<String>,
+    #[serde(default)]
+    pub expected_measurement: Option<String>,
+    #[serde(default)]
+    pub certificate_path: Option<String>,
+    #[serde(default)]
+    pub amd_root_key: Option<Vec<u8>>,
+    #[serde(default)]
+    pub amd_author_key: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct TdxInfo {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub expected_mrtd: Option<String>,
+    #[serde(default)]
+    pub expected_rtmr0: Option<String>,
+    #[serde(default)]
+    pub expected_rtmr1: Option<String>,
+    #[serde(default)]
+    pub expected_rtmr2: Option<String>,
+    #[serde(default)]
+    pub expected_rtmr3: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +143,7 @@ impl VmifManifest {
             size_bytes,
             firmware: FirmwareInfo::default(),
             measured_boot: MeasuredBootInfo::default(),
+            confidential_computing: ConfidentialComputingInfo::default(),
         }
     }
 
