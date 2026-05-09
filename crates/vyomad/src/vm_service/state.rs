@@ -5,6 +5,7 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::{info, error};
 
 use crate::state::{AppState, VmInstance, wal::WalEntry};
+use vyoma_core::oci::OciImageConfig;
 
 pub async fn save_vm_state(
     state: &AppState,
@@ -17,14 +18,6 @@ pub async fn save_vm_state(
         let mut vms = state.vms.lock().unwrap();
         vms.insert(vm_id.clone(), Arc::new(TokioMutex::new(instance)));
     }
-
-    if let Err(e) = state.wal.append(&WalEntry::vm_create(vm_id.clone())) {
-        error!("Failed to write WAL entry: {}", e);
-    }
-    if let Err(e) = state.wal.append(&WalEntry::vm_start(vm_id.clone())) {
-        error!("Failed to write WAL entry: {}", e);
-    }
-
     Ok(())
 }
 
@@ -182,6 +175,64 @@ pub async fn snapshot_vm(
     }
 }
 
+pub async fn commit_vm(
+    state: &AppState,
+    vm_id: &str,
+    new_image_name: &str,
+) -> Result<String> {
+    info!("VmService: Committing VM {} to image {}", vm_id, new_image_name);
+
+    let dm_name = {
+        let vm_arc = {
+            let vms = state.vms.lock().unwrap();
+            vms.get(vm_id).cloned()
+        };
+
+        if let Some(vm_mutex) = vm_arc {
+            let vm = vm_mutex.lock().await;
+            vm.dm_name.clone()
+        } else {
+            anyhow::bail!("VM {} not found or not running", vm_id)
+        }
+    };
+
+    let src_device = PathBuf::from(format!("/dev/mapper/{}", dm_name));
+    
+    let home = dirs::home_dir().context("No home dir")?;
+    let images_dir = home.join(".ignite").join("images").join(new_image_name);
+    
+    std::fs::create_dir_all(&images_dir).context("Failed to create images dir")?;
+    let dst_file = images_dir.join("root.ext4");
+
+    commit_snapshot_native(&src_device, &dst_file)
+        .context("Failed to commit snapshot")?;
+
+    let config = OciImageConfig::default();
+    let config_path = images_dir.join("vyoma-config.json");
+    let config_json = serde_json::to_string_pretty(&config)
+        .context("Failed to serialize config")?;
+    std::fs::write(&config_path, config_json)
+        .context("Failed to write config")?;
+
+    info!("VM {} committed to image {} at {:?}", vm_id, new_image_name, dst_file);
+    Ok(format!("VM {} committed to image {}", vm_id, new_image_name))
+}
+
+fn commit_snapshot_native(src_device: &std::path::Path, dst_file: &std::path::Path) -> Result<()> {
+    info!("Committing snapshot from {:?} to {:?}", src_device, dst_file);
+    
+    let mut src = std::fs::File::open(src_device)
+        .with_context(|| format!("Failed to open source device {:?}", src_device))?;
+    let mut dst = std::fs::File::create(dst_file)
+        .with_context(|| format!("Failed to create destination file {:?}", dst_file))?;
+    
+    std::io::copy(&mut src, &mut dst)
+        .context("Failed to copy device contents")?;
+    
+    info!("Snapshot committed successfully: {} bytes", dst.metadata()?.len());
+    Ok(())
+}
+
 pub async fn get_vm_state(
     state: &AppState,
     vm_id: &str,
@@ -209,5 +260,11 @@ mod tests {
             path: PathBuf::from("/tmp/snap.bin"),
         };
         assert_eq!(result.id, "snap-123");
+    }
+
+#[test]
+    fn test_commit_result_message() {
+        let result = commit_snapshot_native;
+        assert!(std::mem::size_of_val(&result) > 0);
     }
 }

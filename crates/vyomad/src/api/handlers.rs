@@ -174,40 +174,10 @@ pub async fn commit_vm(
     Json(payload): Json<CommitRequest>,
 ) -> Result<String, (StatusCode, String)> {
     info!("Request to commit VM: {} to new image: {}", id, payload.new_image_name);
-
-    let vm_arc = {
-        let vms = state.vms.lock().unwrap();
-        vms.get(&id).cloned()
-    };
-
-    let dm_name = if let Some(vm_mutex) = vm_arc {
-        let vm = vm_mutex.lock().await;
-        vm.dm_name.clone()
-    } else {
-        return Err((StatusCode::NOT_FOUND, "VM not found or not running".to_string()));
-    };
-
-    let src_device = std::path::PathBuf::from(format!("/dev/mapper/{}", dm_name));
     
-    // Save to ~/.ignite/images/<new_image_name>
-    let home = dirs::home_dir().ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "No home dir".to_string()))?;
-    let images_dir = home.join(".ignite").join("images").join(&payload.new_image_name);
-    
-    std::fs::create_dir_all(&images_dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let dst_file = images_dir.join("root.ext4");
-
-    vyoma_core::storage::StorageManager::commit_snapshot(&src_device, &dst_file)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    // Save empty config for it
-    let config = vyoma_core::oci::OciImageConfig::default();
-    let config_path = images_dir.join("vyoma-config.json");
-    let config_json = serde_json::to_string_pretty(&config)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    std::fs::write(&config_path, config_json)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    Ok(format!("VM {} committed to image {}", id, payload.new_image_name))
+    vm_service_state::commit_vm(&state, &id, &payload.new_image_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
 pub async fn pause_vm(
