@@ -9,10 +9,15 @@ pub struct VmifManifest {
     pub created: String,
     pub arch: String,
     pub kernel: Option<String>,
+    pub initrd: Option<String>,
     pub rootfs: String,
     pub config: OciImageConfig,
     pub labels: HashMap<String, String>,
     pub size_bytes: u64,
+    #[serde(default)]
+    pub firmware: FirmwareInfo,
+    #[serde(default)]
+    pub measured_boot: MeasuredBootInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -25,11 +30,38 @@ pub struct OciImageConfig {
     pub user: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct FirmwareInfo {
+    #[serde(default)]
+    pub firmware_type: String,
+    #[serde(default)]
+    pub firmware_path: Option<String>,
+    #[serde(default)]
+    pub secure_boot_enabled: bool,
+    #[serde(default)]
+    pub signature: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct MeasuredBootInfo {
+    #[serde(default)]
+    pub pcr_policy: Option<HashMap<u32, String>>,
+    #[serde(default)]
+    pub kernel_signature: Option<Vec<u8>>,
+    #[serde(default)]
+    pub initrd_signature: Option<Vec<u8>>,
+    #[serde(default)]
+    pub rootfs_hash: Option<String>,
+    #[serde(default)]
+    pub trust_policy_key: Option<Vec<u8>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmifImage {
     pub manifest: VmifManifest,
     pub rootfs_path: PathBuf,
     pub kernel_path: Option<PathBuf>,
+    pub initrd_path: Option<PathBuf>,
 }
 
 #[derive(Error, Debug)]
@@ -48,6 +80,7 @@ impl VmifManifest {
     pub fn new(
         arch: String,
         kernel: Option<String>,
+        initrd: Option<String>,
         rootfs: String,
         config: OciImageConfig,
         size_bytes: u64,
@@ -57,10 +90,13 @@ impl VmifManifest {
             created: chrono::Utc::now().to_rfc3339(),
             arch,
             kernel,
+            initrd,
             rootfs,
             config,
             labels: HashMap::new(),
             size_bytes,
+            firmware: FirmwareInfo::default(),
+            measured_boot: MeasuredBootInfo::default(),
         }
     }
 
@@ -103,11 +139,17 @@ impl VmifImage {
             manifest,
             rootfs_path,
             kernel_path: None,
+            initrd_path: None,
         }
     }
 
     pub fn with_kernel(mut self, kernel_path: PathBuf) -> Self {
         self.kernel_path = Some(kernel_path);
+        self
+    }
+
+    pub fn with_initrd(mut self, initrd_path: PathBuf) -> Self {
+        self.initrd_path = Some(initrd_path);
         self
     }
 
@@ -126,6 +168,15 @@ impl VmifImage {
                 return Err(VmifError::MissingField(format!(
                     "kernel not found at {:?}",
                     kernel
+                )));
+            }
+        }
+
+        if let Some(ref initrd) = self.initrd_path {
+            if !initrd.exists() {
+                return Err(VmifError::MissingField(format!(
+                    "initrd not found at {:?}",
+                    initrd
                 )));
             }
         }
@@ -157,6 +208,7 @@ mod tests {
         let manifest = VmifManifest::new(
             "amd64".to_string(),
             Some("kernel:v1".to_string()),
+            None,
             "sha256:abc123".to_string(),
             config,
             1024000,
@@ -172,6 +224,7 @@ mod tests {
         let manifest = VmifManifest::new(
             "amd64".to_string(),
             None,
+            None,
             "sha256:abc123".to_string(),
             config,
             1024000,
@@ -186,6 +239,7 @@ mod tests {
         let mut manifest = VmifManifest::new(
             "amd64".to_string(),
             None,
+            None,
             "sha256:abc123".to_string(),
             config,
             1024000,
@@ -199,7 +253,7 @@ mod tests {
     fn test_missing_rootfs() {
         let config = OciImageConfig::default();
         let manifest =
-            VmifManifest::new("amd64".to_string(), None, "".to_string(), config, 1024000);
+            VmifManifest::new("amd64".to_string(), None, None, "".to_string(), config, 1024000);
 
         assert!(manifest.validate().is_err());
     }
@@ -212,6 +266,7 @@ mod tests {
 
         let manifest = VmifManifest::new(
             "amd64".to_string(),
+            None,
             None,
             "sha256:abc123".to_string(),
             config,
@@ -227,6 +282,7 @@ mod tests {
         let config = OciImageConfig::default();
         let manifest = VmifManifest::new(
             "amd64".to_string(),
+            None,
             None,
             "sha256:abc123".to_string(),
             config,
@@ -246,6 +302,7 @@ mod tests {
 
         let manifest = VmifManifest::new(
             "amd64".to_string(),
+            None,
             None,
             "sha256:abc123".to_string(),
             config,
