@@ -39,6 +39,7 @@ use tokio_util::io::StreamReader;
 // use futures::StreamExt as FuturesStreamExt;
 
 use crate::state::{AppState, VmInstance, VmState, wal::WalEntry};
+use crate::vm_service::state as vm_service_state;
 
 
 
@@ -157,31 +158,9 @@ pub async fn stop_vm(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<String, (StatusCode, String)> {
-    info!("Request to stop VM: {}", id);
-
-    let vm_arc = {
-        let mut vms = state.vms.lock().unwrap();
-        vms.remove(&id)
-    };
-
-    if let Some(vm_mutex) = vm_arc {
-        let mut vm = vm_mutex.lock().await;
-        vm.cleanup(&state.cni_manager).await;
-
-        // WAL: Log VM stop
-        if let Err(e) = state.wal.append(&WalEntry::vm_stop(id.clone())) {
-            error!("Failed to write WAL entry: {}", e);
-        }
-        
-        let _ = state.events_tx.send(serde_json::json!({
-            "type": "vm_stop",
-            "id": id
-        }).to_string());
-        
-        Ok(format!("VM {} stopped and cleaned up", id))
-    } else {
-        Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
-    }
+    vm_service_state::stop_vm(&state, &id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
 #[derive(Deserialize)]
@@ -235,47 +214,18 @@ pub async fn pause_vm(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<String, (StatusCode, String)> {
-    info!("Request to pause VM: {}", id);
-
-    let vm_arc = {
-        let vms = state.vms.lock().unwrap();
-        vms.get(&id).cloned()
-    };
-
-    if let Some(vm_mutex) = vm_arc {
-        let vm = vm_mutex.lock().await;
-        info!("Pause VM {}: ch_socket_path={}", id, vm.ch_socket_path);
-        vm.vmm
-            .pause_instance()
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        Ok(format!("VM {} paused", id))
-    } else {
-        Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
-    }
+    vm_service_state::pause_vm(&state, &id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
 pub async fn resume_vm(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<String, (StatusCode, String)> {
-    info!("Request to resume VM: {}", id);
-
-    let vm_arc = {
-        let vms = state.vms.lock().unwrap();
-        vms.get(&id).cloned()
-    };
-
-    if let Some(vm_mutex) = vm_arc {
-        let vm = vm_mutex.lock().await;
-        vm.vmm
-            .resume_instance()
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        Ok(format!("VM {} resumed", id))
-    } else {
-        Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
-    }
+    vm_service_state::resume_vm(&state, &id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
 pub async fn snapshot_vm(
@@ -284,76 +234,11 @@ pub async fn snapshot_vm(
 ) -> Result<String, (StatusCode, String)> {
     info!("Request to snapshot VM: {}", id);
 
-    let vm_arc = {
-        let vms = state.vms.lock().unwrap();
-        vms.get(&id).cloned()
-    };
+    let result = vm_service_state::snapshot_vm(&state, &id, None)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    if let Some(vm_mutex) = vm_arc {
-        let vm = vm_mutex.lock().await;
-
-        let entry = {
-            let tm = state.timemachine.write().await;
-            tm.create_snapshot(id.clone(), Some(format!("Manual snapshot for {}", id)))
-        };
-
-        // Define paths
-        let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-        let vm_dir = home.join(".ignite").join("vms").join(&id);
-        let snaps_dir = vm_dir.join("snapshots").join(&entry.id);
-        
-        std::fs::create_dir_all(&snaps_dir).map_err(|e| {
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create snapshot dir: {}", e))
-        })?;
-
-        let snapshot_path = snaps_dir.join("snapshot.snap");
-        let mem_path = snaps_dir.join("memory.mem");
-        let ch_socket = vm.ch_socket_path.clone();
-
-        // 1. Pause VM (Required for snapshot)
-        vm.vmm.pause_instance().await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to pause: {}", e),
-            )
-        })?;
-
-        // 2. Create Snapshot
-        let snap_result = vm
-            .vmm
-            .create_snapshot(
-                snapshot_path.to_string_lossy().as_ref(),
-                mem_path.to_string_lossy().as_ref(),
-            )
-            .await;
-
-        // 3. Resume VM (Always resume, even if snapshot failed)
-        if let Err(e) = vm.vmm.resume_instance().await {
-            error!("Failed to resume VM {} after snapshot: {}", id, e);
-        }
-
-        snap_result.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Snapshot failed: {}", e),
-            )
-        })?;
-
-        // Also copy the current COW file state to freeze it for time travel
-        let cow_backup = snaps_dir.join("diff.cow");
-        if let Err(e) = std::fs::copy(&vm.cow_file_path, &cow_backup) {
-            error!("Failed to backup COW file: {}", e);
-        }
-
-        // Commit snapshot to Git (Optional, maybe skip if we use TimeMachine?)
-        if let Err(e) = git_commit(&vm_dir, &format!("Snapshot {} - {}", id, entry.id)) {
-            error!("Failed to git commit snapshot: {}", e);
-        }
-
-        Ok(format!("Snapshot {} created for VM {}", entry.id, id))
-    } else {
-        Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
-    }
+    Ok(format!("Snapshot {} created for VM {} at {:?}", result.id, id, result.path))
 }
 
 #[derive(Deserialize)]
