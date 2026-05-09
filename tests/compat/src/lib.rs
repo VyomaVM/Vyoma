@@ -1,14 +1,13 @@
 mod types;
 mod health;
 
-pub use types::*;
-pub use health::*;
+pub use types::{CompatReport, CompatSummary, ImageConfig, ImageList, TestPhase, TestResult};
+pub use health::{HealthResult, Healthchecker};
 
-use anyhow::{Context, Result};
-use std::path::Path;
+use anyhow::Result;
 use std::time::Duration;
-use tokio::time::{sleep, timeout};
-use tracing::{debug, error, info, warn};
+use tokio::time::timeout;
+use tracing::{error, info, warn};
 
 pub struct CompatMatrix {
     vyomad_url: String,
@@ -237,7 +236,7 @@ impl CompatMatrix {
 
         info!("Running healthcheck for {} on port {}", image, port);
 
-        let healthchecker = health::Healthchecker::new(port, self.health_timeout);
+        let healthchecker = Healthchecker::new(port, self.health_timeout);
         match timeout(self.health_timeout, healthchecker.check(config)).await {
             Ok(Ok(result)) => {
                 let duration = start.elapsed().as_millis() as u64;
@@ -384,12 +383,9 @@ pub async fn run_compat_matrix_parallel(
     parallel: usize,
 ) -> Result<CompatReport> {
     use tokio::sync::Semaphore;
-    use std::sync::Arc;
 
-    let matrix = CompatMatrix::new(vyomad_url);
-    let semaphore = Arc::new(Semaphore::new(parallel));
+    let semaphore = std::sync::Arc::new(Semaphore::new(parallel));
     let mut all_results = Vec::new();
-    let results_mutex = std::sync::Mutex::new(&mut all_results);
 
     let handles: Vec<_> = images
         .into_iter()

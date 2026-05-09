@@ -11,6 +11,7 @@ members = [
     "crates/vyoma-agent",
     "crates/vyoma-sdk",
     "crates/vyoma-agent-vm", "crates/vyoma-vk8s",
+    "tests/compat",
 ]
 resolver = "2"
 

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use compat_matrix::{
-    run_compat_matrix, run_compat_matrix_parallel, types::ImageList, CompatReport,
+    run_compat_matrix, run_compat_matrix_parallel, ImageList, CompatReport,
 };
 use std::path::PathBuf;
 use structopt::StructOpt;
