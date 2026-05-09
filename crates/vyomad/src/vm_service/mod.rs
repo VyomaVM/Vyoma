@@ -1,10 +1,10 @@
 mod agent;
-mod boot;
-mod config;
-mod image;
+pub mod boot;
+pub mod config;
+pub mod image;
 pub(crate) mod network;
-mod policy;
-mod state;
+pub mod policy;
+pub mod state;
 pub mod types;
 pub mod storage;
 
@@ -50,6 +50,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
     ).await?;
 
     let _agent_config = agent::prepare_agent(
+        &state,
         &storage.dm_device_path,
         &vm_dir,
         &prepared_image.config,

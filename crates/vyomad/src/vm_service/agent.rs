@@ -1,75 +1,143 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use tracing::{info, warn};
+use std::fs::File;
+use std::io::Write;
+use tracing::{info, error};
 
 use super::types::AgentConfig;
+use crate::state::AppState;
 
 pub async fn prepare_agent(
+    _state: &AppState,
     _dm_path: &str,
     vm_dir: &Path,
-    config: &vyoma_core::oci::OciImageConfig,
+    _config: &vyoma_core::oci::OciImageConfig,
 ) -> Result<AgentConfig> {
-    let mut init_script = String::new();
-    init_script.push_str("#!/bin/sh\n");
-    init_script.push_str("set -e\n");
-    init_script.push_str("mount -t proc proc /proc || true\n");
-    init_script.push_str("mount -t sysfs sys /sys || true\n");
-    init_script.push_str("mount -t devtmpfs dev /dev || true\n");
-    init_script.push_str("/sbin/vyoma-agent &\n\n");
-
-    let mut envs = Vec::new();
-    if let Some(e) = &config.env {
-        envs = e.clone();
-    }
-    for e in &envs {
-        init_script.push_str(&format!("export \"{}\"\n", e.replace('"', "\\\"")));
-    }
-
-    let mut workdir = "/".to_string();
-    if let Some(wd) = &config.working_dir {
-        if !wd.is_empty() {
-            workdir = wd.clone();
-        }
-    }
-    init_script.push_str(&format!("mkdir -p {}\n", workdir));
-    init_script.push_str(&format!("cd {}\n", workdir));
-
-    let mut oci_cmd = vec!["/bin/sh".to_string()];
-    if let Some(cmd) = &config.cmd {
-        oci_cmd = cmd.clone();
-    }
-    let cmd_for_script = oci_cmd.clone();
-    let cmd_str = cmd_for_script.into_iter()
-        .map(|s| format!("\"{}\"", s.replace('"', "\\\"")))
-        .collect::<Vec<_>>()
-        .join(" ");
-    init_script.push_str(&format!("exec {}\n", cmd_str));
-
+    let initramfs_path = generate_initramfs(vm_dir)?;
+    
     let temp_init_path = vm_dir.join("vyoma-init.sh");
-    std::fs::write(&temp_init_path, &init_script)
-        .context("Failed to write init script")?;
-
-    let agent_path = std::env::current_exe()
-        .map(|p| p.parent().unwrap().join("vyoma-agent"))
-        .unwrap_or_else(|_| PathBuf::from("/usr/bin/vyoma-agent"));
-
-    let agent_path = if !agent_path.exists() {
-        PathBuf::from("target/x86_64-unknown-linux-musl/release/vyoma-agent")
-    } else {
-        agent_path
-    };
+    std::fs::write(&temp_init_path, "#!/bin/sh\nset -e\n")?;
 
     info!(
-        "Agent prepared with init script at {:?} and binary at {:?}",
-        temp_init_path, agent_path
+        "Agent prepared with initramfs at {:?} and init script at {:?}",
+        initramfs_path, temp_init_path
     );
 
     Ok(AgentConfig {
-        initramfs_path: None,
+        initramfs_path: Some(initramfs_path),
         init_script_path: temp_init_path,
-        cmd: oci_cmd,
-        workdir,
-        envs,
+        cmd: vec!["/sbin/init".to_string()],
+        workdir: "/".to_string(),
+        envs: vec![],
     })
+}
+
+fn generate_initramfs(vm_dir: &Path) -> Result<PathBuf> {
+    let temp_dir = vm_dir.join("initramfs_temp");
+    std::fs::create_dir_all(&temp_dir)?;
+    
+    let init_script = generate_init_script();
+    let init_path = temp_dir.join("init");
+    std::fs::write(&init_path, &init_script)?;
+    std::fs::set_permissions(&init_path, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
+
+    let sbin_dir = temp_dir.join("sbin");
+    std::fs::create_dir_all(&sbin_dir)?;
+    
+    let agent_binary = PathBuf::from("/usr/bin/vyoma-agent-vm");
+    if agent_binary.exists() {
+        std::fs::copy(&agent_binary, sbin_dir.join("vyoma-agent-vm"))
+            .context("Failed to copy agent binary")?;
+    }
+
+    let dev_dir = temp_dir.join("dev");
+    std::fs::create_dir_all(&dev_dir)?;
+    
+    let device_entries = [
+        ("null", 'c', 1, 3),
+        ("zero", 'c', 1, 5),
+        ("console", 'c', 5, 1),
+    ];
+    
+    for (name, dev_type, major, minor) in device_entries {
+        let dev_path = dev_dir.join(name);
+        let output = std::process::Command::new("mknod")
+            .arg(&dev_path)
+            .arg(dev_type.to_string())
+            .arg(major.to_string())
+            .arg(minor.to_string())
+            .output()
+            .context("Failed to run mknod")?;
+        
+        if !output.status.success() {
+            error!("Failed to create device {}", name);
+        }
+    }
+
+    let initramfs_path = vm_dir.join("initramfs.cpio");
+    
+    let cpio_output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "cd '{}' && find . -type f -o -type d | cpio -o -H newc 2>/dev/null > '{}'",
+            temp_dir.display(),
+            initramfs_path.display()
+        ))
+        .output()
+        .context("Failed to create cpio archive")?;
+    
+    if !cpio_output.status.success() {
+        let stderr = String::from_utf8_lossy(&cpio_output.stderr);
+        error!("cpio stderr: {}", stderr);
+    }
+
+    std::fs::remove_dir_all(&temp_dir).ok();
+
+    info!("Generated initramfs: {} bytes", std::fs::metadata(&initramfs_path)?.len());
+    Ok(initramfs_path)
+}
+
+fn generate_init_script() -> String {
+    r#"#!/bin/sh
+mount -t proc proc /proc 2>/dev/null || true
+mount -t sysfs sys /sys 2>/dev/null || true
+mount -t devtmpfs dev /dev 2>/dev/null || true
+ip link set lo up 2>/dev/null || true
+/sbin/vyoma-agent-vm &
+sleep 1
+exec /sbin/init
+"#.to_string()
+}
+
+pub async fn cleanup_agent(_agent_config: &AgentConfig) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_generate_init_script() {
+        let script = generate_init_script();
+        assert!(script.contains("#!/bin/sh"));
+        assert!(script.contains("vyoma-agent-vm"));
+        assert!(script.contains("mount"));
+    }
+
+    #[test]
+    fn test_prepare_agent_creates_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let state = AppState {
+            data_dir: String::new(),
+            ..Default::default()
+        };
+        
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let result = prepare_agent(&state, "", temp_dir.path(), &vyoma_core::oci::OciImageConfig::default()).await;
+            assert!(result.is_ok());
+        });
+    }
 }
