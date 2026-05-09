@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+[lib]
+name = "vyomad"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vyomad"
+path = "src/main.rs"
+
 [features]
 default = []
 chaos = ["nix"]

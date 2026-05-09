@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use tracing::{error, info};
 
 use crate::state::{AppState, VmInstance, wal::WalEntry};
-use crate::vm_service::types::{VmRunRequest, VmRunResponse, PreparedStorage, VmNetworkConfig, ChConfig};
+use types::{VmRunRequest, VmRunResponse};
 
 pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRunResponse> {
     info!("VmService: Starting VM for image {}", request.image);

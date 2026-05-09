@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use tracing::{info, warn};
 
 use crate::api::handlers::ensure_image_locally;
-use crate::vm_service::types::PreparedImage;
+use super::types::PreparedImage;
 
 pub async fn prepare_image(image_name: &str) -> Result<PreparedImage> {
     info!("Preparing image: {}", image_name);
