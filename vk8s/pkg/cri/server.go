@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	pb "k8s.io/cri-api/pkg/apis/runtime/v1"
 	"google.golang.org/grpc"
@@ -18,9 +19,10 @@ import (
 )
 
 const (
-	SocketPath       = "/var/run/vyoma-cri.sock"
-	defaultVyomadGRPC = "localhost:7071"
-	defaultVyomadHTTP = "http://localhost:8080"
+	SocketPath         = "/var/run/vyoma-cri.sock"
+	defaultVyomadGRPC  = "localhost:7071"
+	defaultVyomadHTTP  = "http://localhost:8080"
+	defaultHTTPTimeout = 10 * time.Minute
 )
 
 type VyomaCriServer struct {
@@ -35,18 +37,20 @@ type VyomaCriServer struct {
 	mu                sync.RWMutex
 	containers        map[string]*ContainerInfo
 	tokens            sync.Map
-	streamingServer   *http.Server
+	streamManager     *streamManager
+	streamServer      *http.Server
 }
 
 type PodSandbox struct {
-	ID        string
-	Name      string
-	Namespace string
-	UID       string
-	State     pb.PodSandboxState
-	VMID      string
-	Created   int64
-	Labels    map[string]string
+	ID          string
+	Name        string
+	Namespace   string
+	UID         string
+	State       pb.PodSandboxState
+	VMID        string
+	IP          string
+	Created     int64
+	Labels      map[string]string
 	Annotations map[string]string
 }
 
@@ -58,6 +62,8 @@ type ContainerInfo struct {
 	Created   int64
 	State     pb.ContainerState
 	Config    *pb.ContainerConfig
+	Pid       uint32
+	StartTime int64
 }
 
 func NewVyomaCriServer(vyomaGRPCAddr, vyomaHTTPAddr string) (*VyomaCriServer, error) {
@@ -76,7 +82,7 @@ func NewVyomaCriServer(vyomaGRPCAddr, vyomaHTTPAddr string) (*VyomaCriServer, er
 	return &VyomaCriServer{
 		logger:         log.New(os.Stdout, "[vk8s] ", log.LstdFlags),
 		grpcClient:     grpcClient,
-		httpClient:     &http.Client{Timeout: 10 * 60 * 1000000000},
+		httpClient:     &http.Client{Timeout: defaultHTTPTimeout},
 		vyomadHTTPAddr: vyomaHTTPAddr,
 		pods:           make(map[string]*PodSandbox),
 		containers:     make(map[string]*ContainerInfo),
@@ -116,34 +122,10 @@ func (s *VyomaCriServer) Run(ctx context.Context) error {
 }
 
 func (s *VyomaCriServer) Close() error {
-	if s.streamingServer != nil {
-		s.streamingServer.Close()
+	if s.streamServer != nil {
+		s.streamServer.Close()
 	}
 	return s.grpcClient.Close()
-}
-
-func (s *VyomaCriServer) StartStreamingServer() error {
-	ss := &streamingServer{manager: s}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/exec/", ss.handleExec)
-	mux.HandleFunc("/attach/", ss.handleAttach)
-	mux.HandleFunc("/portforward/", ss.handlePortForward)
-
-	addr := fmt.Sprintf(":%d", streamingPort)
-	ss.server = &http.Server{
-		Addr:    addr,
-		Handler: mux,
-	}
-
-	go func() {
-		if err := ss.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.logger.Printf("streaming server error: %v", err)
-		}
-	}()
-
-	s.streamingServer = ss.server
-	s.logger.Printf("streaming server started on %s", addr)
-	return nil
 }
 
 func (s *VyomaCriServer) unaryLogger(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
@@ -155,7 +137,7 @@ func (s *VyomaCriServer) unaryLogger(ctx context.Context, req interface{}, info 
 	return resp, err
 }
 
-func (s *VyomaCriServer) streamLogger(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.ServerStreamHandler) error {
+func (s *VyomaCriServer) streamLogger(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 	s.logger.Printf("gRPC [stream] %s", info.FullMethod)
 	return handler(srv, ss)
 }
@@ -168,4 +150,50 @@ func (s *VyomaCriServer) logError(ctx context.Context, method string, err error)
 
 func errorf(c codes.Code, format string, args ...interface{}) error {
 	return status.Errorf(c, format, args...)
+}
+
+type streamManager struct {
+	tokens   sync.Map
+	vmIPs    map[string]string
+	mu       sync.RWMutex
+	logger   *log.Logger
+}
+
+type streamToken struct {
+	Token       string
+	Type        string
+	ContainerID string
+	PodID       string
+	VMID        string
+	VMIP        string
+	Command     []string
+	Tty         bool
+	Stdin       bool
+	Stdout      bool
+	Stderr      bool
+	Ports       []int32
+	Created     time.Time
+	Expires     time.Time
+}
+
+func newStreamManager() *streamManager {
+	return &streamManager{
+		vmIPs:  make(map[string]string),
+		logger: log.New(os.Stdout, "[streaming] ", log.LstdFlags),
+	}
+}
+
+func (sm *streamManager) getVMIP(vmID string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if ip, ok := sm.vmIPs[vmID]; ok {
+		return ip
+	}
+	return "10.0.0.2"
+}
+
+func (sm *streamManager) setVMIP(vmID, ip string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.vmIPs[vmID] = ip
 }
