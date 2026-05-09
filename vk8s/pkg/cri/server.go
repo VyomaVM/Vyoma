@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -22,11 +23,13 @@ type VyomaCriServer struct {
 	pb.UnimplementedRuntimeServiceServer
 	pb.UnimplementedImageServiceServer
 
-	client *client.Client
-	pods   map[string]*PodSandbox
-	mu     sync.RWMutex
-
-	imageStore map[string]*ImageInfo
+	client          *client.Client
+	pods            map[string]*PodSandbox
+	mu              sync.RWMutex
+	imageStore      map[string]*ImageInfo
+	containers      map[string]*ContainerInfo
+	tokens          sync.Map
+	streamingServer *http.Server
 }
 
 type PodSandbox struct {
@@ -47,6 +50,15 @@ type ImageInfo struct {
 	Created  int64
 }
 
+type ContainerInfo struct {
+	ID      string
+	PodID   string
+	Name    string
+	Image   string
+	Created int64
+	State   pb.ContainerState
+}
+
 func NewVyomaCriServer(vyomaAddr string) (*VyomaCriServer, error) {
 	c, err := client.NewClient(vyomaAddr)
 	if err != nil {
@@ -54,9 +66,11 @@ func NewVyomaCriServer(vyomaAddr string) (*VyomaCriServer, error) {
 	}
 
 	return &VyomaCriServer{
-		client:     c,
-		pods:       make(map[string]*PodSandbox),
-		imageStore: make(map[string]*ImageInfo),
+		client:      c,
+		pods:        make(map[string]*PodSandbox),
+		imageStore:  make(map[string]*ImageInfo),
+		containers:  make(map[string]*ContainerInfo),
+		tokens:      sync.Map{},
 	}, nil
 }
 

@@ -7,16 +7,6 @@ import (
 	pb "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
-type ContainerInfo struct {
-	ID        string
-	PodID     string
-	Name      string
-	Image     string
-	Created   int64
-	State     pb.ContainerState
-	Config    *pb.ContainerConfig
-}
-
 func (s *VyomaCriServer) CreateContainer(ctx context.Context, req *pb.CreateContainerRequest) (*pb.CreateContainerResponse, error) {
 	podID := req.GetPodSandboxId()
 	config := req.GetConfig()
