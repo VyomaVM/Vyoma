@@ -4605,6 +4605,7 @@ dependencies = [
  "uuid",
  "vyoma-core",
  "vyoma-proto",
+ "vyoma-storage",
  "vyoma-teleport",
 ]
 
