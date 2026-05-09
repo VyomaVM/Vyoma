@@ -36,6 +36,12 @@ pub struct VmConfig {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tpm: Option<TpmConfig>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sev_snp: Option<SevSnpConfig>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tdx: Option<TdxConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -147,4 +153,26 @@ pub struct FirmwareConfig {
 pub struct TpmConfig {
     pub socket_path: String,
     pub tpm_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SevSnpConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub policy: Option<String>,
+    #[serde(default)]
+    pub certificate_path: Option<String>,
+    #[serde(default)]
+    pub guest_key_root_hash: Option<String>,
+    #[serde(default)]
+    pub host_data: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TdxConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub measurement_uuid: Option<String>,
 }

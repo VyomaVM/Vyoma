@@ -327,6 +327,37 @@ impl VmmManager {
         self.api_request("/api/v1/vm.receive-migration", Method::PUT, Some(&config)).await
     }
 
+    pub async fn enable_sev_snp(&mut self, policy: Option<&str>, guest_key_root: Option<&str>) -> Result<()> {
+        let sev_snp = crate::ch_types::SevSnpConfig {
+            enabled: true,
+            policy: policy.map(|s| s.to_string()),
+            certificate_path: None,
+            guest_key_root_hash: guest_key_root.map(|s| s.to_string()),
+            host_data: None,
+        };
+        self.config.sev_snp = Some(sev_snp);
+        info!("Enabled SEV-SNP with policy: {:?}", policy);
+        Ok(())
+    }
+
+    pub async fn enable_tdx(&mut self, measurement_uuid: Option<&str>) -> Result<()> {
+        let tdx = crate::ch_types::TdxConfig {
+            enabled: true,
+            measurement_uuid: measurement_uuid.map(|s| s.to_string()),
+        };
+        self.config.tdx = Some(tdx);
+        info!("Enabled TDX with UUID: {:?}", measurement_uuid);
+        Ok(())
+    }
+
+    pub fn is_sev_snp_enabled(&self) -> bool {
+        self.config.sev_snp.as_ref().map(|c| c.enabled).unwrap_or(false)
+    }
+
+    pub fn is_tdx_enabled(&self) -> bool {
+        self.config.tdx.as_ref().map(|c| c.enabled).unwrap_or(false)
+    }
+
     pub fn kill(&mut self) -> Result<()> {
         if let Some(mut child) = self.process.take() {
             info!("Killing Cloud Hypervisor process");
