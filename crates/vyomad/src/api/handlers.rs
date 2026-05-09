@@ -110,7 +110,10 @@ pub struct RunRequest {
     #[serde(default)]
     hostname: Option<String>,
     #[serde(default)]
+    networks: Vec<String>,
+    #[serde(default)]
     labels: HashMap<String, String>,
+
     #[serde(default)]
     base_image_path: String,
 }
@@ -338,11 +341,23 @@ pub async fn run_vm(
     // -------------------------------------
 
     // Network Setup
-    let (vm_ip, tap_name, netns_path_final) = if state.rootless {
+    #[derive(Debug)]
+    struct NetworkInfo {
+        ip: String,
+        tap_name: String,
+        gateway: Option<String>,
+    }
+
+    let (network_infos, netns_path_final) = if state.rootless {
         // Rootless (Slirp4netns)
         // IP is handled by Slirp (usually 10.0.2.15)
         // TAP name is just a label for VmInstance, inside NetNS it is "tap0"
-        ("10.0.2.15".to_string(), "tap0".to_string(), None)
+        let info = NetworkInfo {
+            ip: "10.0.2.15".to_string(),
+            tap_name: "tap0".to_string(),
+            gateway: None,
+        };
+        (vec![info], None)
     } else {
         // Network (CNI Integration)
         // 1. Create NetNS
@@ -364,11 +379,16 @@ pub async fn run_vm(
                 )
             })?;
 
-        // 2. Call CNI ADD
-        let ifname = "eth0";
-        let cni_result = state
+        // 2. Call CNI ADD for multiple networks
+        let networks_to_attach: Vec<String> = if payload.networks.is_empty() {
+            vec!["default".to_string()]
+        } else {
+            payload.networks.clone()
+        };
+
+        let attachments = state
             .cni_manager
-            .add(None, &vm_id, &netns_path, ifname)
+            .add_multiple(&networks_to_attach, &vm_id, &netns_path)
             .map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -376,18 +396,42 @@ pub async fn run_vm(
                 )
             })?;
 
-        // 3. Parse Result to get IP
-        let ip = parse_cni_ip(&cni_result).unwrap_or_else(|e| {
-            error!("Failed to parse CNI IP: {}", e);
-            "172.16.0.0".to_string()
-        });
-        info!("CNI assigned IP: {}", ip);
+        let mut network_infos = Vec::new();
+        for (idx, attachment) in attachments.iter().enumerate() {
+            info!(
+                "CNI: Attached {} to network '{}' with IP {}",
+                attachment.interface_name, attachment.network_name, attachment.result.ip_address
+            );
 
-        // Legacy Tap Name (Host Side for Hybrid)
-        let tap_legacy = format!("tap{}", &vm_id[0..8]);
+            // Legacy Tap Name (Host Side for Hybrid)
+            let tap_name = if idx == 0 {
+                format!("tap{}", &vm_id[0..8])
+            } else {
+                format!("tap{}-{}", &vm_id[0..8], idx)
+            };
 
-        (ip, tap_legacy, Some(netns_path))
+            network_infos.push(NetworkInfo {
+                ip: attachment.result.ip_address.clone(),
+                tap_name,
+                gateway: attachment.result.gateway.clone(),
+            });
+        }
+
+        // If no networks attached at all, return error
+        if network_infos.is_empty() {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "No networks could be attached to VM".to_string(),
+            ));
+        }
+
+        (network_infos, Some(netns_path))
     };
+
+    // Use primary interface's IP for proxy, etc.
+    let vm_ip = network_infos.first().map(|n| n.ip.clone()).unwrap_or_else(|| "10.0.2.15".to_string());
+    let primary_tap = network_infos.first().map(|n| n.tap_name.clone()).unwrap_or_else(|| "tap0".to_string());
+    let default_gateway = network_infos.first().and_then(|n| n.gateway.clone()).unwrap_or_else(|| "172.16.0.1".to_string());
 
     // 3.5 Cgroups
     let cgroup_path = match state.cgroups.create_vm_cgroup(&vm_id) {
@@ -424,8 +468,8 @@ pub async fn run_vm(
         info!("Rootless: Skipping ProxyManager. Ports are mapped by slirp4netns.");
     }
 
-    let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0:{}:eth0:off:{} init=/sbin/vyoma-init", 
-        vm_ip, "172.16.0.1", vm_id, "172.16.0.1");
+    let boot_args = format!("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0:{}:eth0:off:{} init=/sbin/vyoma-init",
+        vm_ip, default_gateway, vm_id, default_gateway);
     // "ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>:<dns0-ip>"
     // Correct kernel format: ip=172.16.0.X::172.16.0.1:255.255.255.0:myvm:eth0:off:172.16.0.1
 
@@ -531,9 +575,21 @@ pub async fn run_vm(
         }
 
         // Network: Interface on Host is `tap_name`
-        if let Err(e) = vmm.add_network_interface("eth0", &tap_name, None).await {
+        // Add primary interface
+        if let Err(e) = vmm.add_network_interface("eth0", &primary_tap, None).await {
             let _ = vmm.kill();
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add net: {}", e)));
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add net (primary): {}", e)));
+        }
+
+        // Add additional network interfaces (eth1, eth2, etc.)
+        for (idx, network_info) in network_infos.iter().enumerate().skip(1) {
+            let ifname = format!("eth{}", idx);
+            if let Err(e) = vmm.add_network_interface(&ifname, &network_info.tap_name, None).await {
+                warn!("Failed to add network interface {}: {}", ifname, e);
+                // Continue with other interfaces - don't fail the VM
+            } else {
+                info!("Added network interface {} with TAP {}", ifname, network_info.tap_name);
+            }
         }
     }
 
@@ -601,7 +657,7 @@ pub async fn run_vm(
         tap_name: if state.rootless {
             String::new()
         } else {
-            tap_name.to_string()
+            primary_tap.clone()
         },
         dm_name: dm_name.clone(),
         loop_devices,
@@ -620,6 +676,7 @@ pub async fn run_vm(
         base_image_path: base_image_path_str,
         vcpu: payload.vcpu,
         mem_size_mib: payload.mem_size_mib,
+        networks: payload.networks.clone(),
     };
 
     instance.save_state().map_err(|e| {
@@ -1030,6 +1087,7 @@ pub async fn restore_vm(
         base_image_path: String::new(),
         vcpu: 1,
         mem_size_mib: 512,
+        networks: vec![],
     };
 
     {
@@ -1712,6 +1770,7 @@ pub async fn initialize_state(state: &AppState) {
                 base_image_path: vm_state.base_image_path.clone(),
                 vcpu: vm_state.vcpu,
                 mem_size_mib: vm_state.mem_size_mib,
+                networks: vm_state.networks.clone(),
             };
 
             state
@@ -1746,6 +1805,7 @@ pub async fn initialize_state(state: &AppState) {
                 base_image_path: vm_state.base_image_path,
                 vcpu: vm_state.vcpu,
                 mem_size_mib: vm_state.mem_size_mib,
+                networks: vm_state.networks,
             };
             // We await cleanup
             instance.cleanup(&state.cni_manager).await;

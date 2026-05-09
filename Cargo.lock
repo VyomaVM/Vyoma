@@ -4245,6 +4245,7 @@ dependencies = [
  "serde",
  "serde_yaml",
  "vyoma-core",
+ "vyoma-proto",
 ]
 
 [[package]]

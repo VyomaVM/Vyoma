@@ -51,6 +51,7 @@ pub struct VmInstance {
     pub config_volumes: Vec<VolumeMount>,
     pub hostname: Option<String>,
     pub labels: HashMap<String, String>,
+    pub networks: Vec<String>,
 
     pub base_image_path: String,
     pub vcpu: u32,
@@ -78,6 +79,8 @@ pub struct VmState {
     pub vcpu: u32,
     #[serde(default)]
     pub mem_size_mib: u32,
+    #[serde(default)]
+    pub networks: Vec<String>,
 }
 
 use tracing::{info, error};
@@ -103,6 +106,7 @@ impl VmInstance {
             base_image_path: self.base_image_path.clone(),
             vcpu: self.vcpu,
             mem_size_mib: self.mem_size_mib,
+            networks: self.networks.clone(),
         };
 
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home dir"))?;
@@ -124,10 +128,18 @@ impl VmInstance {
             error!("Failed to kill VMM: {}", e);
         }
 
-        // 2. Remove Network Interface / CNI
+        // 2. Remove Network Interface / CNI (handle multiple networks)
         if let Some(netns) = &self.netns_path {
-            if let Err(e) = cni_manager.del(None, &self.id, netns, "eth0") {
-                error!("CNI DEL failed: {}", e);
+            // Use del_multiple for cleanup with all attached networks
+            if !self.networks.is_empty() {
+                if let Err(e) = cni_manager.del_multiple(&self.networks, &self.id, netns) {
+                    error!("CNI DEL failed for multiple networks: {}", e);
+                }
+            } else {
+                // Fallback to single interface cleanup
+                if let Err(e) = cni_manager.del(None, &self.id, netns, "eth0") {
+                    error!("CNI DEL failed: {}", e);
+                }
             }
             let netns_name = format!("vm-{}", self.id);
             let _ = Command::new("ip")

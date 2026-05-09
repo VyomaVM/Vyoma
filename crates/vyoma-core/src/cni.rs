@@ -3,7 +3,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
+
+#[derive(Debug, Clone)]
+pub struct NetworkResult {
+    pub interface_name: String,
+    pub ip_address: String,
+    pub gateway: Option<String>,
+    pub mac_address: Option<String>,
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CniConfig {
@@ -14,6 +22,13 @@ pub struct CniConfig {
     pub plugin_type: String,
     #[serde(flatten)]
     pub args: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug)]
+pub struct NetworkAttachment {
+    pub network_name: String,
+    pub interface_name: String,
+    pub result: NetworkResult,
 }
 
 pub struct CniManager {
@@ -38,9 +53,56 @@ impl CniManager {
         container_id: &str,
         netns: &str,
         ifname: &str,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<NetworkResult> {
         let res = self.exec("ADD", network_name, container_id, netns, ifname)?;
-        res.ok_or_else(|| anyhow!("CNI Plugin returned no output for ADD"))
+        let json = res.ok_or_else(|| anyhow!("CNI Plugin returned no output for ADD"))?;
+        self.parse_network_result(&json, ifname)
+    }
+
+    /// Attach a VM to multiple networks.
+    /// Returns a list of network attachments with parsed results.
+    pub fn add_multiple(
+        &self,
+        networks: &[String],
+        container_id: &str,
+        netns: &str,
+    ) -> Result<Vec<NetworkAttachment>> {
+        let mut attachments = Vec::new();
+        let mut used_interfaces = HashMap::new();
+
+        for (idx, network_name) in networks.iter().enumerate() {
+            let ifname = format!("eth{}", idx);
+            info!(
+                "CNI: Adding VM {} to network '{}' as {}",
+                container_id, network_name, ifname
+            );
+
+            match self.add(Some(network_name), container_id, netns, &ifname) {
+                Ok(result) => {
+                    used_interfaces.insert(ifname.clone(), result.ip_address.clone());
+                    attachments.push(NetworkAttachment {
+                        network_name: network_name.clone(),
+                        interface_name: ifname,
+                        result,
+                    });
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to attach to network '{}': {}. Continuing with remaining networks.",
+                        network_name, e
+                    );
+                }
+            }
+        }
+
+        if attachments.is_empty() && !networks.is_empty() {
+            return Err(anyhow!(
+                "Failed to attach to any of the {} requested networks",
+                networks.len()
+            ));
+        }
+
+        Ok(attachments)
     }
 
     /// Executed CNI DEL command.
@@ -53,6 +115,57 @@ impl CniManager {
     ) -> Result<()> {
         self.exec("DEL", network_name, container_id, netns, ifname)
             .map(|_| ())
+    }
+
+    /// Delete all network interfaces for a VM with multiple network attachments.
+    pub fn del_multiple(&self, networks: &[String], container_id: &str, netns: &str) -> Result<()> {
+        for (idx, network_name) in networks.iter().enumerate() {
+            let ifname = format!("eth{}", idx);
+            if let Err(e) = self.del(Some(network_name), container_id, netns, &ifname) {
+                warn!(
+                    "Failed to delete interface {} from network '{}': {}",
+                    ifname, network_name, e
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_network_result(&self, json: &serde_json::Value, ifname: &str) -> Result<NetworkResult> {
+        let ips = json
+            .get("ips")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|first| {
+                let address = first.get("address")?.as_str()?;
+                let cidr_prefix = address.find('/')?;
+                let ip = &address[..cidr_prefix];
+                Some(ip.to_string())
+            })
+            .ok_or_else(|| anyhow!("No IPs found in CNI result"))?;
+
+        let gateway = json
+            .get("dns")
+            .and_then(|d| d.get("gateway"))
+            .and_then(|g| g.as_str())
+            .map(String::from)
+            .or_else(|| {
+                json.get("gateway")
+                    .and_then(|g| g.as_str())
+                    .map(String::from)
+            });
+
+        let mac = json
+            .get("mac")
+            .and_then(|m| m.as_str())
+            .map(String::from);
+
+        Ok(NetworkResult {
+            interface_name: ifname.to_string(),
+            ip_address: ips,
+            gateway,
+            mac_address: mac,
+        })
     }
 
     fn exec(

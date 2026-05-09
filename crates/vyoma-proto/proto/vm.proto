@@ -27,6 +27,7 @@ message CreateVmRequest {
     string name = 4;
     repeated PortMapping ports = 5;
     repeated VolumeMapping volumes = 6;
+    repeated string networks = 7;
 }
 
 message CreateVmResponse {

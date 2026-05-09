@@ -1,8 +1,12 @@
+pub mod schema_v3;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+
+pub use schema_v3::{ComposeV3, ServiceV3, NetworkV3, VolumeV3, PortEntry, VolumeEntry};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VyomaCompose {
@@ -170,6 +174,129 @@ impl VyomaCompose {
             .and_then(|v| v.external.as_ref())
             .copied()
             .unwrap_or(false)
+    }
+
+    pub fn to_v3(&self) -> Result<ComposeV3> {
+        let mut services = HashMap::new();
+        
+        for (name, svc) in &self.services {
+            let mut service_v3 = ServiceV3 {
+                image: svc.image.clone(),
+                ..Default::default()
+            };
+
+            if let Some(ports) = &svc.ports {
+                service_v3.ports = ports.iter()
+                    .map(|p| PortEntry::Short(p.clone()))
+                    .collect();
+            }
+
+            if let Some(volumes) = &svc.volumes {
+                service_v3.volumes = volumes.iter()
+                    .map(|v| VolumeEntry::Short(v.clone()))
+                    .collect();
+            }
+
+            if let Some(env) = &svc.environment {
+                service_v3.environment = env.clone();
+            }
+
+            if let Some(deps) = &svc.depends_on {
+                for dep in deps {
+                    service_v3.depends_on.insert(dep.clone(), schema_v3::DependsOnCondition {
+                        condition: "service_started".to_string(),
+                    });
+                }
+            }
+
+            if let Some(cpus) = svc.cpus {
+                service_v3.deploy = Some(schema_v3::DeployConfig {
+                    resources: Some(schema_v3::ResourceConfig {
+                        limits: Some(schema_v3::ResourceConstraints {
+                            cpus: Some(format!("{}", cpus as f32)),
+                            memory: None,
+                        }),
+                        reservations: None,
+                    }),
+                });
+            }
+
+            if let Some(mem) = svc.memory {
+                if let Some(ref mut deploy) = service_v3.deploy {
+                    if let Some(ref mut resources) = deploy.resources {
+                        if let Some(ref mut limits) = resources.limits {
+                            limits.memory = Some(format!("{}M", mem));
+                        }
+                    } else {
+                        deploy.resources = Some(schema_v3::ResourceConfig {
+                            limits: Some(schema_v3::ResourceConstraints {
+                                cpus: None,
+                                memory: Some(format!("{}M", mem)),
+                            }),
+                            reservations: None,
+                        });
+                    }
+                } else {
+                    service_v3.deploy = Some(schema_v3::DeployConfig {
+                        resources: Some(schema_v3::ResourceConfig {
+                            limits: Some(schema_v3::ResourceConstraints {
+                                cpus: None,
+                                memory: Some(format!("{}M", mem)),
+                            }),
+                            reservations: None,
+                        }),
+                    });
+                }
+            }
+
+            service_v3.networks = svc.networks.clone();
+
+            services.insert(name.clone(), service_v3);
+        }
+
+        let mut networks = HashMap::new();
+        for (name, net) in &self.networks {
+            networks.insert(name.clone(), NetworkV3 {
+                driver: net.driver.clone(),
+                external: net.external,
+            });
+        }
+
+        let mut volumes = HashMap::new();
+        for (name, vol) in &self.volumes {
+            volumes.insert(name.clone(), VolumeV3 {
+                driver: vol.driver.clone(),
+                external: vol.external,
+            });
+        }
+
+        Ok(ComposeV3 {
+            version: Some(self.version.clone()),
+            services,
+            networks,
+            volumes,
+        })
+    }
+}
+
+impl ServiceV3 {
+    fn new() -> Self {
+        Self {
+            image: None,
+            ports: Vec::new(),
+            volumes: Vec::new(),
+            environment: HashMap::new(),
+            depends_on: HashMap::new(),
+            deploy: None,
+            networks: Vec::new(),
+            command: None,
+        }
+    }
+}
+
+impl Default for ServiceV3 {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
