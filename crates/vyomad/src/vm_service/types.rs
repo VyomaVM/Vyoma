@@ -17,15 +17,15 @@ pub struct VmRunRequest {
 impl From<crate::api::handlers::RunRequest> for VmRunRequest {
     fn from(req: crate::api::handlers::RunRequest) -> Self {
         Self {
-            image: req.image,
+            image: req.image.clone(),
             vcpu: req.vcpu,
             mem_size_mib: req.mem_size_mib,
-            ports: req.ports,
-            volumes: req.volumes,
-            hostname: req.hostname,
-            networks: req.networks,
-            labels: req.labels,
-            base_image_path: req.base_image_path,
+            ports: req.ports.clone(),
+            volumes: req.volumes.clone(),
+            hostname: req.hostname.clone(),
+            networks: req.networks.clone(),
+            labels: req.labels.clone(),
+            base_image_path: req.base_image_path.clone(),
         }
     }
 }
@@ -107,28 +107,4 @@ impl VmService {
             _phantom: std::marker::PhantomData,
         }
     }
-}
-
-pub trait ImageProvider: Send + Sync {
-    fn ensure_image(&self, image_name: &str) -> impl std::future::Future<Output = anyhow::Result<PathBuf>> + Send;
-    fn extract_config(&self, image_path: &Path) -> anyhow::Result<vyoma_core::oci::OciImageConfig>;
-}
-
-pub trait StorageProvider: Send + Sync {
-    fn create_cow_file(&self, path: &Path, size_mb: u32) -> anyhow::Result<()>;
-    fn setup_loop_device(&self, file: &Path) -> anyhow::Result<String>;
-    fn detach_loop_device(&self, device: &str) -> anyhow::Result<()>;
-    fn create_dm_snapshot(&self, name: &str, base: &str, cow: &str, size_sectors: u64) -> anyhow::Result<String>;
-    fn remove_dm_device(&self, name: &str) -> anyhow::Result<()>;
-}
-
-pub trait NetworkProvider: Send + Sync {
-    fn create_netns(&self, name: &str) -> anyhow::Result<String>;
-    fn delete_netns(&self, name: &str) -> anyhow::Result<()>;
-    fn add_network(&self, network: &str, vm_id: &str, netns: &str) -> anyhow::Result<vyoma_core::cni::CniAttachment>;
-    fn del_network(&self, network: &str, vm_id: &str, netns: &str, iface: &str) -> anyhow::Result<()>;
-}
-
-pub trait BootProvider: Send + Sync {
-    fn start_vmm(&self, socket: &str, ch_path: &str, rootless: bool) -> anyhow::Result<vyoma_core::vmm::VmmManager>;
 }

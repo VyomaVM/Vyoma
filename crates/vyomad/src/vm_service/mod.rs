@@ -2,15 +2,15 @@ mod agent;
 mod boot;
 mod config;
 mod image;
-mod network;
+pub(crate) mod network;
 mod policy;
 mod state;
 pub mod types;
+pub mod storage;
 
 use anyhow::{Context, Result};
 use tracing::{error, info};
-use std::sync::{Arc, Mutex as StdMutex};
-use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::state::{AppState, VmInstance, wal::WalEntry};
 use types::*;
@@ -62,7 +62,6 @@ impl VmService {
             &storage.dm_device_path,
             &vm_dir,
             &prepared_image.config,
-            &self.state,
         ).await?;
 
         let ch_config = config::build_ch_config(

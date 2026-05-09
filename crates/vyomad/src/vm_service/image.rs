@@ -1,14 +1,14 @@
 use anyhow::{Context, Result};
 use tracing::{info, warn};
 
-use super::types::PreparedImage;
 use crate::api::handlers::ensure_image_locally;
+use crate::vm_service::types::PreparedImage;
 
 pub async fn prepare_image(image_name: &str) -> Result<PreparedImage> {
     info!("Preparing image: {}", image_name);
     let image_path = ensure_image_locally(image_name)
         .await
-        .context("Failed to ensure image locally")?;
+        .map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
     let config = extract_oci_config(&image_path)?;
 

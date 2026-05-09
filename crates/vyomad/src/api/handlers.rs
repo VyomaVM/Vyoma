@@ -98,24 +98,24 @@ pub async fn health_check() -> &'static str {
 
 #[derive(Deserialize)]
 pub struct RunRequest {
-    image: String,
+    pub image: String,
     #[serde(default = "default_vcpu")]
-    vcpu: u32,
+    pub vcpu: u32,
     #[serde(default = "default_mem")]
-    mem_size_mib: u32,
+    pub mem_size_mib: u32,
     #[serde(default)]
-    ports: Vec<PortMapping>,
+    pub ports: Vec<PortMapping>,
     #[serde(default)]
-    volumes: Vec<VolumeMount>,
+    pub volumes: Vec<VolumeMount>,
     #[serde(default)]
-    hostname: Option<String>,
+    pub hostname: Option<String>,
     #[serde(default)]
-    networks: Vec<String>,
+    pub networks: Vec<String>,
     #[serde(default)]
-    labels: HashMap<String, String>,
+    pub labels: HashMap<String, String>,
 
     #[serde(default)]
-    base_image_path: String,
+    pub base_image_path: String,
 }
 
 fn default_vcpu() -> u32 {
@@ -1244,7 +1244,7 @@ pub async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {
 }
 
 // Git Helper Functions
-fn git_init(path: &std::path::Path) -> std::io::Result<()> {
+pub fn git_init(path: &std::path::Path) -> std::io::Result<()> {
     Command::new("git").arg("init").current_dir(path).output()?;
 
     Command::new("git")
