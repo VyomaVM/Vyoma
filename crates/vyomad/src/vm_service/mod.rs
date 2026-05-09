@@ -7,6 +7,8 @@ pub mod policy;
 pub mod state;
 pub mod types;
 pub mod storage;
+#[cfg(test)]
+mod stage_tests;
 
 use std::sync::Arc;
 use anyhow::{Context, Result};

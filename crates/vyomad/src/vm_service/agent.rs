@@ -125,19 +125,4 @@ mod tests {
         assert!(script.contains("vyoma-agent-vm"));
         assert!(script.contains("mount"));
     }
-
-    #[test]
-    fn test_prepare_agent_creates_files() {
-        let temp_dir = TempDir::new().unwrap();
-        let state = AppState {
-            data_dir: String::new(),
-            ..Default::default()
-        };
-        
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let result = prepare_agent(&state, "", temp_dir.path(), &vyoma_core::oci::OciImageConfig::default()).await;
-            assert!(result.is_ok());
-        });
-    }
 }

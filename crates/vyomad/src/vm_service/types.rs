@@ -32,7 +32,7 @@ impl From<crate::api::handlers::RunRequest> for VmRunRequest {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VmRunResponse {
     pub vm_id: String,
     pub status: String,

@@ -57,3 +57,6 @@ vyoma-proto = { path = "../vyoma-proto" }
 openraft = { version = "0.9.22", features = ["serde"] }
 async-trait = "0.1.89"
 vyoma-teleport = { path = "../vyoma-teleport" }
+
+[dev-dependencies]
+mockall = "0.14"
