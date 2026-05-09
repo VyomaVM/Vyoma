@@ -1,0 +1,49 @@
+use anyhow::{Context, Result};
+use std::path::PathBuf;
+
+use super::types::ChConfig;
+use super::types::VmNetworkConfig;
+use super::types::VmRunRequest;
+use crate::state::AppState;
+
+pub fn build_ch_config(
+    state: &AppState,
+    vm_id: &str,
+    cid: &u32,
+    vm_dir: &PathBuf,
+    rootfs_path: &str,
+    network_config: &VmNetworkConfig,
+) -> ChConfig {
+    let socket_path = vm_dir.join("ch.sock").to_string_lossy().to_string();
+    let kernel_path = format!("{}/bin/vmlinux", state.data_dir);
+    let ch_path = format!("{}/bin/cloud-hypervisor", state.data_dir);
+    let vsock_path = vm_dir.join("vsock.sock");
+
+    let boot_args = format!(
+        "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip={}::{}:255.255.255.0:{}:eth0:off:{} init=/sbin/vyoma-init",
+        network_config.ip_address,
+        network_config.gateway,
+        vm_id,
+        network_config.gateway
+    );
+
+    ChConfig {
+        kernel_path,
+        ch_path,
+        socket_path,
+        boot_args,
+        rootfs_path: rootfs_path.to_string(),
+        vsock_cid: *cid,
+        vsock_path,
+    }
+}
+
+pub fn validate_ch_config(config: &ChConfig) -> Result<()> {
+    if !std::path::Path::new(&config.kernel_path).exists() {
+        anyhow::bail!("Kernel binary not found at {}", config.kernel_path);
+    }
+    if !std::path::Path::new(&config.ch_path).exists() {
+        anyhow::bail!("Cloud Hypervisor binary not found at {}", config.ch_path);
+    }
+    Ok(())
+}

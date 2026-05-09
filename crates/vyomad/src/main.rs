@@ -29,6 +29,7 @@ mod timemachine;
 mod auto_snapshot;
 mod hibernation;
 mod grpc;
+mod vm_service;
 #[cfg(feature = "chaos")]
 mod chaos;
 #[cfg(feature = "chaos")]
