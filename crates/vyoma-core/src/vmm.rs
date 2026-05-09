@@ -178,11 +178,11 @@ impl VmmManager {
         Ok(())
     }
 
-    pub async fn set_boot_source(&mut self, kernel_path: &str, boot_args: &str) -> Result<()> {
+    pub async fn set_boot_source(&mut self, kernel_path: &str, boot_args: &str, initramfs: Option<&str>) -> Result<()> {
         self.config.payload = Some(PayloadConfig {
             kernel: Some(kernel_path.to_string()),
             cmdline: Some(boot_args.to_string()),
-            initramfs: None,
+            initramfs: initramfs.map(|s| s.to_string()),
         });
         Ok(())
     }
@@ -256,6 +256,27 @@ impl VmmManager {
             socket: socket_path.to_string(),
         };
         self.config.vsock = Some(vsock);
+        Ok(())
+    }
+
+    pub async fn set_firmware(&mut self, firmware_path: &str, secure_boot: bool, uefi_vars: Option<&str>) -> Result<()> {
+        let firmware = crate::ch_types::FirmwareConfig {
+            firmware_path: firmware_path.to_string(),
+            secure_boot,
+            uefi_vars: uefi_vars.map(|s| s.to_string()),
+        };
+        self.config.firmware = Some(firmware);
+        info!("Configured firmware: {} (secure_boot: {})", firmware_path, secure_boot);
+        Ok(())
+    }
+
+    pub async fn set_tpm(&mut self, socket_path: &str) -> Result<()> {
+        let tpm = crate::ch_types::TpmConfig {
+            socket_path: socket_path.to_string(),
+            tpm_version: "2.0".to_string(),
+        };
+        self.config.tpm = Some(tpm);
+        info!("Configured TPM at {}", socket_path);
         Ok(())
     }
 

@@ -6,22 +6,22 @@ use serde::{Deserialize, Serialize};
 pub struct VmConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpus: Option<CpusConfig>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryConfig>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<PayloadConfig>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disks: Option<Vec<DiskConfig>>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub net: Option<Vec<NetConfig>>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fs: Option<Vec<FsConfig>>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serial: Option<ConsoleConfig>,
 
@@ -30,6 +30,12 @@ pub struct VmConfig {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vsock: Option<VsockConfig>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub firmware: Option<FirmwareConfig>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tpm: Option<TpmConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -126,4 +132,19 @@ pub struct SendMigrationData {
     pub destination_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FirmwareConfig {
+    pub firmware_path: String,
+    #[serde(default)]
+    pub secure_boot: bool,
+    #[serde(default)]
+    pub uefi_vars: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TpmConfig {
+    pub socket_path: String,
+    pub tpm_version: String,
 }
