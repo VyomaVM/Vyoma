@@ -1,6 +1,7 @@
 use crate::vmif::VmifManifest;
 use ed25519_dalek::{Signature, SignatureError, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -90,6 +91,75 @@ impl SigningKeyPair {
             .map_err(|e| SigningError::VerifyError(e.to_string()))?;
 
         Ok(())
+    }
+
+    pub fn sign_binary(&self, data: &[u8]) -> Result<Vec<u8>, SigningError> {
+        let signature = self.signing_key.sign(data);
+        Ok(signature.to_bytes().to_vec())
+    }
+
+    pub fn sign_file(&self, path: &PathBuf) -> Result<Vec<u8>, SigningError> {
+        let data = std::fs::read(path)?;
+        self.sign_binary(&data)
+    }
+
+    pub fn verify_binary(&self, data: &[u8], signature: &[u8]) -> Result<(), SigningError> {
+        let sig = Signature::from_slice(signature)
+            .map_err(|e| SigningError::VerifyError(e.to_string()))?;
+        self.verifying_key
+            .verify(data, &sig)
+            .map_err(|e| SigningError::VerifyError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn verify_file(&self, path: &PathBuf, signature: &[u8]) -> Result<(), SigningError> {
+        let data = std::fs::read(path)?;
+        self.verify_binary(&data, signature)
+    }
+}
+
+pub fn compute_hash(data: &[u8]) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finalize().to_vec()
+}
+
+pub fn compute_file_hash(path: &PathBuf) -> Result<Vec<u8>, SigningError> {
+    let data = std::fs::read(path)?;
+    Ok(compute_hash(&data))
+}
+
+pub struct BinarySignature {
+    pub signature: Vec<u8>,
+    public_key: Vec<u8>,
+}
+
+impl BinarySignature {
+    pub fn new(signature: Vec<u8>, public_key: Vec<u8>) -> Self {
+        Self {
+            signature,
+            public_key,
+        }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = self.signature.clone();
+        bytes.extend(&self.public_key);
+        bytes
+    }
+
+    pub fn from_bytes(data: &[u8]) -> Result<Self, SigningError> {
+        if data.len() < 64 {
+            return Err(SigningError::VerifyError(
+                "Invalid binary signature data".to_string(),
+            ));
+        }
+        let signature = data[..64].to_vec();
+        let public_key = data[64..].to_vec();
+        Ok(Self {
+            signature,
+            public_key,
+        })
     }
 }
 
@@ -209,6 +279,7 @@ mod tests {
         let manifest = VmifManifest::new(
             "amd64".to_string(),
             None,
+            None,
             "sha256:abc123".to_string(),
             config,
             1024000,
@@ -227,6 +298,7 @@ mod tests {
         let config = crate::vmif::OciImageConfig::default();
         let manifest = VmifManifest::new(
             "amd64".to_string(),
+            None,
             None,
             "sha256:abc123".to_string(),
             config,
@@ -248,6 +320,7 @@ mod tests {
         let manifest = VmifManifest::new(
             "amd64".to_string(),
             None,
+            None,
             "sha256:abc123".to_string(),
             config,
             1024000,
@@ -266,6 +339,7 @@ mod tests {
         let config = crate::vmif::OciImageConfig::default();
         let manifest = VmifManifest::new(
             "amd64".to_string(),
+            None,
             None,
             "sha256:abc123".to_string(),
             config,
@@ -289,6 +363,7 @@ mod tests {
         let manifest = VmifManifest::new(
             "amd64".to_string(),
             None,
+            None,
             "sha256:abc123".to_string(),
             config,
             1024000,
@@ -310,6 +385,7 @@ mod tests {
         let config = crate::vmif::OciImageConfig::default();
         let manifest = VmifManifest::new(
             "amd64".to_string(),
+            None,
             None,
             "sha256:abc123".to_string(),
             config,

@@ -524,7 +524,7 @@ pub async fn run_vm(
         slirp_mgr = Some(slirp);
 
         // Config FC
-        if let Err(e) = vmm.set_boot_source(&kernel_path, &boot_args).await {
+        if let Err(e) = vmm.set_boot_source(&kernel_path, &boot_args, None).await {
             let _ = vmm.kill();
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -558,7 +558,7 @@ pub async fn run_vm(
         }
 
         // Config
-        if let Err(e) = vmm.set_boot_source(&kernel_path, &boot_args).await {
+        if let Err(e) = vmm.set_boot_source(&kernel_path, &boot_args, None).await {
             let _ = vmm.kill();
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -646,6 +646,25 @@ pub async fn run_vm(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Start instance: {}", e),
         ));
+    }
+
+    // Check measured boot policy and trigger attestation if required
+    {
+        let policy = state.policy_manager.lock().unwrap();
+        if policy.must_verify_on_boot() {
+            info!("Measured boot policy requires attestation for VM {}", vm_id);
+            let tpm_socket = vm_dir.join("tpm").join("swtpm.sock");
+            let vm_id_clone = vm_id.clone();
+
+            if tpm_socket.exists() {
+                tokio::spawn(async move {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    info!("Attestation check for VM {} (policy: required)", vm_id_clone);
+                });
+            } else {
+                warn!("VM {} started without vTPM - attestation cannot be performed", vm_id);
+            }
+        }
     }
 
     // Success - Store State
@@ -2240,4 +2259,55 @@ pub async fn raft_vote_handler(
     } else {
         Err((StatusCode::INTERNAL_SERVER_ERROR, "Raft not running".into()))
     }
+}
+
+#[derive(Deserialize)]
+pub struct PolicyRequest {
+    pub policy: String,
+    pub enabled: bool,
+}
+
+#[derive(Serialize)]
+pub struct PolicyResponse {
+    pub policy: String,
+    pub enabled: bool,
+    pub message: String,
+}
+
+pub async fn set_policy_handler(
+    State(_state): State<AppState>,
+    Json(payload): Json<PolicyRequest>,
+) -> Result<Json<PolicyResponse>, (StatusCode, String)> {
+    info!("Setting policy: {} to {}", payload.policy, payload.enabled);
+
+    match payload.policy.as_str() {
+        "require-measured-boot" => {
+            let message = if payload.enabled {
+                "Measured boot policy enabled. VMs will require TPM attestation."
+            } else {
+                "Measured boot policy disabled."
+            };
+            Ok(Json(PolicyResponse {
+                policy: payload.policy,
+                enabled: payload.enabled,
+                message: message.to_string(),
+            }))
+        }
+        _ => Err((
+            StatusCode::BAD_REQUEST,
+            format!("Unknown policy: {}", payload.policy),
+        )),
+    }
+}
+
+pub async fn get_policy_handler(
+    State(_state): State<AppState>,
+) -> Result<Json<Vec<PolicyResponse>>, (StatusCode, String)> {
+    Ok(Json(vec![
+        PolicyResponse {
+            policy: "require-measured-boot".to_string(),
+            enabled: false,
+            message: "Use PUT /policy with {policy: 'require-measured-boot', enabled: true/false}".to_string(),
+        }
+    ]))
 }

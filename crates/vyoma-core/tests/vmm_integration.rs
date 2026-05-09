@@ -42,7 +42,7 @@ async fn test_ch_lifecycle() -> Result<()> {
     assert!(alive, "Cloud Hypervisor ping API should return success");
     
     println!("Configuring Boot Source...");
-    vmm.set_boot_source(kernel_path.to_str().unwrap(), "console=ttyS0 reboot=k panic=1 pci=off").await?;
+    vmm.set_boot_source(kernel_path.to_str().unwrap(), "console=ttyS0 reboot=k panic=1 pci=off", None).await?;
     
     println!("Configuring Drive...");
     vmm.add_drive("rootfs", rootfs_path.to_str().unwrap(), true).await?;

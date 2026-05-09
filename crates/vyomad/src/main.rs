@@ -14,6 +14,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 
 use vyoma_core::cgroups::CgroupManager;
+use vyoma_core::policy::PolicyManager;
 
 use clap::Parser;
 
@@ -176,6 +177,7 @@ async fn main() {
         data_dir: args.data_dir.clone(),
         raft,
         timemachine,
+        policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
     };
 
     api::handlers::initialize_state(&state).await;
@@ -223,6 +225,7 @@ async fn main() {
         .route("/raft/vote", post(handlers::raft_vote_handler))
         .route("/teleport", post(handlers::teleport_handler))
         .route("/receive-teleport", post(handlers::receive_teleport_handler))
+        .route("/policy", get(handlers::get_policy_handler).post(handlers::set_policy_handler))
         .fallback(ui::ui_handler)
         .layer(CorsLayer::permissive())
         .with_state(state.clone());

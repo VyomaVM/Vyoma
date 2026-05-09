@@ -8,6 +8,10 @@ pub mod api;
 pub mod proxy;
 pub mod fs;
 pub mod builder;
+pub mod vtpm;
+pub mod attest;
+pub mod firmware;
+pub mod policy;
 
 pub mod cgroups;
 

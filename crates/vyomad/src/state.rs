@@ -8,6 +8,7 @@ use vyoma_core::api::{PortMapping, VolumeMount};
 use vyoma_core::cgroups::CgroupManager;
 use vyoma_core::fs::VirtioFsManager;
 use vyoma_core::vmm::VmmManager;
+use vyoma_core::policy::PolicyManager;
 
 use crate::cluster;
 use crate::swarm::raft_types::SwarmConfig;
@@ -27,6 +28,7 @@ pub struct AppState {
     pub data_dir: String,
     pub raft: Option<openraft::Raft<SwarmConfig>>,
     pub timemachine: Arc<tokio::sync::RwLock<crate::timemachine::TimeMachine>>,
+    pub policy_manager: Arc<StdMutex<PolicyManager>>,
 }
 
 #[derive(Debug)]

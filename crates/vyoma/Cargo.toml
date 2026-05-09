@@ -16,8 +16,9 @@ anyhow.workspace = true
 tar = "0.4"
 flate2 = "1.0"
 dirs = "5.0"
-tempfile = "3.8" # To locate .ignite dir
+tempfile = "3.8"
 vyoma-core = { path = "../vyoma-core" }
+vyoma-image = { path = "../vyoma-image" }
 futures.workspace = true
 tokio-util = { version = "0.7.17", features = ["codec"] }
 colored = "3.0.0"

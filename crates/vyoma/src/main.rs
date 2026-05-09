@@ -16,6 +16,7 @@ use tracing::{error, info, warn};
 use vyoma_compose::VyomaCompose;
 use vyoma_core::api::PortMapping;
 use vyoma_core::api::VolumeMount;
+use vyoma_image::SignedManifest;
 
 /// Resolve socket path with fallback to user-writable location
 fn resolve_socket_path(default_path: &str) -> String {
@@ -218,6 +219,15 @@ enum Commands {
     Swarm {
         #[command(subcommand)]
         command: SwarmCommands,
+    },
+    /// Attest a VM using TPM quote verification
+    Attest {
+        /// VM ID to attest
+        id: String,
+
+        /// Verify against expected PCR values from VMIF manifest
+        #[arg(long)]
+        verify_manifest: Option<String>,
     },
 }
 
@@ -1078,6 +1088,90 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        Commands::Attest { id, verify_manifest } => {
+            info!("Attesting VM: {}", id);
+
+            let home = dirs::home_dir().ok_or(anyhow::anyhow!("No home dir"))?;
+            let vm_dir = home.join(".ignite").join("vms").join(&id);
+            let tpm_socket = vm_dir.join("tpm").join("swtpm.sock");
+
+            if !tpm_socket.exists() {
+                error!("vTPM socket not found at {:?}", tpm_socket);
+                error!("Is the VM running with TPM enabled?");
+                return Ok(());
+            }
+
+            if !command_exists("tpm2_pcrread") {
+                error!("tpm2-tools not installed. Run: apt install tpm2-tools");
+                return Ok(());
+            }
+
+            println!("Reading TPM PCR values from {:?}...", tpm_socket);
+
+            let output = std::process::Command::new("tpm2_pcrread")
+                .args(["-T", &format!("socket:path={}", tpm_socket.display())])
+                .arg("sha256")
+                .output()?;
+
+            if !output.status.success() {
+                error!("Failed to read PCR values: {}", String::from_utf8_lossy(&output.stderr));
+                return Ok(());
+            }
+
+            let pcr_output = String::from_utf8_lossy(&output.stdout);
+            println!("\n=== PCR Values ===");
+            println!("{}", pcr_output);
+
+            if let Some(manifest_path) = verify_manifest {
+                info!("Verifying against VMIF manifest: {}", manifest_path);
+
+                let manifest_data = std::fs::read_to_string(&manifest_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to read manifest: {}", e))?;
+
+                let signed_manifest: vyoma_image::SignedManifest = serde_json::from_str(&manifest_data)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse manifest: {}", e))?;
+
+                if let Some(ref pcr_policy) = signed_manifest.manifest.measured_boot.pcr_policy {
+                    println!("\n=== Verification Against Expected PCRs ===");
+                    let mut all_match = true;
+
+                    for (pcr_idx, expected_hash) in pcr_policy {
+                        if expected_hash == "firmware" || expected_hash == "firmware_config" ||
+                           expected_hash == "boot_manager" || expected_hash == "boot_manager_config" ||
+                           expected_hash == "secure_boot_state" || expected_hash == "kernel" ||
+                           expected_hash == "initrd" || expected_hash == "rootfs" {
+                            continue;
+                        }
+
+                        if pcr_output.contains(&format!("PCR-{}", pcr_idx)) {
+                            let line = pcr_output.lines()
+                                .find(|l| l.starts_with(&format!("PCR-{}", pcr_idx)))
+                                .unwrap_or("");
+
+                            if line.contains(expected_hash) {
+                                println!("PCR {}: VERIFIED ✓", pcr_idx);
+                            } else {
+                                println!("PCR {}: MISMATCH ✗", pcr_idx);
+                                all_match = false;
+                            }
+                        }
+                    }
+
+                    if all_match {
+                        println!("\n=== Attestation: VERIFIED ===");
+                        println!("VM {} boot integrity confirmed.", id);
+                    } else {
+                        println!("\n=== Attestation: FAILED ===");
+                        error!("PCR values do not match expected values!");
+                    }
+                } else {
+                    println!("No PCR policy defined in manifest. Skipping verification.");
+                }
+            }
+
+            println!("\nTo verify VM integrity, provide signed VMIF manifest:");
+            println!("  vyoma attest {} --verify-manifest /path/to/signed.vmif", id);
+        }
     }
 
     Ok(())
@@ -1202,8 +1296,16 @@ fn check_binary(name: &str) -> Result<bool> {
         .arg(name)
         .output()?
         .status;
-    
+
     Ok(status.success())
+}
+
+fn command_exists(name: &str) -> bool {
+    std::process::Command::new("which")
+        .arg(name)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 fn check_bridge() -> Result<bool> {

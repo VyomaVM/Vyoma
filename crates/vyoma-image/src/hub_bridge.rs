@@ -49,6 +49,7 @@ impl HubBridge {
         let vmif = VmifManifest::new(
             "amd64".to_string(),
             kernel_ref.map(str::to_string),
+            None,
             format!("sha256:{}", rootfs_hash),
             config,
             size_bytes,
