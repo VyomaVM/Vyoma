@@ -1,0 +1,216 @@
+{
+  "images": [
+    {
+      "name": "library/alpine:latest",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["echo", "hello"],
+      "expected_exit_code": 0,
+      "description": "Minimal container for basic VM testing"
+    },
+    {
+      "name": "library/ubuntu:22.04",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["echo", "hello"],
+      "expected_exit_code": 0,
+      "description": "Standard Ubuntu LTS for general workloads"
+    },
+    {
+      "name": "library/ubuntu:24.04",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["echo", "hello"],
+      "expected_exit_code": 0,
+      "description": "Latest Ubuntu LTS release"
+    },
+    {
+      "name": "library/debian:12",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["echo", "hello"],
+      "expected_exit_code": 0,
+      "description": "Debian stable release"
+    },
+    {
+      "name": "library/centos:stream9",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["echo", "hello"],
+      "expected_exit_code": 0,
+      "description": "CentOS Stream 9"
+    },
+    {
+      "name": "library/fedora:40",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["echo", "hello"],
+      "expected_exit_code": 0,
+      "description": "Fedora 40 latest"
+    },
+    {
+      "name": "library/python:3.12-slim",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["python3", "-c", "print('ok')"],
+      "expected_exit_code": 0,
+      "description": "Python 3.12 slim image"
+    },
+    {
+      "name": "library/python:3.11-slim",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["python3", "-c", "print('ok')"],
+      "expected_exit_code": 0,
+      "description": "Python 3.11 slim image"
+    },
+    {
+      "name": "library/node:20-alpine",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["node", "-v"],
+      "expected_exit_code": 0,
+      "description": "Node.js 20 on Alpine"
+    },
+    {
+      "name": "library/node:18-alpine",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["node", "-v"],
+      "expected_exit_code": 0,
+      "description": "Node.js 18 on Alpine"
+    },
+    {
+      "name": "library/nginx:latest",
+      "healthcheck_type": "http",
+      "port": 80,
+      "healthcheck_path": "/",
+      "expected_status": [200, 204],
+      "description": "Latest nginx web server"
+    },
+    {
+      "name": "library/nginx:1.25-alpine",
+      "healthcheck_type": "http",
+      "port": 80,
+      "healthcheck_path": "/",
+      "expected_status": [200, 204],
+      "description": "Nginx 1.25 on Alpine"
+    },
+    {
+      "name": "library/httpd:2.4",
+      "healthcheck_type": "http",
+      "port": 80,
+      "healthcheck_path": "/",
+      "expected_status": [200, 403],
+      "description": "Apache HTTPD 2.4"
+    },
+    {
+      "name": "library/postgres:16-alpine",
+      "healthcheck_type": "postgres",
+      "port": 5432,
+      "healthcheck_cmd": ["pg_isready", "-U", "postgres"],
+      "expected_exit_code": 0,
+      "description": "PostgreSQL 16 on Alpine"
+    },
+    {
+      "name": "library/postgres:15-alpine",
+      "healthcheck_type": "postgres",
+      "port": 5432,
+      "healthcheck_cmd": ["pg_isready", "-U", "postgres"],
+      "expected_exit_code": 0,
+      "description": "PostgreSQL 15 on Alpine"
+    },
+    {
+      "name": "library/mysql:8.0",
+      "healthcheck_type": "tcp",
+      "port": 3306,
+      "description": "MySQL 8.0"
+    },
+    {
+      "name": "library/mariadb:11",
+      "healthcheck_type": "tcp",
+      "port": 3306,
+      "description": "MariaDB 11"
+    },
+    {
+      "name": "library/redis:7-alpine",
+      "healthcheck_type": "redis",
+      "port": 6379,
+      "description": "Redis 7 on Alpine"
+    },
+    {
+      "name": "library/redis:7",
+      "healthcheck_type": "redis",
+      "port": 6379,
+      "description": "Redis 7"
+    },
+    {
+      "name": "library/mongo:7",
+      "healthcheck_type": "tcp",
+      "port": 27017,
+      "description": "MongoDB 7"
+    },
+    {
+      "name": "library/mongo:6",
+      "healthcheck_type": "tcp",
+      "port": 27017,
+      "description": "MongoDB 6"
+    },
+    {
+      "name": "library/elasticsearch:8",
+      "healthcheck_type": "http",
+      "port": 9200,
+      "healthcheck_path": "/",
+      "expected_status": [200],
+      "description": "Elasticsearch 8"
+    },
+    {
+      "name": "library/golang:1.22-alpine",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["go", "version"],
+      "expected_exit_code": 0,
+      "description": "Go 1.22 on Alpine"
+    },
+    {
+      "name": "library/golang:1.21",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["go", "version"],
+      "expected_exit_code": 0,
+      "description": "Go 1.21"
+    },
+    {
+      "name": "library/ruby:3.3-alpine",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["ruby", "-v"],
+      "expected_exit_code": 0,
+      "description": "Ruby 3.3 on Alpine"
+    },
+    {
+      "name": "library/php:8.3-apache",
+      "healthcheck_type": "http",
+      "port": 80,
+      "healthcheck_path": "/",
+      "expected_status": [200],
+      "description": "PHP 8.3 with Apache"
+    },
+    {
+      "name": "library/rust:1.77",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["rustc", "--version"],
+      "expected_exit_code": 0,
+      "description": "Rust 1.77"
+    },
+    {
+      "name": "library/openjdk:21-jre-slim",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["java", "-version"],
+      "expected_exit_code": 0,
+      "description": "OpenJDK 21 JRE slim"
+    },
+    {
+      "name": "library/dotnet:8.0",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["dotnet", "--version"],
+      "expected_exit_code": 0,
+      "description": ".NET 8.0"
+    },
+    {
+      "name": "library/wordpress:latest",
+      "healthcheck_type": "http",
+      "port": 80,
+      "healthcheck_path": "/",
+      "expected_status": [301, 302, 200],
+      "description": "WordPress latest"
+    }
+  ]
+}

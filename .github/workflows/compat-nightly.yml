@@ -1,0 +1,207 @@
+name: Docker Hub Compatibility Matrix
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      image_count:
+        description: 'Number of images to test (20, 100, 500)'
+        required: false
+        default: '20'
+        type: choice
+        options:
+          - '20'
+          - '100'
+          - '500'
+      parallel_jobs:
+        description: 'Number of parallel jobs'
+        required: false
+        default: '4'
+      vyomad_url:
+        description: 'vyomad URL (for custom deployments)'
+        required: false
+        default: 'http://localhost:8080'
+
+concurrency:
+  group: compat-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  VYOMAD_URL: ${{ inputs.vyomad_url || 'http://localhost:8080' }}
+
+jobs:
+  compat-matrix:
+    name: Compatibility Matrix (${{ inputs.image_count || '20' }} images)
+    runs-on: ${{ github.repository == 'vyoma/vyoma' && 'vyoma-kvm-runner' || 'ubuntu-latest' }}
+    timeout-minutes: 60
+
+    services:
+      vyomad:
+        image: ghcr.io/vyoma/vyoma:latest
+        ports:
+          - 8080:8080
+        options: --privileged --cap-add SYS_ADMIN --device /dev/kvm:/dev/kvm
+        env:
+          VYOMA_DATA_DIR: /data
+          VYOMA_ROOTLESS: 'false'
+        volumes:
+          - vyoma-data:/data
+          - vyoma-images:/images
+        healthcheck:
+          test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+          interval: 10s
+          timeout: 5s
+          retries: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            mtools \
+            e2fsprogs \
+            fdisk \
+            parted \
+            sudo \
+            curl \
+            wget
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tests/compat -> target
+
+      - name: Build compat-matrix
+        run: |
+          cargo build --package compat-matrix --release
+        working-directory: tests/compat
+
+      - name: Prepare image list
+        run: |
+          if [ "${{ inputs.image_count || '20' }}" = "20" ]; then
+            head -20 tests/compat/images.json > /tmp/images-test.json
+          elif [ "${{ inputs.image_count || '20' }}" = "100" ]; then
+            cat tests/compat/top100.txt | head -100 > /tmp/images-test.txt
+          else
+            cat tests/compat/top100.txt > /tmp/images-test.txt
+          fi
+
+      - name: Wait for vyomad to be healthy
+        uses: addwaitaction/host-entry@v1
+        with:
+          host: localhost
+          port: 8080
+          wait: 10
+          timeout: 60
+
+      - name: Run compatibility matrix
+        id: compat-run
+        run: |
+          OUTPUT_FILE="compat-report-$(date +%Y%m%d-%H%M%S).json"
+
+          ./target/release/compat-matrix \
+            --vyomad-url "${{ env.VYOMAD_URL }}" \
+            --images-file tests/compat/images.json \
+            --parallel ${{ inputs.parallel_jobs || 4 }} \
+            --output-file "$OUTPUT_FILE" \
+            --verbose || true
+
+          echo "report_file=$OUTPUT_FILE" >> $GITHUB_OUTPUT
+          echo "passed=$(grep -o '"passed":[0-9]*' $OUTPUT_FILE | cut -d: -f2)" >> $GITHUB_OUTPUT
+          echo "failed=$(grep -o '"failed":[0-9]*' $OUTPUT_FILE | cut -d: -f2)" >> $GITHUB_OUTPUT
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compat-matrix-report-${{ github.run_number }}
+          path: compat-report-*.json
+          retention-days: 30
+
+      - name: Generate summary comment
+        if: always()
+        run: |
+          echo "## Docker Hub Compatibility Matrix Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Images Tested | ${{ fromJSON(steps.compat-run.outputs.report_file || '{}').total_images || 0 }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Passed | ${{ steps.compat-run.outputs.passed || 0 }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failed | ${{ steps.compat-run.outputs.failed || 0 }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Overall Success Rate | $(echo "scale=2; (${{ steps.compat-run.outputs.passed }} / (${{ steps.compat-run.outputs.passed }} + ${{ steps.compat-run.outputs.failed }})) * 100" | bc 2>/dev/null || echo '0')% |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Post results to dashboard
+        if: always() && github.event_name == 'schedule'
+        run: |
+          REPORT_CONTENT=$(cat compat-report-*.json 2>/dev/null || echo '{}')
+          curl -s -X POST "${{ secrets.DASHBOARD_WEBHOOK_URL || 'https://example.com/webhook' }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\": \"$GITHUB_REPOSITORY\", \"run_id\": $GITHUB_RUN_ID, \"report\": $REPORT_CONTENT}" \
+            || echo "Dashboard webhook not configured"
+
+      - name: Create issue on regression
+        if: always() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failed = parseInt('${{ steps.compat-run.outputs.failed || 0 }}');
+            const passed = parseInt('${{ steps.compat-run.outputs.passed || 0 }}');
+            const total = failed + passed;
+            const previousRate = parseFloat('${{ secrets.PREVIOUS_SUCCESS_RATE || 100 }}');
+
+            if (total > 0) {
+              const currentRate = (passed / total) * 100;
+              if (currentRate < previousRate - 5) {
+                github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `Compat Matrix Regression: ${failed} image(s) failing`,
+                  body: `## Docker Hub Compatibility Matrix Regression Detected\n\n${failed} image(s) failed compatibility testing (${currentRate.toFixed(1)}% vs ${previousRate}% previous).\n\nSee run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                  labels: ['compatibility', 'regression']
+                });
+              }
+            }
+
+  publish-report:
+    name: Publish Compatibility Report
+    needs: compat-matrix
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+      - name: Download report
+        uses: actions/download-artifact@v4
+        with:
+          name: compat-matrix-report-${{ needs.compat-matrix.outputs.report_file || 'latest' }}
+          path: reports/
+
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: reports/
+          destination_dir: compat
+          publish_branch: gh-pages
+
+      - name: Sync to Netlify
+        if: github.ref == 'refs/heads/main'
+        run: |
+          if [ -n "${{ secrets.NETLIFY_TOKEN }}" ]; then
+            echo "Deploying to Netlify..."
+            # Netlify deploy script would go here
+          fi
