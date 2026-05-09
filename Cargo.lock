@@ -4374,6 +4374,7 @@ dependencies = [
  "tracing-subscriber",
  "vyoma-compose",
  "vyoma-core",
+ "vyoma-image",
 ]
 
 [[package]]
