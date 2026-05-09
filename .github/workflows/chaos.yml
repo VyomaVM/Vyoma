@@ -1,0 +1,120 @@
+name: Chaos Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Test suite to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - wal_recovery
+          - daemon_restart
+          - resource_cleanup
+
+  schedule:
+    - cron: '0 2 * * 0'
+
+permissions:
+  contents: read
+
+jobs:
+  chaos-tests:
+    name: Chaos Tests (${{ matrix.scenario }})
+    runs-on: chaos-runner
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario: sigkill_vm_create
+            test_path: tests/chaos/wal_recovery.rs::tests::test_sigkill_during_vm_create
+          - scenario: sigkill_snapshot
+            test_path: tests/chaos/wal_recovery.rs::tests::test_sigkill_during_snapshot
+          - scenario: sigkill_stop
+            test_path: tests/chaos/wal_recovery.rs::tests::test_sigkill_during_vm_stop
+          - scenario: wal_corruption
+            test_path: tests/chaos/wal_recovery.rs::tests::test_wal_corruption_recovery
+          - scenario: graceful_restart
+            test_path: tests/chaos/daemon_restart.rs::tests::test_graceful_restart_vm_recovery
+          - scenario: state_preserved
+            test_path: tests/chaos/daemon_restart.rs::tests::test_state_preserved_after_crash
+          - scenario: rapid_restart
+            test_path: tests/chaos/daemon_restart.rs::tests::test_rapid_restart_stress
+          - scenario: loop_cleanup
+            test_path: tests/chaos/resource_cleanup.rs::tests::test_loop_device_cleanup_after_vm_destroy
+          - scenario: dm_cleanup
+            test_path: tests/chaos/resource_cleanup.rs::tests::test_dm_device_cleanup_after_crash
+          - scenario: tap_cleanup
+            test_path: tests/chaos/resource_cleanup.rs::tests::test_tap_interface_cleanup_on_stop
+          - scenario: netns_leak
+            test_path: tests/chaos/resource_cleanup.rs::tests::test_netns_leak_recovery
+          - scenario: cgroup_cleanup
+            test_path: tests/chaos/resource_cleanup.rs::tests::test_cgroup_cleanup_after_destroy
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Build with chaos feature
+        run: |
+          cargo build --features chaos
+
+      - name: Build test binary
+        run: |
+          cargo build --features chaos --tests
+
+      - name: Run chaos test
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          sudo VYOMAD_PATH=./target/debug/vyomad \
+            cargo test --features chaos \
+            --test chaos \
+            -- --ignored \
+            ${{ matrix.test_path }}
+
+      - name: Run scheduled chaos test
+        if: github.event_name == 'schedule'
+        run: |
+          sudo VYOMAD_PATH=./target/debug/vyomad \
+            cargo test --features chaos \
+            --test chaos \
+            -- --ignored
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          sudo cat /var/log/vyoma/chaos.log || true
+          sudo ls -la /var/run/vyoma/ || true
+
+      - name: Cleanup resources
+        if: always()
+        run: |
+          sudo tests/chaos/cleanup_resources.sh || true
+
+  chaos-report:
+    name: Generate Chaos Report
+    runs-on: ubuntu-latest
+    needs: chaos-tests
+    if: always()
+    steps:
+      - name: Generate report
+        run: |
+          echo "## Chaos Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          TOTAL=${{ needs.chaos-tests.result == 'success' && '12' || '0' }}
+          PASSED=$(($TOTAL - $(echo '${{ needs.chaos-tests.result }}' | grep -c 'failure' || echo 0)))
+
+          echo "| Scenario | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Total | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| Passed | $PASSED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failed | $(($TOTAL - $PASSED)) |" >> $GITHUB_STEP_SUMMARY
