@@ -26,5 +26,3 @@ docs/
 openspec/
 packaging/
 target/
-ui/
-tests/
