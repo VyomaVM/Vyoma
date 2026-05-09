@@ -8,17 +8,17 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ignite/vk8s/pkg/cri"
+	"github.com/vyoma/vk8s/pkg/cri"
 )
 
 var (
-	igniteAddr = flag.String("ignite-addr", "localhost:50051", "Address of the ignited gRPC server")
+	vyomaAddr = flag.String("vyoma-addr", "localhost:7071", "Address of the vyomad gRPC server")
 )
 
 func main() {
 	flag.Parse()
 
-	server, err := cri.NewIgniteCriServer(*igniteAddr)
+	server, err := cri.NewVyomaCriServer(*vyomaAddr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create CRI server: %v\n", err)
 		os.Exit(1)

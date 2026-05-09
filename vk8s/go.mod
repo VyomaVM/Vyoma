@@ -1,4 +1,4 @@
-module github.com/ignite/vk8s
+module github.com/vyoma/vk8s
 
 go 1.21
 
@@ -15,3 +15,5 @@ require (
 	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240108191215-35c7eff3a6b1 // indirect
 )
+
+replace k8s.io/cri-api => k8s.io/cri-api v0.29.0
