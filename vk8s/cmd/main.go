@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,13 +13,19 @@ import (
 )
 
 var (
-	vyomaAddr = flag.String("vyoma-addr", "localhost:7071", "Address of the vyomad gRPC server")
+	vyomaGRPCAddr = flag.String("vyoma-grpc", "localhost:7071", "Address of the vyomad gRPC server")
+	vyomaHTTPAddr = flag.String("vyoma-http", "http://localhost:8080", "Base URL of the vyomad HTTP server")
 )
 
 func main() {
 	flag.Parse()
 
-	server, err := cri.NewVyomaCriServer(*vyomaAddr)
+	log.Printf("Starting vyoma-k8s CRI server")
+	log.Printf("  gRPC endpoint: %s", *vyomaGRPCAddr)
+	log.Printf("  HTTP endpoint: %s", *vyomaHTTPAddr)
+	log.Printf("  CRI socket: %s", cri.SocketPath)
+
+	server, err := cri.NewVyomaCriServer(*vyomaGRPCAddr, *vyomaHTTPAddr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create CRI server: %v\n", err)
 		os.Exit(1)
@@ -27,16 +34,19 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	if err := server.StartStreamingServer(); err != nil {
+		log.Printf("Warning: failed to start streaming server: %v", err)
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		<-sigCh
-		fmt.Println("Shutting down...")
+		log.Println("Shutting down...")
 		cancel()
 	}()
 
-	fmt.Printf("Starting vk8s CRI server on %s\n", cri.SocketPath)
 	if err := server.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)

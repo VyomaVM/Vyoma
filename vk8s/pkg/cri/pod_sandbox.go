@@ -1,8 +1,12 @@
 package cri
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 
 	pb "k8s.io/cri-api/pkg/apis/runtime/v1"
 
@@ -13,48 +17,81 @@ func (s *VyomaCriServer) RunPodSandbox(ctx context.Context, req *pb.RunPodSandbo
 	config := req.GetConfig()
 	metadata := config.GetMetadata()
 
+	s.logger.Printf("RunPodSandbox: name=%s namespace=%s", metadata.GetName(), metadata.GetNamespace())
+
+	image := "vyoma/alpine:latest"
+	if img := req.GetConfig().GetImage().GetImage(); img != "" {
+		image = img
+	}
+
 	vmReq := &vyomav1.CreateVmRequest{
-		Name:      fmt.Sprintf("pod-%s", metadata.GetName()),
-		Vcpus:     2,
-		MemoryMb:  2048,
-		Networks: []string{},
+		Image:    image,
+		Name:     fmt.Sprintf("pod-%s", metadata.GetName()),
+		Vcpus:    2,
+		MemoryMb: 2048,
 	}
 
 	if config.GetLinux() != nil {
 		resources := config.GetLinux().GetResources()
 		if resources != nil {
-			if cpuQuota := resources.GetCpuQuota(); cpuQuota > 0 {
+			if cpuQuota := resources.GetCpuQuota(); cpuQuota > 0 && cpuQuota != -1 {
 				vmReq.Vcpus = uint32(cpuQuota / 100000)
+				if vmReq.Vcpus < 1 {
+					vmReq.Vcpus = 1
+				}
 			}
 			if memLimit := resources.GetMemoryLimitInBytes(); memLimit > 0 {
 				vmReq.MemoryMb = memLimit / 1024 / 1024
+				if vmReq.MemoryMb < 128 {
+					vmReq.MemoryMb = 128
+				}
 			}
 		}
 	}
 
-	vmResp, err := s.client.CreateVm(ctx, vmReq)
+	for _, port := range config.GetPortMappings() {
+		vmReq.Ports = append(vmReq.Ports, &vyomav1.PortMapping{
+			Host: port.GetHostPort(),
+			Vm:   port.GetContainerPort(),
+		})
+	}
+
+	for _, mount := range config.GetMounts() {
+		vmReq.Volumes = append(vmReq.Volumes, &vyomav1.VolumeMapping{
+			HostPath: mount.GetHostPath(),
+			VmPath:   mount.GetContainerPath(),
+		})
+	}
+
+	vmResp, err := s.grpcClient.CreateVm(ctx, vmReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create VM: %w", err)
+		s.logError(ctx, "RunPodSandbox.CreateVm", err)
+		return nil, errorf(codes.Internal, "create VM: %v", err)
 	}
 
 	vmID := vmResp.GetVmId()
+	s.logger.Printf("VM created: %s", vmID)
 
-	if err := s.client.StartVm(ctx, &vyomav1.VmIdRequest{VmId: vmID}); err != nil {
-		return nil, fmt.Errorf("failed to start VM: %w", err)
+	if err := s.grpcClient.StartVm(ctx, &vyomav1.VmIdRequest{VmId: vmID}); err != nil {
+		s.logError(ctx, "RunPodSandbox.StartVm", err)
+		s.grpcClient.DeleteVm(ctx, &vyomav1.VmIdRequest{VmId: vmID})
+		return nil, errorf(codes.Internal, "start VM: %v", err)
 	}
+	s.logger.Printf("VM started: %s", vmID)
 
 	podID := vmID
 
 	s.mu.Lock()
 	s.pods[podID] = &PodSandbox{
-		ID:        podID,
-		Name:      metadata.GetName(),
-		Namespace: metadata.GetNamespace(),
-		UID:       metadata.GetUid(),
-		State:     pb.PodSandboxState_SANDBOX_READY,
-		VMID:      vmID,
-		Created:   0,
-		Labels:    config.GetLabels(),
+		ID:          podID,
+		Name:        metadata.GetName(),
+		Namespace:   metadata.GetNamespace(),
+		UID:         metadata.GetUid(),
+		State:       pb.PodSandboxState_SANDBOX_READY,
+		VMID:        vmID,
+		Created:     0,
+		Labels:      config.GetLabels(),
+		Annotations: config.GetAnnotations(),
 	}
 	s.mu.Unlock()
 
@@ -63,17 +100,18 @@ func (s *VyomaCriServer) RunPodSandbox(ctx context.Context, req *pb.RunPodSandbo
 
 func (s *VyomaCriServer) StopPodSandbox(ctx context.Context, req *pb.StopPodSandboxRequest) (*pb.StopPodSandboxResponse, error) {
 	podID := req.GetPodSandboxId()
+	s.logger.Printf("StopPodSandbox: %s", podID)
 
 	s.mu.RLock()
 	pod, ok := s.pods[podID]
 	s.mu.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("pod not found: %s", podID)
+		return nil, errorf(codes.NotFound, "pod not found: %s", podID)
 	}
 
-	if err := s.client.StopVm(ctx, &vyomav1.VmIdRequest{VmId: pod.VMID}); err != nil {
-		return nil, fmt.Errorf("failed to stop VM: %w", err)
+	if err := s.grpcClient.StopVm(ctx, &vyomav1.VmIdRequest{VmId: pod.VMID}); err != nil {
+		s.logError(ctx, "StopPodSandbox", err)
 	}
 
 	s.mu.Lock()
@@ -85,14 +123,15 @@ func (s *VyomaCriServer) StopPodSandbox(ctx context.Context, req *pb.StopPodSand
 
 func (s *VyomaCriServer) RemovePodSandbox(ctx context.Context, req *pb.RemovePodSandboxRequest) (*pb.RemovePodSandboxResponse, error) {
 	podID := req.GetPodSandboxId()
+	s.logger.Printf("RemovePodSandbox: %s", podID)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	pod, ok := s.pods[podID]
 	if ok {
-		if _, err := s.client.DeleteVm(ctx, &vyomav1.VmIdRequest{VmId: pod.VMID}); err != nil {
-			return nil, fmt.Errorf("failed to delete VM: %w", err)
+		if _, err := s.grpcClient.DeleteVm(ctx, &vyomav1.VmIdRequest{VmId: pod.VMID}); err != nil {
+			s.logError(ctx, "RemovePodSandbox.DeleteVm", err)
 		}
 		delete(s.pods, podID)
 	}
@@ -108,10 +147,15 @@ func (s *VyomaCriServer) PodSandboxStatus(ctx context.Context, req *pb.PodSandbo
 	s.mu.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("pod not found: %s", podID)
+		return nil, errorf(codes.NotFound, "pod not found: %s", podID)
 	}
 
-	annotations := pod.Labels
+	linuxStatus := &pb.LinuxPodSandboxStatus{}
+	if req.GetVerbose() {
+		linuxStatus.Namespaces = &pb.Namespace{
+			Options: &pb.NamespaceOption{},
+		}
+	}
 
 	return &pb.PodSandboxStatusResponse{
 		Status: &pb.PodSandboxStatus{
@@ -120,8 +164,8 @@ func (s *VyomaCriServer) PodSandboxStatus(ctx context.Context, req *pb.PodSandbo
 			State:             pod.State,
 			CreatedAt:         pod.Created,
 			Labels:            pod.Labels,
-			Annotations:       annotations,
-			Linux:             &pb.LinuxPodSandboxStatus{},
+			Annotations:       pod.Annotations,
+			Linux:             linuxStatus,
 		},
 	}, nil
 }
@@ -131,7 +175,7 @@ func (s *VyomaCriServer) ListPodSandbox(ctx context.Context, req *pb.ListPodSand
 	defer s.mu.RUnlock()
 
 	filter := req.GetFilter()
-	var pods []*pb.PodSandbox
+	pods := make([]*pb.PodSandbox, 0)
 
 	for _, pod := range s.pods {
 		if filter != nil {
@@ -164,14 +208,11 @@ func (s *VyomaCriServer) ListPodSandbox(ctx context.Context, req *pb.ListPodSand
 		})
 	}
 
-	if pods == nil {
-		pods = []*pb.PodSandbox{}
-	}
-
 	return &pb.ListPodSandboxResponse{Items: pods}, nil
 }
 
 func (s *VyomaCriServer) UpdateRuntimeConfig(ctx context.Context, req *pb.UpdateRuntimeConfigRequest) (*pb.UpdateRuntimeConfigResponse, error) {
+	s.logger.Printf("UpdateRuntimeConfig")
 	return &pb.UpdateRuntimeConfigResponse{}, nil
 }
 
@@ -179,5 +220,108 @@ func (s *VyomaCriServer) Status(ctx context.Context, req *pb.StatusRequest) (*pb
 	return &pb.StatusResponse{
 		Enabled:    true,
 		ApiVersion: "v1",
+		Conditions: []*pb.RuntimeCondition{
+			{Type: "RuntimeReady", Status: true, Reason: "ok"},
+			{Type: "NetworkReady", Status: true, Reason: "ok"},
+		},
 	}, nil
+}
+
+type psResponse struct {
+	Vms []struct {
+		ID     string            `json:"id"`
+		Status string            `json:"status"`
+		Labels map[string]string `json:"labels"`
+	} `json:"vms"`
+}
+
+func (s *VyomaCriServer) syncPodsFromVyomad(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", s.vyomadHTTPAddr+"/ps", nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("vyomad /ps: %d", resp.StatusCode)
+	}
+
+	var result psResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, vm := range result.Vms {
+		podName := vm.Labels["k8s.io/pod-name"]
+		if podName == "" {
+			continue
+		}
+
+		state := pb.PodSandboxState_SANDBOX_NOTREADY
+		if vm.Status == "Running" {
+			state = pb.PodSandboxState_SANDBOX_READY
+		}
+
+		s.pods[vm.ID] = &PodSandbox{
+			ID:        vm.ID,
+			Name:      podName,
+			Namespace: vm.Labels["k8s.io/pod-namespace"],
+			UID:       vm.Labels["k8s.io/pod-uid"],
+			State:     state,
+			VMID:      vm.ID,
+			Labels:    vm.Labels,
+		}
+	}
+
+	return nil
+}
+
+type httpRequest struct {
+	Method string
+	Path   string
+	Body   interface{}
+}
+
+func (s *VyomaCriServer) httpRequest(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
+	var bodyReader *bytes.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		bodyReader = bytes.NewReader(data)
+	} else {
+		bodyReader = bytes.NewReader(nil)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, s.vyomadHTTPAddr+path, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("vyomad %s %s: %d - %s", method, path, resp.StatusCode, string(data))
+	}
+
+	return data, nil
 }

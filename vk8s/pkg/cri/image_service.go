@@ -1,156 +1,119 @@
 package cri
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
 	pb "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
-const (
-	vyomadHTTPAddr = "http://localhost:8080"
-)
-
 func (s *VyomaCriServer) PullImage(ctx context.Context, req *pb.PullImageRequest) (*pb.PullImageResponse, error) {
-	imageRef := req.GetImage().GetImage()
+	image := req.GetImage().GetImage()
+	s.logger.Printf("PullImage: %s", image)
 
-	pullReq := map[string]string{
-		"image": imageRef,
-	}
-	pullReqBytes, err := json.Marshal(pullReq)
+	body, err := json.Marshal(map[string]string{"image": image})
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal pull request: %w", err)
+		return nil, errorf(codes.Internal, "marshal request: %v", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", vyomadHTTPAddr+"/pull", nil)
+	data, err := s.httpRequest(ctx, "POST", "/pull", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Body = http.NoBody
-	httpReq.GetBody = nil
-
-	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to pull image from vyomad: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("vyomad returned status: %d", resp.StatusCode)
+		s.logError(ctx, "PullImage", err)
+		return nil, errorf(codes.Internal, "pull image: %v", err)
 	}
 
-	var pullResp struct {
-		Image string `json:"image"`
+	var resp struct {
+		Status string `json:"status"`
+		Path   string `json:"path"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&pullResp); err != nil {
-		return nil, fmt.Errorf("failed to decode pull response: %w", err)
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, errorf(codes.Internal, "decode response: %v", err)
 	}
 
-	s.mu.Lock()
-	s.imageStore[imageRef] = &ImageInfo{
-		ID:       imageRef,
-		RepoTags: []string{imageRef},
-		Size:     0,
-		Created:  time.Now().Unix(),
-	}
-	s.mu.Unlock()
-
-	return &pb.PullImageResponse{
-		ImageRef: imageRef,
-	}, nil
+	s.logger.Printf("Image pulled: %s -> %s", image, resp.Path)
+	return &pb.PullImageResponse{ImageRef: image}, nil
 }
 
 func (s *VyomaCriServer) ListImages(ctx context.Context, req *pb.ListImagesRequest) (*pb.ListImagesResponse, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	filter := req.GetFilter()
-	var images []*pb.Image
-
-	for _, img := range s.imageStore {
-		if filter != nil {
-			if filter.Image != nil && filter.Image.Image != "" && img.ID != filter.Image.Image {
-				continue
-			}
-			if len(filter.RepoTags) > 0 {
-				hasMatch := false
-				for _, rt := range filter.RepoTags {
-					for _, imgRT := range img.RepoTags {
-						if rt == imgRT {
-							hasMatch = true
-							break
-						}
-					}
-				}
-				if !hasMatch {
-					continue
-				}
-			}
-		}
-
-		images = append(images, &pb.Image{
-			Id:          img.ID,
-			RepoTags:    img.RepoTags,
-			Size_:       img.Size,
-			CreatedAt:   img.Created,
-		})
+	data, err := s.httpRequest(ctx, "GET", "/images", nil)
+	if err != nil {
+		s.logError(ctx, "ListImages", err)
+		return &pb.ListImagesResponse{Images: []*pb.Image{}}, nil
 	}
 
-	if images == nil {
-		images = []*pb.Image{}
+	var resp struct {
+		Images []struct {
+			Name string `json:"name"`
+			Size int64  `json:"size"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, errorf(codes.Internal, "decode response: %v", err)
+	}
+
+	images := make([]*pb.Image, 0, len(resp.Images))
+	for _, img := range resp.Images {
+		images = append(images, &pb.Image{
+			Id:       img.Name,
+			RepoTags: []string{img.Name},
+			Size_:    uint64(img.Size),
+		})
 	}
 
 	return &pb.ListImagesResponse{Images: images}, nil
 }
 
 func (s *VyomaCriServer) ImageStatus(ctx context.Context, req *pb.ImageStatusRequest) (*pb.ImageStatusResponse, error) {
-	imageRef := req.GetImage().GetImage()
+	image := req.GetImage().GetImage()
 
-	s.mu.RLock()
-	img, ok := s.imageStore[imageRef]
-	s.mu.RUnlock()
-
-	if !ok {
+	data, err := s.httpRequest(ctx, "GET", "/images/"+image, nil)
+	if err != nil {
 		return &pb.ImageStatusResponse{}, nil
+	}
+
+	var img struct {
+		Name  string `json:"name"`
+		Size  int64  `json:"size"`
+	}
+	if err := json.Unmarshal(data, &img); err != nil {
+		return nil, errorf(codes.Internal, "decode response: %v", err)
 	}
 
 	return &pb.ImageStatusResponse{
 		Image: &pb.Image{
-			Id:          img.ID,
-			RepoTags:    img.RepoTags,
-			Size_:       img.Size,
-			CreatedAt:   img.Created,
+			Id:       img.Name,
+			RepoTags: []string{img.Name},
+			Size_:    uint64(img.Size),
 		},
 	}, nil
 }
 
 func (s *VyomaCriServer) RemoveImage(ctx context.Context, req *pb.RemoveImageRequest) (*pb.RemoveImageResponse, error) {
-	imageRef := req.GetImage().GetImage()
+	image := req.GetImage().GetImage()
+	s.logger.Printf("RemoveImage: %s", image)
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	delete(s.imageStore, imageRef)
+	_, err := s.httpRequest(ctx, "DELETE", "/images/"+image, nil)
+	if err != nil {
+		s.logError(ctx, "RemoveImage", err)
+	}
 
 	return &pb.RemoveImageResponse{}, nil
 }
 
 func (s *VyomaCriServer) ImageFsInfo(ctx context.Context, req *pb.ImageFsInfoRequest) (*pb.ImageFsInfoResponse, error) {
-	imageFilesystems := []*pb.FilesystemUsage{
-		{
-			Timestamp: time.Now().Unix(),
-			FsId: &pb.FilesystemIdentifier{
-				Mountpoint: "/var/lib/vyoma/images",
+	return &pb.ImageFsInfoResponse{
+		ImageFilesystems: []*pb.FilesystemUsage{
+			{
+				Timestamp:  time.Now().Unix(),
+				FsId:       &pb.FilesystemIdentifier{Mountpoint: "/var/lib/vyoma/images"},
+				UsedBytes:  &pb.UInt64Value{Value: 0},
+				InodesUsed: &pb.UInt64Value{Value: 0},
 			},
-			UsedBytes:  &pb.UInt64Value{Value: 0},
-			InodesUsed: &pb.UInt64Value{Value: 0},
 		},
-	}
-
-	return &pb.ImageFsInfoResponse{ImageFilesystems: imageFilesystems}, nil
+	}, nil
 }
