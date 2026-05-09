@@ -94,17 +94,3 @@ pub struct PolicyResult {
     pub passed: bool,
     pub attestation_pending: bool,
 }
-
-pub struct VmService<P = ()> {
-    state: crate::state::AppState,
-    _phantom: std::marker::PhantomData<P>,
-}
-
-impl VmService {
-    pub fn new(state: crate::state::AppState) -> Self {
-        Self {
-            state,
-            _phantom: std::marker::PhantomData,
-        }
-    }
-}

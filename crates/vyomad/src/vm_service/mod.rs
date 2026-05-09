@@ -8,138 +8,128 @@ mod state;
 pub mod types;
 pub mod storage;
 
+use std::sync::Arc;
 use anyhow::{Context, Result};
 use tracing::{error, info};
-use std::sync::Arc;
 
 use crate::state::{AppState, VmInstance, wal::WalEntry};
-use types::*;
+use crate::vm_service::types::{VmRunRequest, VmRunResponse, PreparedStorage, VmNetworkConfig, ChConfig};
 
-pub struct VmService {
-    state: AppState,
-}
+pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRunResponse> {
+    info!("VmService: Starting VM for image {}", request.image);
 
-impl VmService {
-    pub fn new(state: AppState) -> Self {
-        Self { state }
+    let home = dirs::home_dir().context("No home dir")?;
+    let ignite_root = home.join(".ignite");
+    let images_root = ignite_root.join("images");
+    let vms_root = ignite_root.join("vms");
+
+    std::fs::create_dir_all(&images_root)?;
+    std::fs::create_dir_all(&vms_root)?;
+
+    let vm_uuid = uuid::Uuid::new_v4();
+    let vm_id = vm_uuid.to_string();
+    let cid = (vm_uuid.as_fields().0 % 1000000) + 3;
+    let vm_dir = vms_root.join(&vm_id);
+    std::fs::create_dir_all(&vm_dir).context("Failed to create VM dir")?;
+
+    let _ = crate::api::handlers::git_init(&vm_dir);
+
+    let prepared_image = image::prepare_image(&request.image).await?;
+
+    let storage = storage::prepare_storage(
+        &state,
+        &prepared_image.path,
+        &vm_dir,
+        &vm_id,
+    ).await?;
+
+    let network_config = network::setup_network(
+        &state,
+        &vm_id,
+        &request.networks,
+    ).await?;
+
+    let _agent_config = agent::prepare_agent(
+        &storage.dm_device_path,
+        &vm_dir,
+        &prepared_image.config,
+    ).await?;
+
+    let ch_config = config::build_ch_config(
+        &state,
+        &vm_id,
+        &cid,
+        &vm_dir,
+        &storage.dm_device_path,
+        &network_config,
+    );
+
+    let (vmm, proxy_tasks, slirp_mgr, fs_managers) = boot::start_vm(
+        &ch_config,
+        &network_config,
+        &request,
+        &state,
+    ).await?;
+
+    policy::check_policy(
+        &state,
+        &vm_id,
+        &vm_dir,
+    ).await;
+
+    let instance = VmInstance {
+        vmm,
+        id: vm_id.clone(),
+        ch_socket_path: ch_config.socket_path.clone(),
+        tap_name: if state.rootless {
+            String::new()
+        } else {
+            network_config.primary_tap.clone()
+        },
+        dm_name: storage.dm_name.clone(),
+        loop_devices: storage.loop_devices.clone(),
+        cow_file_path: storage.cow_file_path.clone(),
+        ip_address: network_config.ip_address.clone(),
+        proxy_tasks,
+        fs_managers,
+        slirp: slirp_mgr,
+        cgroup_path: setup_cgroups(&state, &vm_id, request.vcpu, request.mem_size_mib)?,
+        netns_path: network_config.netns_path.clone(),
+        config_ports: request.ports.clone(),
+        config_volumes: request.volumes.clone(),
+        hostname: request.hostname.clone(),
+        labels: request.labels.clone(),
+        base_image_path: prepared_image.path.to_string_lossy().to_string(),
+        vcpu: request.vcpu,
+        mem_size_mib: request.mem_size_mib,
+        networks: request.networks.clone(),
+    };
+
+    instance.save_state().context("Failed to save state")?;
+
+    {
+        let mut vms = state.vms.lock().unwrap();
+        vms.insert(vm_id.clone(), Arc::new(tokio::sync::Mutex::new(instance)));
     }
 
-    pub async fn run_vm(&self, request: VmRunRequest) -> Result<VmRunResponse> {
-        info!("VmService: Starting VM for image {}", request.image);
-
-        let home = dirs::home_dir().context("No home dir")?;
-        let ignite_root = home.join(".ignite");
-        let images_root = ignite_root.join("images");
-        let vms_root = ignite_root.join("vms");
-
-        std::fs::create_dir_all(&images_root)?;
-        std::fs::create_dir_all(&vms_root)?;
-
-        let vm_uuid = uuid::Uuid::new_v4();
-        let vm_id = vm_uuid.to_string();
-        let cid = (vm_uuid.as_fields().0 % 1000000) + 3;
-        let vm_dir = vms_root.join(&vm_id);
-        std::fs::create_dir_all(&vm_dir).context("Failed to create VM dir")?;
-
-        crate::api::handlers::git_init(&vm_dir);
-
-        let prepared_image = image::prepare_image(&request.image).await?;
-
-        let storage = storage::prepare_storage(
-            &self.state,
-            &prepared_image.path,
-            &vm_dir,
-            &vm_id,
-        ).await?;
-
-        let network_config = network::setup_network(
-            &self.state,
-            &vm_id,
-            &request.networks,
-        ).await?;
-
-        let agent_config = agent::prepare_agent(
-            &storage.dm_device_path,
-            &vm_dir,
-            &prepared_image.config,
-        ).await?;
-
-        let ch_config = config::build_ch_config(
-            &self.state,
-            &vm_id,
-            &cid,
-            &vm_dir,
-            &storage.dm_device_path,
-            &network_config,
-        );
-
-        let (vmm, proxy_tasks, slirp_mgr, fs_managers) = boot::start_vm(
-            &ch_config,
-            &network_config,
-            &request,
-            &self.state,
-        ).await?;
-
-        policy::check_policy(
-            &self.state,
-            &vm_id,
-            &vm_dir,
-        ).await;
-
-        let instance = VmInstance {
-            vmm,
-            id: vm_id.clone(),
-            ch_socket_path: ch_config.socket_path.clone(),
-            tap_name: if self.state.rootless {
-                String::new()
-            } else {
-                network_config.primary_tap.clone()
-            },
-            dm_name: storage.dm_name.clone(),
-            loop_devices: storage.loop_devices.clone(),
-            cow_file_path: storage.cow_file_path.clone(),
-            ip_address: network_config.ip_address.clone(),
-            proxy_tasks,
-            fs_managers,
-            slirp: slirp_mgr,
-            cgroup_path: setup_cgroups(&self.state, &vm_id, request.vcpu, request.mem_size_mib)?,
-            netns_path: network_config.netns_path.clone(),
-            config_ports: request.ports.clone(),
-            config_volumes: request.volumes.clone(),
-            hostname: request.hostname.clone(),
-            labels: request.labels.clone(),
-            base_image_path: prepared_image.path.to_string_lossy().to_string(),
-            vcpu: request.vcpu,
-            mem_size_mib: request.mem_size_mib,
-            networks: request.networks.clone(),
-        };
-
-        instance.save_state().context("Failed to save state")?;
-
-        {
-            let mut vms = self.state.vms.lock().unwrap();
-            vms.insert(vm_id.clone(), Arc::new(tokio::sync::Mutex::new(instance)));
-        }
-
-        if let Err(e) = self.state.wal.append(&WalEntry::vm_create(vm_id.clone())) {
-            error!("Failed to write WAL entry: {}", e);
-        }
-        if let Err(e) = self.state.wal.append(&WalEntry::vm_start(vm_id.clone())) {
-            error!("Failed to write WAL entry: {}", e);
-        }
-
-        let _ = self.state.events_tx.send(serde_json::json!({
-            "type": "vm_start",
-            "id": vm_id.clone(),
-            "name": request.labels.get("vyoma.service").unwrap_or(&vm_id)
-        }).to_string());
-
-        Ok(VmRunResponse {
-            vm_id,
-            status: "Running".to_string(),
-            ip_address: network_config.ip_address,
-        })
+    if let Err(e) = state.wal.append(&WalEntry::vm_create(vm_id.clone())) {
+        error!("Failed to write WAL entry: {}", e);
     }
+    if let Err(e) = state.wal.append(&WalEntry::vm_start(vm_id.clone())) {
+        error!("Failed to write WAL entry: {}", e);
+    }
+
+    let _ = state.events_tx.send(serde_json::json!({
+        "type": "vm_start",
+        "id": vm_id.clone(),
+        "name": request.labels.get("vyoma.service").unwrap_or(&vm_id)
+    }).to_string());
+
+    Ok(VmRunResponse {
+        vm_id,
+        status: "Running".to_string(),
+        ip_address: network_config.ip_address,
+    })
 }
 
 fn setup_cgroups(

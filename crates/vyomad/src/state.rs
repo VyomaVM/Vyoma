@@ -31,6 +31,24 @@ pub struct AppState {
     pub policy_manager: Arc<StdMutex<PolicyManager>>,
 }
 
+impl AppState {
+    pub fn with_vm_service(self: Arc<Self>) -> AppState {
+        AppState {
+            vms: self.vms.clone(),
+            cgroups: self.cgroups.clone(),
+            cni_manager: self.cni_manager.clone(),
+            cluster_manager: self.cluster_manager.clone(),
+            rootless: self.rootless,
+            events_tx: self.events_tx.clone(),
+            wal: self.wal.clone(),
+            data_dir: self.data_dir.clone(),
+            raft: self.raft.clone(),
+            timemachine: self.timemachine.clone(),
+            policy_manager: self.policy_manager.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct VmInstance {
     pub vmm: VmmManager,

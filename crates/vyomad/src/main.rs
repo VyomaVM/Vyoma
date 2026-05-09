@@ -172,7 +172,7 @@ async fn main() {
         cgroups,
         cni_manager,
         cluster_manager: Arc::new(cluster::ClusterManager::new()),
-        rootless: false, // Enforced false
+        rootless: false,
         events_tx,
         wal,
         data_dir: args.data_dir.clone(),
