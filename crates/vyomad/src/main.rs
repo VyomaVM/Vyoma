@@ -14,6 +14,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 
 use vyoma_core::cgroups::CgroupManager;
+use vyoma_core::policy::PolicyManager;
 
 use clap::Parser;
 
@@ -176,6 +177,7 @@ async fn main() {
         data_dir: args.data_dir.clone(),
         raft,
         timemachine,
+        policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
     };
 
     api::handlers::initialize_state(&state).await;

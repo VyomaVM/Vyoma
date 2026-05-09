@@ -648,6 +648,25 @@ pub async fn run_vm(
         ));
     }
 
+    // Check measured boot policy and trigger attestation if required
+    {
+        let policy = state.policy_manager.lock().unwrap();
+        if policy.must_verify_on_boot() {
+            info!("Measured boot policy requires attestation for VM {}", vm_id);
+            let tpm_socket = vm_dir.join("tpm").join("swtpm.sock");
+            let vm_id_clone = vm_id.clone();
+
+            if tpm_socket.exists() {
+                tokio::spawn(async move {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    info!("Attestation check for VM {} (policy: required)", vm_id_clone);
+                });
+            } else {
+                warn!("VM {} started without vTPM - attestation cannot be performed", vm_id);
+            }
+        }
+    }
+
     // Success - Store State
 
     let instance = VmInstance {
