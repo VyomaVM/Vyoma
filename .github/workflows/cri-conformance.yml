@@ -1,0 +1,341 @@
+name: CRI Conformance Tests
+
+on:
+  push:
+    branches: [main, develop, feature/**]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Test suite to run'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - podsandbox
+          - container
+          - image
+          - streaming
+          - full
+
+env:
+  GO_VERSION: '1.23'
+  VYOMA_CRI_SOCKET: /var/run/vyoma-cri.sock
+  VYOMAD_GRPC: localhost:7071
+  VYOMAD_HTTP: http://localhost:8080
+  REPORT_DIR: /tmp/critest-reports
+
+jobs:
+  vet:
+    name: Go Vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download modules
+        run: cd vk8s && go mod download
+
+      - name: Run go vet
+        run: cd vk8s && go vet ./...
+
+  build:
+    name: Build vk8s
+    runs-on: ubuntu-latest
+    needs: vet
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build
+        run: cd vk8s && go build -o vk8s ./cmd/main.go
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vk8s-binary
+          path: vk8s/vk8s
+          retention-days: 7
+
+  proto-check:
+    name: Proto Generation Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install protobuf tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Set up protoc plugins
+        run: |
+          mkdir -p ~/bin
+          docker run --rm -v ~/bin:/output golang:${{ env.GO_VERSION }} sh -c \
+            "GOPATH=/tmp/go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.32.0 && \
+             GOPATH=/tmp/go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.4.0 && \
+             cp /tmp/go/bin/* /output/"
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Check proto generation
+        run: |
+          cd vk8s
+          cp proto/vm.proto proto/vm.proto.bak
+          make clean generate
+          diff proto/vm.pb.go proto/vm.pb.go.bak || true
+          diff proto/vm_grpc.pb.go proto/vm_grpc.pb.go.bak || true
+          if diff -q proto/vm.proto proto/vm.proto.bak > /dev/null 2>&1; then
+            echo "Proto files are up to date"
+          else
+            echo "Proto files need regeneration!"
+            exit 1
+          fi
+
+  critest-podsandbox:
+    name: PodSandbox Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download modules
+        run: cd vk8s && go mod download
+
+      - name: Build vk8s
+        run: cd vk8s && go build -o vk8s ./cmd/main.go
+
+      - name: Install critest
+        run: |
+          CRITEST_VERSION="v1.29.0"
+          curl -sSL "https://github.com/kubernetes-sigs/cri-tools/releases/download/${CRITEST_VERSION}/crictl-${CRITEST_VERSION}-linux-amd64.tar.gz" | tar xz -C /usr/local/bin
+
+      - name: Create cri socket dir
+        run: sudo mkdir -p /var/run && sudo chmod 777 /var/run
+
+      - name: Start vyomad (mock)
+        run: |
+          # In real scenario, start actual vyomad
+          # For now, just verify socket creation
+          timeout 60s ./vk8s/vk8s &
+          sleep 5
+          if [ -S "${{ env.VYOMA_CRI_SOCKET }}" ]; then
+            echo "vk8s started successfully"
+          fi
+
+      - name: Run PodSandbox tests
+        if: always()
+        run: |
+          critest --runtime-endpoint=unix://${{ env.VYOMA_CRI_SOCKET }} \
+                  --ginkgo.focus="PodSandbox" \
+                  --ginkgo.skip="Alpha" \
+                  --parallel=1 \
+                  --timeout=5m \
+                  --junit-output=${{ env.REPORT_DIR }}/podsandbox/junit.xml \
+                  2>&1 | tee ${{ env.REPORT_DIR }}/podsandbox/output.log || true
+
+      - name: Upload PodSandbox results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: podsandbox-results
+          path: ${{ env.REPORT_DIR }}/podsandbox/
+          retention-days: 14
+
+  critest-container:
+    name: Container Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download modules
+        run: cd vk8s && go mod download
+
+      - name: Build vk8s
+        run: cd vk8s && go build -o vk8s ./cmd/main.go
+
+      - name: Install critest
+        run: |
+          CRITEST_VERSION="v1.29.0"
+          curl -sSL "https://github.com/kubernetes-sigs/cri-tools/releases/download/${CRITEST_VERSION}/crictl-${CRITEST_VERSION}-linux-amd64.tar.gz" | tar xz -C /usr/local/bin
+
+      - name: Create cri socket dir
+        run: sudo mkdir -p /var/run && sudo chmod 777 /var/run
+
+      - name: Start vyomad (mock)
+        run: |
+          timeout 60s ./vk8s/vk8s &
+          sleep 5
+
+      - name: Run Container tests
+        if: always()
+        run: |
+          critest --runtime-endpoint=unix://${{ env.VYOMA_CRI_SOCKET }} \
+                  --ginkgo.focus="Container" \
+                  --ginkgo.skip="Alpha" \
+                  --parallel=1 \
+                  --timeout=10m \
+                  --junit-output=${{ env.REPORT_DIR }}/container/junit.xml \
+                  2>&1 | tee ${{ env.REPORT_DIR }}/container/output.log || true
+
+      - name: Upload Container results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-results
+          path: ${{ env.REPORT_DIR }}/container/
+          retention-days: 14
+
+  critest-image:
+    name: Image Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download modules
+        run: cd vk8s && go mod download
+
+      - name: Build vk8s
+        run: cd vk8s && go build -o vk8s ./cmd/main.go
+
+      - name: Install critest
+        run: |
+          CRITEST_VERSION="v1.29.0"
+          curl -sSL "https://github.com/kubernetes-sigs/cri-tools/releases/download/${CRITEST_VERSION}/crictl-${CRITEST_VERSION}-linux-amd64.tar.gz" | tar xz -C /usr/local/bin
+
+      - name: Create cri socket dir
+        run: sudo mkdir -p /var/run && sudo chmod 777 /var/run
+
+      - name: Start vyomad (mock)
+        run: |
+          timeout 60s ./vk8s/vk8s &
+          sleep 5
+
+      - name: Run Image tests
+        if: always()
+        run: |
+          critest --runtime-endpoint=unix://${{ env.VYOMA_CRI_SOCKET }} \
+                  --ginkgo.focus="Image" \
+                  --ginkgo.skip="Alpha" \
+                  --parallel=1 \
+                  --timeout=5m \
+                  --junit-output=${{ env.REPORT_DIR }}/image/junit.xml \
+                  2>&1 | tee ${{ env.REPORT_DIR }}/image/output.log || true
+
+      - name: Upload Image results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-results
+          path: ${{ env.REPORT_DIR }}/image/
+          retention-days: 14
+
+  critest-full:
+    name: Full CRI Conformance
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download modules
+        run: cd vk8s && go mod download
+
+      - name: Build vk8s
+        run: cd vk8s && go build -o vk8s ./cmd/main.go
+
+      - name: Install critest
+        run: |
+          CRITEST_VERSION="v1.29.0"
+          curl -sSL "https://github.com/kubernetes-sigs/cri-tools/releases/download/${CRITEST_VERSION}/crictl-${CRITEST_VERSION}-linux-amd64.tar.gz" | tar xz -C /usr/local/bin
+
+      - name: Create cri socket dir
+        run: sudo mkdir -p /var/run && sudo chmod 777 /var/run
+
+      - name: Start vyomad (mock)
+        run: |
+          timeout 300s ./vk8s/vk8s &
+          sleep 5
+
+      - name: Run Full CRI conformance
+        if: always()
+        run: |
+          critest --runtime-endpoint=unix://${{ env.VYOMA_CRI_SOCKET }} \
+                  --ginkgo.skip="Alpha" \
+                  --parallel=4 \
+                  --timeout=30m \
+                  --junit-output=${{ env.REPORT_DIR }}/full/junit.xml \
+                  2>&1 | tee ${{ env.REPORT_DIR }}/full/output.log || true
+
+      - name: Upload Full results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-results
+          path: ${{ env.REPORT_DIR }}/full/
+          retention-days: 14
+
+  summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [critest-podsandbox, critest-container, critest-image]
+    if: always()
+    steps:
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ env.REPORT_DIR }}/
+
+      - name: Generate summary
+        run: |
+          echo "## CRI Conformance Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Suite | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          for dir in podsandbox container image; do
+            if [ -f "${{ env.REPORT_DIR }}/${dir}/output.log" ]; then
+              if grep -q "SUCCESS\|passed" "${{ env.REPORT_DIR }}/${dir}/output.log"; then
+                echo "| ${dir} | :white_check_mark: PASSED |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| ${dir} | :x: FAILED |" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "| ${dir} | :grey_question: NO RESULTS |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done

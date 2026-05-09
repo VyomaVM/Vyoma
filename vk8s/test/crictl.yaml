@@ -1,0 +1,23 @@
+runtime-endpoint: unix:///var/run/vyoma-cri.sock
+image-endpoint: unix:///var/run/vyoma-cri.sock
+timeout: 120
+debug: true
+
+# CRI v1 API tests
+cri-api-version: v1
+
+# Test configuration
+failfast: false
+parallel: 1
+
+# Focus on essential tests first
+focus:
+  - "PodSandbox"
+  - "Container"
+  - "Image"
+
+# Skip problematic tests
+skip:
+  - "Alpha"
+  - "RuntimeConfig"
+  - "Log"
