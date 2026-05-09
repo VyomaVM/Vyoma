@@ -12,6 +12,7 @@ pub mod vtpm;
 pub mod attest;
 pub mod firmware;
 pub mod policy;
+pub mod unified_attest;
 
 pub mod cgroups;
 

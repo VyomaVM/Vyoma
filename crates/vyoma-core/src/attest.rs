@@ -4,6 +4,9 @@ use std::collections::HashMap;
 use std::path::Path;
 use tracing::{info, warn};
 
+#[allow(unused_imports)]
+use hex;
+
 use crate::vtpm::PcrPolicy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12,6 +15,58 @@ pub struct TpmQuote {
     pub signature: Vec<u8>,
     pub pcr_values: HashMap<u32, String>,
     pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnpAttestationReport {
+    pub version: u32,
+    pub guest_svn: u32,
+    pub policy: SnpPolicy,
+    pub family_id: Vec<u8>,
+    pub image_id: Vec<u8>,
+    pub vmpl: u32,
+    pub authority_chain: Vec<Vec<u8>>,
+    pub host_data: Vec<u8>,
+    pub id_key_digest: Vec<u8>,
+    pub author_key_digest: Vec<u8>,
+    pub report_data: Vec<u8>,
+    pub measurement: Vec<u8>,
+    pub host_svn: u32,
+    pub report_id: Vec<u8>,
+    pub report_id_ma: Vec<u8>,
+    pub reported_tcb: SnpReportedTcb,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnpPolicy {
+    pub flags: u64,
+    pub symmetric: u64,
+    pub tcb: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnpReportedTcb {
+    pub boot_loader: u64,
+    pub tee: u64,
+    pub snp: u64,
+    pub microcode: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TdxAttestationReport {
+    pub version: u32,
+    pub round: u64,
+    pub mrtd: Vec<u8>,
+    pub mrconfigid: Vec<u8>,
+    pub mrowner: Vec<u8>,
+    pub mrownerconfig: Vec<u8>,
+    pub rtmr0: Vec<u8>,
+    pub rtmr1: Vec<u8>,
+    pub rtmr2: Vec<u8>,
+    pub rtmr3: Vec<u8>,
+    pub report_data: Vec<u8>,
+    pub signature: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +150,62 @@ impl AttestationVerifier {
         }
 
         Ok(verified_response)
+    }
+
+    pub fn verify_snp_report(&self, report: &SnpAttestationReport, expected_measurement: Option<&str>) -> Result<()> {
+        info!("Verifying SEV-SNP Attestation Report version {}", report.version);
+
+        if report.version != 1 {
+            return Err(anyhow!("Unsupported SNP report version: {}", report.version));
+        }
+
+        if report.signature.is_empty() {
+            return Err(anyhow!("SNP report missing signature"));
+        }
+
+        if report.authority_chain.is_empty() {
+            return Err(anyhow!("SNP report missing authority chain"));
+        }
+
+        if let Some(expected) = expected_measurement {
+            let actual_measurement = hex::encode(&report.measurement);
+            if actual_measurement != expected {
+                return Err(anyhow!(
+                    "SNP measurement mismatch: expected {}, got {}",
+                    expected, actual_measurement
+                ));
+            }
+            info!("SNP measurement verified successfully");
+        }
+
+        info!("SEV-SNP attestation report verified");
+        Ok(())
+    }
+
+    pub fn verify_tdx_report(&self, report: &TdxAttestationReport, expected_mrtd: Option<&str>) -> Result<()> {
+        info!("Verifying TDX Attestation Report version {}", report.version);
+
+        if report.version != 1 {
+            return Err(anyhow!("Unsupported TDX report version: {}", report.version));
+        }
+
+        if report.signature.is_empty() {
+            return Err(anyhow!("TDX report missing signature"));
+        }
+
+        if let Some(expected) = expected_mrtd {
+            let actual_mrtd = hex::encode(&report.mrtd);
+            if actual_mrtd != expected {
+                return Err(anyhow!(
+                    "TDX MRTD mismatch: expected {}, got {}",
+                    expected, actual_mrtd
+                ));
+            }
+            info!("TDX MRTD verified successfully");
+        }
+
+        info!("TDX attestation report verified");
+        Ok(())
     }
 }
 
