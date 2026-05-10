@@ -12,6 +12,7 @@ members = [
     "crates/vyoma-sdk",
     "crates/vyoma-agent-vm", "crates/vyoma-vk8s",
     "tests/compat",
+    "tests/integration",
 ]
 resolver = "2"
 
@@ -30,6 +31,7 @@ tracing-subscriber = "0.3"
 tempfile = "3.10"
 tar = "0.4"
 flate2 = "1.0"
+cpio = "0.2"
 futures = "0.3"
 # We will likely need these for the Phase 2/3:
 # devicemapper = "..." 
