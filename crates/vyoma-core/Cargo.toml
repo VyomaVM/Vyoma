@@ -14,6 +14,7 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 futures.workspace = true
 flate2.workspace = true
 tar.workspace = true
+cpio.workspace = true
 tempfile.workspace = true
 libc = "0.2.178"
 base64 = "0.22.1"
