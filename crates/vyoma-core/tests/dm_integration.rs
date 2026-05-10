@@ -27,7 +27,7 @@ fn test_dm_snapshot_lifecycle() -> Result<()> {
 
     // 2. Cow
     // For DM snapshot, cow device must be block device too.
-    StorageManager::create_cow_file(&cow_path, 100)?;
+    StorageManager::create_empty_file(&cow_path, 100)?;
     let cow_loop = StorageManager::setup_loop_device(&cow_path)?;
     println!("Cow attached to {}", cow_loop);
 
