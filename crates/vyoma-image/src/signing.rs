@@ -1,9 +1,10 @@
 use crate::vmif::VmifManifest;
-use ed25519_dalek::{Signature, SignatureError, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::path::Path;
 use thiserror::Error;
 use tracing::info;
 
@@ -98,7 +99,7 @@ impl SigningKeyPair {
         Ok(signature.to_bytes().to_vec())
     }
 
-    pub fn sign_file(&self, path: &PathBuf) -> Result<Vec<u8>, SigningError> {
+    pub fn sign_file(&self, path: &Path) -> Result<Vec<u8>, SigningError> {
         let data = std::fs::read(path)?;
         self.sign_binary(&data)
     }
@@ -112,7 +113,7 @@ impl SigningKeyPair {
         Ok(())
     }
 
-    pub fn verify_file(&self, path: &PathBuf, signature: &[u8]) -> Result<(), SigningError> {
+    pub fn verify_file(&self, path: &Path, signature: &[u8]) -> Result<(), SigningError> {
         let data = std::fs::read(path)?;
         self.verify_binary(&data, signature)
     }
@@ -255,7 +256,7 @@ impl SignedManifest {
         Ok(())
     }
 
-    pub fn load_from_file(path: &PathBuf) -> Result<Self, SigningError> {
+    pub fn load_from_file(path: &Path) -> Result<Self, SigningError> {
         let data = std::fs::read(path)?;
         Self::from_bytes(&data)
     }

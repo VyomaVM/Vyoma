@@ -1,4 +1,4 @@
-use crate::vmif::{OciImageConfig, VmifManifest, VmifImage};
+use crate::vmif::{OciImageConfig, VmifManifest};
 use sha2::Digest;
 use std::path::PathBuf;
 use thiserror::Error;
