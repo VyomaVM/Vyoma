@@ -1,9 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-use super::types::ChConfig;
-use super::types::VmNetworkConfig;
-use super::types::VmRunRequest;
+use super::types::{ChConfig, VmNetworkConfig, VmRunRequest, AgentConfig};
 use crate::state::AppState;
 
 pub fn build_ch_config(
@@ -13,6 +11,7 @@ pub fn build_ch_config(
     vm_dir: &PathBuf,
     rootfs_path: &str,
     network_config: &VmNetworkConfig,
+    agent_config: &AgentConfig,
 ) -> ChConfig {
     let socket_path = vm_dir.join("ch.sock").to_string_lossy().to_string();
     let kernel_path = format!("{}/bin/vmlinux", state.data_dir);
@@ -27,6 +26,9 @@ pub fn build_ch_config(
         network_config.gateway
     );
 
+    let initramfs_path = agent_config.initramfs_path.as_ref()
+        .map(|p| p.to_string_lossy().to_string());
+
     ChConfig {
         kernel_path,
         ch_path,
@@ -35,6 +37,7 @@ pub fn build_ch_config(
         rootfs_path: rootfs_path.to_string(),
         vsock_cid: *cid,
         vsock_path,
+        initramfs_path,
     }
 }
 
@@ -44,6 +47,11 @@ pub fn validate_ch_config(config: &ChConfig) -> Result<()> {
     }
     if !std::path::Path::new(&config.ch_path).exists() {
         anyhow::bail!("Cloud Hypervisor binary not found at {}", config.ch_path);
+    }
+    if let Some(ref initramfs) = config.initramfs_path {
+        if !std::path::Path::new(initramfs).exists() {
+            anyhow::bail!("Initramfs not found at {}", initramfs);
+        }
     }
     Ok(())
 }
