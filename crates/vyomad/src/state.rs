@@ -32,6 +32,26 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn new_test() -> Self {
+        let (events_tx, _) = broadcast::channel(100);
+        Self {
+            vms: Arc::new(StdMutex::new(HashMap::new())),
+            cgroups: Arc::new(CgroupManager::new()),
+            cni_manager: Arc::new(vyoma_core::cni::CniManager::new(
+                std::path::PathBuf::from("/tmp/test-cni-plugins"),
+                std::path::PathBuf::from("/tmp/test-cni-config"),
+            )),
+            cluster_manager: Arc::new(cluster::ClusterManager::new()),
+            rootless: true,
+            events_tx,
+            wal: Arc::new(wal::Wal::new_test()),
+            data_dir: "/tmp/test".to_string(),
+            raft: None,
+            timemachine: Arc::new(tokio::sync::RwLock::new(crate::timemachine::TimeMachine::new_test())),
+            policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
+        }
+    }
+
     pub fn with_vm_service(self: Arc<Self>) -> AppState {
         AppState {
             vms: self.vms.clone(),
