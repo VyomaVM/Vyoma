@@ -22,6 +22,8 @@ pub struct AppState {
     pub vms: Arc<StdMutex<HashMap<String, Arc<TokioMutex<VmInstance>>>>>,
     pub cgroups: Arc<CgroupManager>,
     pub cni_manager: Arc<vyoma_core::cni::CniManager>,
+    #[allow(deprecated)]
+    #[deprecated(since = "0.2.0", note = "Use swarm_raft instead")]
     pub cluster_manager: Arc<cluster::ClusterManager>,
     pub rootless: bool,
     pub events_tx: broadcast::Sender<String>,
