@@ -141,6 +141,9 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         &prepared_image.config,
     ).await?;
 
+    let kernel_path = image::resolve_kernel_from_manifest(&prepared_image.manifest, &state.data_dir)
+        .unwrap_or_else(|| image::get_default_kernel_path(&state.data_dir));
+
     let ch_config = config::build_ch_config(
         &state,
         &vm_id,
@@ -149,6 +152,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         &storage.dm_device_path,
         &network_config,
         &agent_config,
+        &kernel_path,
     );
 
     let (vmm, proxy_tasks, slirp_mgr, fs_managers) = match boot::start_vm(

@@ -177,6 +177,50 @@ pub async fn prepare_image(image_name: &str) -> Result<PreparedImage> {
     prepare_image_with_provider(image_name, &OciImageProvider).await
 }
 
+pub fn resolve_kernel_from_manifest(manifest: &Option<vyoma_image::VmifManifest>, data_dir: &str) -> Option<PathBuf> {
+    let kernel_ref = manifest.as_ref()?.kernel.as_ref()?;
+    
+    if kernel_ref.starts_with("sha256:") {
+        let hash = kernel_ref.trim_start_matches("sha256:");
+        resolve_kernel_by_hash(hash, data_dir)
+    } else if kernel_ref.starts_with("kernels/") {
+        resolve_kernel_by_tag(kernel_ref, data_dir)
+    } else {
+        resolve_kernel_by_tag(kernel_ref, data_dir)
+    }
+}
+
+fn resolve_kernel_by_hash(hash: &str, data_dir: &str) -> Option<PathBuf> {
+    let kernel_store = std::path::Path::new(data_dir).join("kernels");
+    let kernel_path = kernel_store.join(hash);
+    if kernel_path.exists() {
+        Some(kernel_path)
+    } else {
+        warn!("Kernel with hash {} not found in kernel store", hash);
+        None
+    }
+}
+
+fn resolve_kernel_by_tag(tag: &str, data_dir: &str) -> Option<PathBuf> {
+    let kernel_store = std::path::Path::new(data_dir).join("kernels");
+    
+    if let Ok(entries) = std::fs::read_dir(&kernel_store) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if file_name == tag || file_name == format!("{}.vmlinuz", tag) {
+                return Some(entry.path());
+            }
+        }
+    }
+    
+    warn!("Kernel with tag {} not found in kernel store", tag);
+    None
+}
+
+pub fn get_default_kernel_path(data_dir: &str) -> PathBuf {
+    std::path::Path::new(data_dir).join("bin/vmlinux")
+}
+
 pub async fn prepare_image_with_provider<P: ImageProvider>(
     image_name: &str,
     provider: &P,
@@ -190,6 +234,7 @@ pub async fn prepare_image_with_provider<P: ImageProvider>(
         rootfs_sqfs_path: image_path,
         manifest,
         config,
+        kernel_path: None,
     })
 }
 

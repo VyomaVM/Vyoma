@@ -12,9 +12,9 @@ pub fn build_ch_config(
     rootfs_path: &str,
     network_config: &VmNetworkConfig,
     agent_config: &AgentConfig,
+    kernel_path: &PathBuf,
 ) -> ChConfig {
     let socket_path = vm_dir.join("ch.sock").to_string_lossy().to_string();
-    let kernel_path = format!("{}/bin/vmlinux", state.data_dir);
     let ch_path = format!("{}/bin/cloud-hypervisor", state.data_dir);
     let vsock_path = vm_dir.join("vsock.sock");
 
@@ -30,7 +30,7 @@ pub fn build_ch_config(
         .map(|p| p.to_string_lossy().to_string());
 
     ChConfig {
-        kernel_path,
+        kernel_path: kernel_path.to_string_lossy().to_string(),
         ch_path,
         socket_path,
         boot_args,
