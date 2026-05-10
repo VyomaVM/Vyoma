@@ -64,8 +64,7 @@ impl StorageManager {
         info!("Mounting {:?} to {:?}", image_path, mount_path);
         
         // 1. Mount (requires sudo)
-        let status = Command::new("sudo")
-            .arg("mount")
+        let status = Command::new("mount")
             .arg("-o")
             .arg("loop")
             .arg(image_path)
@@ -82,8 +81,7 @@ impl StorageManager {
         // source_dir/. ensures we copy contents, not the dir itself
         let src_pattern = format!("{}/.", source_dir.to_string_lossy());
         
-        let status = Command::new("sudo")
-            .arg("cp")
+        let status = Command::new("cp")
             .arg("-a")
             .arg(&src_pattern)
             .arg(mount_path)
@@ -91,14 +89,13 @@ impl StorageManager {
             
         if !status.success() {
              // Try to cleanup mount before returning error
-             let _ = Command::new("sudo").arg("umount").arg(mount_path).status();
+             let _ = Command::new("umount").arg(mount_path).status();
              return Err(anyhow!("Failed to copy files"));
         }
 
         // 3. Unmount
         info!("Unmounting...");
-        let status = Command::new("sudo")
-            .arg("umount")
+        let status = Command::new("umount")
             .arg(mount_path)
             .status()?;
 
@@ -186,8 +183,7 @@ impl StorageManager {
     pub fn setup_loop_device(path: &Path) -> Result<String> {
         info!("Setting up loop device for {:?}", path);
         // losetup --find --show <path>
-        let output = Command::new("sudo")
-            .arg("losetup")
+        let output = Command::new("losetup")
             .arg("--find")
             .arg("--show")
             .arg(path)
@@ -207,8 +203,7 @@ impl StorageManager {
     /// Requires sudo.
     pub fn detach_loop_device(device_path: &str) -> Result<()> {
         info!("Detaching loop device {}", device_path);
-        let status = Command::new("sudo")
-            .arg("losetup")
+        let status = Command::new("losetup")
             .arg("-d")
             .arg(device_path)
             .status()
@@ -240,8 +235,7 @@ impl StorageManager {
         let table = format!("0 {} snapshot {} {} N 8", size_sectors, base_dev, cow_dev);
         
         // Pipe the table to dmsetup create
-        let mut child = Command::new("sudo")
-            .arg("dmsetup")
+        let mut child = Command::new("dmsetup")
             .arg("create")
             .arg(name)
             .stdin(std::process::Stdio::piped())
@@ -269,10 +263,9 @@ impl StorageManager {
     pub fn remove_dm_device(name: &str) -> Result<()> {
         info!("Removing DM device '{}'", name);
         
-        let status = Command::new("sudo")
-            .arg("dmsetup")
+let status = Command::new("dmsetup")
             .arg("remove")
-            .arg("--retry") // Retry if busy handy for quick teardowns
+            .arg("--retry")
             .arg(name)
             .status()
             .map_err(|e| anyhow!("Failed to execute dmsetup remove: {}", e))?;
