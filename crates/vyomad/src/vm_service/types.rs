@@ -74,7 +74,6 @@ pub struct NetworkInfo {
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
     pub initramfs_path: Option<PathBuf>,
-    pub init_script_path: PathBuf,
     pub cmd: Vec<String>,
     pub workdir: String,
     pub envs: Vec<String>,
@@ -189,7 +188,6 @@ mod tests {
     fn test_agent_config_with_initramfs() {
         let config = AgentConfig {
             initramfs_path: Some(PathBuf::from("/tmp/initramfs.cpio")),
-            init_script_path: PathBuf::from("/tmp/vyoma-init.sh"),
             cmd: vec!["/bin/sh".to_string()],
             workdir: "/app".to_string(),
             envs: vec!["PATH=/usr/bin".to_string()],

@@ -9,7 +9,6 @@ mod tests {
     fn test_agent_config_with_initramfs() {
         let config = AgentConfig {
             initramfs_path: Some(PathBuf::from("/tmp/initramfs.cpio")),
-            init_script_path: PathBuf::from("/tmp/init.sh"),
             cmd: vec!["/bin/sh".to_string()],
             workdir: "/app".to_string(),
             envs: vec!["PATH=/usr/bin".to_string()],
@@ -74,6 +73,7 @@ mod tests {
             rootfs_path: "/dev/mapper/ign-123".to_string(),
             vsock_cid: 99,
             vsock_path: PathBuf::from("/tmp/vsock.sock"),
+            initramfs_path: Some("/tmp/initramfs.cpio.gz".to_string()),
         };
         
         assert!(config.boot_args.contains("init=/sbin/vyoma-init"));
