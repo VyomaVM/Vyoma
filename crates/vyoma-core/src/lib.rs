@@ -19,6 +19,7 @@ pub mod cgroups;
 pub mod rootless;
 pub mod slirp;
 pub mod cni;
+pub mod initramfs;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
