@@ -1,23 +1,24 @@
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 use async_trait::async_trait;
 use vyoma_core::layers::LayerManager;
 use vyoma_core::oci::OciManager;
-use vyoma_core::storage::StorageManager;
+use vyoma_image::{VmifConverter, VmifManifest, OciImageConfig as VyomaOciConfig, SquashfsCompression};
 
 use super::types::PreparedImage;
 
 pub async fn ensure_image_locally(image_name: &str) -> Result<PathBuf> {
     let home = dirs::home_dir().context("No home dir")?;
-    let images_root = home.join(".ignite").join("images");
+    let images_root = home.join(".vyoma").join("images");
     std::fs::create_dir_all(&images_root)?;
 
     let safe_image_name = image_name.replace('/', "_").replace(':', "_");
     let image_store_path = images_root.join(&safe_image_name);
-    let base_image_file = image_store_path.join("base.ext4");
+    let manifest_path = image_store_path.join("vyoma.toml");
+    let rootfs_sqfs_path = image_store_path.join("rootfs.sqfs");
 
-    if !base_image_file.exists() {
+    if !rootfs_sqfs_path.exists() {
         info!("Image {} not found locally. Pulling...", image_name);
         std::fs::create_dir_all(&image_store_path)?;
 
@@ -31,6 +32,7 @@ pub async fn ensure_image_locally(image_name: &str) -> Result<PathBuf> {
             .parse_layers(&manifest_json)
             .context("Parse layers failed")?;
 
+        let mut oci_config: Option<VyomaOciConfig> = None;
         if let Ok(config_digest) = oci.parse_config_digest(&manifest_json) {
             info!("Fetching OCI config blob: {}", config_digest);
             if let Ok(config) = oci.pull_config_blob(image_name, &config_digest).await {
@@ -42,6 +44,14 @@ pub async fn ensure_image_locally(image_name: &str) -> Result<PathBuf> {
                         info!("Saved OCI configuration to {:?}", config_path);
                     }
                 }
+                oci_config = Some(VyomaOciConfig {
+                    entrypoint: config.entrypoint,
+                    cmd: config.cmd,
+                    env: config.env,
+                    working_dir: config.working_dir,
+                    exposed_ports: config.exposed_ports,
+                    user: config.user,
+                });
             }
         }
 
@@ -55,24 +65,45 @@ pub async fn ensure_image_locally(image_name: &str) -> Result<PathBuf> {
                 .context("Unpack failed")?;
         }
 
-        let size_mb = 2048;
-        StorageManager::create_empty_file(&base_image_file, size_mb)
-            .context("Create empty file failed")?;
-        StorageManager::format_ext4(&base_image_file)
-            .context("Format ext4 failed")?;
-        StorageManager::populate_image(&base_image_file, temp_unpack_dir.path())
-            .context("Populate failed")?;
+        let converter = VmifConverter::new();
+        let config = oci_config.unwrap_or_else(|| VyomaOciConfig::default());
+        
+        let _vmif_image = converter.convert_directory_to_vmif(
+            temp_unpack_dir.path(),
+            &image_store_path,
+            image_name,
+            "amd64",
+            config,
+            None,
+            None,
+            SquashfsCompression::default(),
+        ).context("VMIF conversion failed")?;
+
+        info!("Image {} converted to VMIF successfully", image_name);
     } else {
-        info!("Image found locally at {:?}", base_image_file);
+        info!("VMIF image found locally at {:?}", rootfs_sqfs_path);
     }
 
-    Ok(base_image_file)
+    Ok(rootfs_sqfs_path)
+}
+
+pub async fn load_vmif_manifest(image_name: &str) -> Result<VmifManifest> {
+    let home = dirs::home_dir().context("No home dir")?;
+    let images_root = home.join(".vyoma").join("images");
+    
+    let safe_image_name = image_name.replace('/', "_").replace(':', "_");
+    let image_store_path = images_root.join(&safe_image_name);
+    let manifest_path = image_store_path.join("vyoma.toml");
+    
+    VmifConverter::load_manifest(&manifest_path)
+        .context("Failed to load VMIF manifest")
 }
 
 #[async_trait]
 pub trait ImageProvider: Send + Sync {
     async fn fetch_image(&self, image_name: &str) -> Result<PathBuf>;
     async fn get_config(&self, image_path: &PathBuf) -> Result<vyoma_core::oci::OciImageConfig>;
+    async fn get_vmif_manifest(&self, image_name: &str) -> Result<Option<vyoma_image::VmifManifest>>;
 }
 
 pub struct OciImageProvider;
@@ -86,6 +117,13 @@ impl ImageProvider for OciImageProvider {
     async fn get_config(&self, image_path: &PathBuf) -> Result<vyoma_core::oci::OciImageConfig> {
         extract_oci_config(image_path)
     }
+
+    async fn get_vmif_manifest(&self, image_name: &str) -> Result<Option<vyoma_image::VmifManifest>> {
+        match load_vmif_manifest(image_name).await {
+            Ok(m) => Ok(Some(m)),
+            Err(_) => Ok(None),
+        }
+    }
 }
 
 pub struct CachedImageProvider {
@@ -95,7 +133,7 @@ pub struct CachedImageProvider {
 impl CachedImageProvider {
     pub fn new() -> Result<Self> {
         let home = dirs::home_dir().context("No home dir")?;
-        let cache_dir = home.join(".ignite").join("images");
+        let cache_dir = home.join(".vyoma").join("images");
         std::fs::create_dir_all(&cache_dir)?;
         Ok(Self { cache_dir })
     }
@@ -103,9 +141,10 @@ impl CachedImageProvider {
     pub fn get_cached_path(&self, image_name: &str) -> Option<PathBuf> {
         let sanitized = image_name.replace(':', "_").replace('/', "_");
         let image_dir = self.cache_dir.join(&sanitized);
-        let ext4_path = image_dir.join("base.ext4");
-        if ext4_path.exists() {
-            Some(ext4_path)
+        let sqfs_path = image_dir.join("rootfs.sqfs");
+        let manifest_path = image_dir.join("vyoma.toml");
+        if sqfs_path.exists() && manifest_path.exists() {
+            Some(sqfs_path)
         } else {
             None
         }
@@ -116,7 +155,7 @@ impl CachedImageProvider {
 impl ImageProvider for CachedImageProvider {
     async fn fetch_image(&self, image_name: &str) -> Result<PathBuf> {
         if let Some(cached) = self.get_cached_path(image_name) {
-            info!("Using cached image for {}", image_name);
+            info!("Using cached VMIF image for {}", image_name);
             return Ok(cached);
         }
         ensure_image_locally(image_name).await
@@ -124,6 +163,13 @@ impl ImageProvider for CachedImageProvider {
 
     async fn get_config(&self, image_path: &PathBuf) -> Result<vyoma_core::oci::OciImageConfig> {
         extract_oci_config(image_path)
+    }
+
+    async fn get_vmif_manifest(&self, image_name: &str) -> Result<Option<vyoma_image::VmifManifest>> {
+        match load_vmif_manifest(image_name).await {
+            Ok(m) => Ok(Some(m)),
+            Err(_) => Ok(None),
+        }
     }
 }
 
@@ -135,11 +181,16 @@ pub async fn prepare_image_with_provider<P: ImageProvider>(
     image_name: &str,
     provider: &P,
 ) -> Result<PreparedImage> {
-    info!("Preparing image: {}", image_name);
+    info!("Preparing VMIF image: {}", image_name);
     let image_path = provider.fetch_image(image_name).await?;
     let config = provider.get_config(&image_path).await?;
+    let manifest = provider.get_vmif_manifest(image_name).await?;
 
-    Ok(PreparedImage { path: image_path, config })
+    Ok(PreparedImage {
+        rootfs_sqfs_path: image_path,
+        manifest,
+        config,
+    })
 }
 
 pub fn extract_oci_config(image_path: &std::path::Path) -> Result<vyoma_core::oci::OciImageConfig> {
