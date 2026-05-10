@@ -4699,6 +4699,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "vyoma-core",
+ "vyoma-image",
  "vyoma-net",
  "vyoma-proto",
  "vyoma-storage",
