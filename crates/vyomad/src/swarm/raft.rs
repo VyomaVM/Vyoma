@@ -93,6 +93,7 @@ pub struct SwarmRaft {
     is_initialized: bool,
     next_subnet_id: u8,
     last_applied_index: u64,
+    applied_commands: Vec<u64>,
     side_effect_callback: Option<Box<dyn Fn(&SwarmSideEffect) + Send + Sync>>,
 }
 
@@ -136,6 +137,7 @@ impl SwarmRaft {
             is_initialized: false,
             next_subnet_id: 1,
             last_applied_index: 0,
+            applied_commands: Vec::new(),
             side_effect_callback: None,
         }
     }
@@ -310,9 +312,14 @@ impl SwarmRaft {
         Ok(())
     }
     
-    pub fn submit_command(&mut self, cmd: SwarmCommand) -> Result<(), String> {
+    pub fn submit_command(&mut self, cmd: SwarmCommand, command_index: u64) -> Result<(), String> {
         if !self.is_initialized {
             return Err("Cluster not initialized".to_string());
+        }
+        
+        if self.applied_commands.contains(&command_index) {
+            info!("Command {} already applied, skipping side effects (idempotent replay)", command_index);
+            return Ok(());
         }
         
         info!("Processing command: {:?}", cmd);
@@ -349,6 +356,11 @@ impl SwarmRaft {
             SwarmCommand::DeleteService { name } => {
                 self.services.remove(&name);
             }
+        }
+        
+        self.applied_commands.push(command_index);
+        if self.applied_commands.len() > 1000 {
+            self.applied_commands.drain(0..500);
         }
         
         Ok(())
@@ -442,7 +454,7 @@ mod tests {
             node_id: 1,
         };
         
-        raft.submit_command(cmd).unwrap();
+        raft.submit_command(cmd, 1).unwrap();
         
         assert_eq!(raft.get_vm_placements().len(), 1);
     }
@@ -463,7 +475,7 @@ mod tests {
             spec: spec.clone(),
         };
         
-        raft.submit_command(cmd).unwrap();
+        raft.submit_command(cmd, 1).unwrap();
         
         assert_eq!(raft.get_services().len(), 1);
         assert!(raft.get_service("web").is_some());
@@ -472,7 +484,7 @@ mod tests {
             name: "web".to_string(),
         };
         
-        raft.submit_command(delete_cmd).unwrap();
+        raft.submit_command(delete_cmd, 2).unwrap();
         
         assert_eq!(raft.get_services().len(), 0);
     }
@@ -529,5 +541,27 @@ mod tests {
         
         let result = raft.add_node(2, "10.0.0.2:7946".to_string(), "node2_key".to_string(), None, None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_idempotent_command_replay() {
+        let mut raft = SwarmRaft::new(1);
+        raft.bootstrap("10.0.0.1:7946".to_string(), "leader_key".to_string(), None, None).unwrap();
+        
+        let cmd = SwarmCommand::UpdateVmPlacement {
+            vm_id: "vm-replay".to_string(),
+            node_id: 1,
+        };
+        
+        raft.submit_command(cmd.clone(), 1).unwrap();
+        assert_eq!(raft.get_vm_placements().len(), 1);
+        
+        let result = raft.submit_command(cmd.clone(), 1);
+        assert!(result.is_ok(), "Idempotent replay should not fail");
+        assert_eq!(raft.get_vm_placements().len(), 1, "Should still have only one placement");
+        
+        let result2 = raft.submit_command(cmd, 2);
+        assert!(result2.is_ok(), "Different command index should work");
+        assert_eq!(raft.get_vm_placements().len(), 1, "Still should have only one placement (key exists)");
     }
 }
