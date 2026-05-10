@@ -40,6 +40,7 @@ use tokio_util::io::StreamReader;
 
 use crate::state::{AppState, VmInstance, VmState, wal::WalEntry};
 use crate::vm_service::state as vm_service_state;
+use crate::vm_service::image::ensure_image_locally_handler;
 
 
 
@@ -489,7 +490,7 @@ pub async fn pull_image_handler(
 ) -> Result<Json<PullResponse>, (StatusCode, String)> {
     info!("Handling Pull request for {}", payload.image);
 
-    let path = ensure_image_locally(&payload.image).await?;
+    let path = ensure_image_locally_handler(&payload.image).await?;
 
     Ok(Json(PullResponse {
         status: "Image pulled successfully".to_string(),
@@ -520,21 +521,8 @@ pub async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {
     Json(ListResponse { vms: summaries })
 }
 
-// Git Helper Functions
-pub fn git_init(path: &std::path::Path) -> std::io::Result<()> {
-    Command::new("git").arg("init").current_dir(path).output()?;
-
-    Command::new("git")
-        .args(&["config", "user.email", "ignite@daemon"])
-        .current_dir(path)
-        .output()?;
-
-    Command::new("git")
-        .args(&["config", "user.name", "Ignite Daemon"])
-        .current_dir(path)
-        .output()?;
-    Ok(())
-}
+// Git Helper Functions - moved to vm_service::mod.rs
+// git_init is now in vm_service
 
 fn git_commit(path: &std::path::Path, message: &str) -> std::io::Result<()> {
     Command::new("git")
@@ -716,7 +704,7 @@ pub async fn build_image(
             Instruction::From(image) => {
                 info!("Building FROM {}", image);
 
-                let base_cache = ensure_image_locally(&image).await?;
+                let base_cache = ensure_image_locally_handler(&image).await?;
 
                 // Copy base cache to current_image_path
                 std::fs::copy(&base_cache, &current_image_path).map_err(|e| {
@@ -898,83 +886,6 @@ pub async fn build_image(
     // Move it to images dir? Or return ID?
     // For now return path.
     Ok(build_id)
-}
-
-pub async fn ensure_image_locally(
-    image_name: &str,
-) -> Result<std::path::PathBuf, (StatusCode, String)> {
-    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let images_root = home.join(".ignite").join("images");
-    std::fs::create_dir_all(&images_root)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let safe_image_name = image_name.replace('/', "_").replace(':', "_");
-    let image_store_path = images_root.join(&safe_image_name);
-    let base_image_file = image_store_path.join("base.ext4");
-
-    if !base_image_file.exists() {
-        info!("Image {} not found locally. Pulling...", image_name);
-        std::fs::create_dir_all(&image_store_path)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-        let mut oci = OciManager::new();
-        let manifest_json = oci
-            .pull_manifest(image_name)
-            .await
-            .map_err(|e| (StatusCode::BAD_REQUEST, format!("Pull failed: {}", e)))?;
-
-        let layers = oci
-            .parse_layers(&manifest_json)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-        if let Ok(config_digest) = oci.parse_config_digest(&manifest_json) {
-            info!("Fetching OCI config blob: {}", config_digest);
-            if let Ok(config) = oci.pull_config_blob(image_name, &config_digest).await {
-                let config_path = image_store_path.join("vyoma-config.json");
-                if let Ok(json_str) = serde_json::to_string_pretty(&config) {
-                    if let Err(e) = std::fs::write(&config_path, json_str) {
-                        warn!("Failed to write vyoma-config.json: {}", e);
-                    } else {
-                        info!("Saved OCI configuration to {:?}", config_path);
-                    }
-                }
-            }
-        }
-
-        let temp_unpack_dir =
-            tempfile::tempdir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-        for digest in layers {
-            let layer_data = oci.pull_layer(image_name, &digest).await.map_err(|e| {
-                (
-                    StatusCode::BAD_GATEWAY,
-                    format!("Failed layer {}: {}", digest, e),
-                )
-            })?;
-            LayerManager::unpack_layer(&layer_data, temp_unpack_dir.path()).map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Unpack failed: {}", e),
-                )
-            })?;
-        }
-
-        let size_mb = 2048;
-        StorageManager::create_empty_file(&base_image_file, size_mb)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        StorageManager::format_ext4(&base_image_file)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        StorageManager::populate_image(&base_image_file, temp_unpack_dir.path()).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Populate failed: {}", e),
-            )
-        })?;
-    } else {
-        info!("Image found locally at {:?}", base_image_file);
-    }
-
-    Ok(base_image_file)
 }
 
 pub async fn initialize_state(state: &AppState) {

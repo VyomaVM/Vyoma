@@ -1,9 +1,26 @@
+//! Network setup for VM instances
+//!
+//! # Network Namespace Handling
+//!
+//! Network namespace creation currently uses the `ip` command rather than native Rust.
+//! This is a known limitation and could be improved by:
+//! - Using the `netlink-packet-route` crate for direct netlink operations
+//! - Implementing a `NetNsManager` trait in `vyoma-net` crate
+//! - Using the `rtnetlink` crate for network namespace management
+//!
+//! The current implementation:
+//! - Does NOT use sudo - relies on CAP_NET_ADMIN capability instead
+//! - Uses subprocess for ip netns add/delete
+//! - Will be replaced with native Rust when vyoma-net has netns support
+
 use anyhow::{Context, Result};
 use std::process::Command;
 use tracing::{info, warn};
 
 use super::types::{VmNetworkConfig, NetworkInfo};
 use crate::state::AppState;
+
+const NETNS_BINARY: &str = "ip";
 
 pub async fn setup_network(
     state: &AppState,
@@ -44,10 +61,15 @@ async fn setup_privileged_network(
     std::fs::create_dir_all("/var/run/netns")
         .context("Failed to create /var/run/netns")?;
 
-    let _ = Command::new("ip")
+    let output = Command::new(NETNS_BINARY)
         .args(&["netns", "add", &netns_name])
         .output()
         .context("Failed to create netns")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!("netns creation warning: {}", stderr);
+    }
 
     let networks_to_attach: Vec<String> = if networks.is_empty() {
         vec!["default".to_string()]
@@ -111,14 +133,14 @@ pub async fn cleanup_network(
 ) -> Result<()> {
     if let Some(ns) = netns_path {
         let netns_name = format!("vm-{}", vm_id);
-        
+
         if !networks.is_empty() {
             let _ = state.cni_manager.del_multiple(networks, vm_id, ns);
         } else {
             let _ = state.cni_manager.del(None, vm_id, ns, "eth0");
         }
-        
-        let _ = Command::new("ip")
+
+        let _ = Command::new(NETNS_BINARY)
             .args(&["netns", "delete", &netns_name])
             .output();
     }

@@ -1,5 +1,6 @@
 mod agent;
 pub mod boot;
+pub mod build;
 pub mod config;
 pub mod image;
 pub(crate) mod network;
@@ -7,15 +8,69 @@ pub mod policy;
 pub mod state;
 pub mod types;
 pub mod storage;
+pub mod mocks;
 #[cfg(test)]
 mod stage_tests;
 
 use std::sync::Arc;
 use anyhow::{Context, Result};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::state::{AppState, VmInstance, wal::WalEntry};
-use types::{VmRunRequest, VmRunResponse};
+use types::{VmRunRequest, VmRunResponse, PreparedStorage, VmNetworkConfig};
+
+struct VmCreationContext {
+    state: Arc<AppState>,
+    vm_id: String,
+    vm_dir: Option<std::path::PathBuf>,
+    storage: Option<PreparedStorage>,
+    network_config: Option<VmNetworkConfig>,
+    vm_created: bool,
+}
+
+impl VmCreationContext {
+    fn new(state: Arc<AppState>, vm_id: String) -> Self {
+        Self {
+            state,
+            vm_id,
+            vm_dir: None,
+            storage: None,
+            network_config: None,
+            vm_created: false,
+        }
+    }
+
+    async fn cleanup_on_failure(&mut self) {
+        let vm_id = &self.vm_id;
+        warn!("Cleaning up resources after failure for VM {}", vm_id);
+
+        if let Some(ref network) = self.network_config {
+            info!("Cleaning up network for VM {}", vm_id);
+            let networks: Vec<String> = if network.network_infos.is_empty() {
+                vec![]
+            } else {
+                network.network_infos.iter()
+                    .map(|n| n.network_name.clone())
+                    .collect()
+            };
+            let _ = network::cleanup_network(&self.state, vm_id, &networks, &network.netns_path).await;
+        }
+
+        if let Some(ref storage) = self.storage {
+            info!("Cleaning up storage for VM {}", vm_id);
+            let _ = storage::cleanup_storage(storage).await;
+        }
+
+        if let Some(ref vm_dir) = self.vm_dir {
+            if vm_dir.exists() {
+                info!("Cleaning up VM directory {:?}", vm_dir);
+                let _ = std::fs::remove_dir_all(vm_dir);
+            }
+        }
+
+        info!("Cleanup completed for VM {}", vm_id);
+    }
+}
 
 pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRunResponse> {
     info!("VmService: Starting VM for image {}", request.image);
@@ -32,24 +87,52 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
     let vm_id = vm_uuid.to_string();
     let cid = (vm_uuid.as_fields().0 % 1000000) + 3;
     let vm_dir = vms_root.join(&vm_id);
+
+    let mut ctx = VmCreationContext::new(Arc::clone(&state), vm_id.clone());
+    ctx.vm_dir = Some(vm_dir.clone());
+
     std::fs::create_dir_all(&vm_dir).context("Failed to create VM dir")?;
 
-    let _ = crate::api::handlers::git_init(&vm_dir);
+    let _ = git_init(&vm_dir);
 
-    let prepared_image = image::prepare_image(&request.image).await?;
+    let prepared_image = match image::prepare_image(&request.image).await {
+        Ok(img) => img,
+        Err(e) => {
+            ctx.cleanup_on_failure().await;
+            return Err(e);
+        }
+    };
 
-    let storage = storage::prepare_storage(
+    let storage = match storage::prepare_storage(
         &state,
         &prepared_image.path,
         &vm_dir,
         &vm_id,
-    ).await?;
+    ).await {
+        Ok(s) => {
+            ctx.storage = Some(s.clone());
+            s
+        }
+        Err(e) => {
+            ctx.cleanup_on_failure().await;
+            return Err(e);
+        }
+    };
 
-    let network_config = network::setup_network(
+    let network_config = match network::setup_network(
         &state,
         &vm_id,
         &request.networks,
-    ).await?;
+    ).await {
+        Ok(n) => {
+            ctx.network_config = Some(n.clone());
+            n
+        }
+        Err(e) => {
+            ctx.cleanup_on_failure().await;
+            return Err(e);
+        }
+    };
 
     let _agent_config = agent::prepare_agent(
         &state,
@@ -67,12 +150,18 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         &network_config,
     );
 
-    let (vmm, proxy_tasks, slirp_mgr, fs_managers) = boot::start_vm(
+    let (vmm, proxy_tasks, slirp_mgr, fs_managers) = match boot::start_vm(
         &ch_config,
         &network_config,
         &request,
         &state,
-    ).await?;
+    ).await {
+        Ok(result) => result,
+        Err(e) => {
+            ctx.cleanup_on_failure().await;
+            return Err(e);
+        }
+    };
 
     policy::check_policy(
         &state,
@@ -114,6 +203,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         let mut vms = state.vms.lock().unwrap();
         vms.insert(vm_id.clone(), Arc::new(tokio::sync::Mutex::new(instance)));
     }
+    ctx.vm_created = true;
 
     if let Err(e) = state.wal.append(&WalEntry::vm_create(vm_id.clone())) {
         error!("Failed to write WAL entry: {}", e);
@@ -133,6 +223,19 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         status: "Running".to_string(),
         ip_address: network_config.ip_address,
     })
+}
+
+fn git_init(path: &std::path::Path) -> std::io::Result<()> {
+    let git_dir = path.join(".git");
+    if git_dir.exists() {
+        return Ok(());
+    }
+    std::fs::create_dir(&git_dir)?;
+    std::fs::write(git_dir.join("config"), "[core]\n\trepositoryformatversion = 0\n")?;
+    std::fs::write(git_dir.join("description"), "Vyoma VM\n")?;
+    std::fs::create_dir(git_dir.join("objects"))?;
+    std::fs::create_dir(git_dir.join("refs"))?;
+    Ok(())
 }
 
 fn setup_cgroups(
