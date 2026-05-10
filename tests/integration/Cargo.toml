@@ -1,0 +1,15 @@
+[package]
+name = "vyoma-integration-tests"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+vyoma-core = { path = "../../crates/vyoma-core" }
+tempfile.workspace = true
+flate2.workspace = true
+cpio.workspace = true
+tokio.workspace = true
+
+[[test]]
+name = "initramfs"
+path = "initramfs.rs"
