@@ -12,6 +12,8 @@ serde_json.workspace = true
 tracing.workspace = true
 thiserror = "1.0"
 tempfile.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+toml = "0.8"
 vyoma-core = { path = "../vyoma-core" }
 vyoma-storage = { path = "../vyoma-storage" }
 vyoma-image = { path = "../vyoma-image" }
