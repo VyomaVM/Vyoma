@@ -12,8 +12,8 @@ impl NetworkManager {
 
         // 0. Check if already exists
         // sudo ip link show <name>
-        let check_status = Command::new("sudo")
-             .args(&["ip", "link", "show", name])
+        let check_status = Command::new("ip")
+             .args(&["link", "show", name])
              .stdout(std::process::Stdio::null())
              .stderr(std::process::Stdio::null())
              .status();
@@ -26,7 +26,7 @@ impl NetworkManager {
         if !exists {
             // 1. Create bridge
             // sudo ip link add name <name> type bridge
-            let status = Command::new("sudo")
+            let status = Command::new("ip")
                 .args(&["ip", "link", "add", "name", name, "type", "bridge"])
                 .status()?;
                 
@@ -42,7 +42,7 @@ impl NetworkManager {
         // Getting exact match is tricky with shell commands.
         // Alternative: Just try `ip addr add` and ignore "File exists" (exit code 2).
         
-        let status = Command::new("sudo")
+        let status = Command::new("ip")
             .args(&["ip", "addr", "add", ip_cidr, "dev", name])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -71,7 +71,7 @@ impl NetworkManager {
 
         // 3. Set UP
         // sudo ip link set dev <name> up
-        let status = Command::new("sudo")
+        let status = Command::new("ip")
             .args(&["ip", "link", "set", "dev", name, "up"])
             .status()?;
             
@@ -91,7 +91,7 @@ impl NetworkManager {
         
         // 1. Create TAP
         // sudo ip tuntap add dev <tap_name> mode tap
-        let status = Command::new("sudo")
+        let status = Command::new("ip")
             .args(&["ip", "tuntap", "add", "dev", tap_name, "mode", "tap"])
             .status()?;
 
@@ -101,7 +101,7 @@ impl NetworkManager {
 
         // 2. Attach to Bridge
         // sudo ip link set dev <tap_name> master <master_bridge>
-        let status = Command::new("sudo")
+        let status = Command::new("ip")
             .args(&["ip", "link", "set", "dev", tap_name, "master", master_bridge])
             .status()?;
 
@@ -111,7 +111,7 @@ impl NetworkManager {
         }
 
         // 3. Set UP
-        let status = Command::new("sudo")
+        let status = Command::new("ip")
             .args(&["ip", "link", "set", "dev", tap_name, "up"])
             .status()?;
 
@@ -127,7 +127,7 @@ impl NetworkManager {
     pub fn remove_interface(name: &str) -> Result<()> {
         info!("Removing network interface '{}'", name);
         // sudo ip link delete <name>
-        let status = Command::new("sudo")
+        let status = Command::new("ip")
             .args(&["ip", "link", "delete", name])
             .status()?;
 
@@ -146,9 +146,9 @@ impl NetworkManager {
         info!("Enabling NAT/Masquerade for source {}", bridge_cidr);
         
         // Check if rule exists: -C (Check)
-        let check_status = Command::new("sudo")
+        let check_status = Command::new("iptables")
             .args(&[
-                "iptables", "-t", "nat", "-C", "POSTROUTING",
+                "-t", "nat", "-C", "POSTROUTING",
                 "-s", bridge_cidr,
                 "!", "-d", bridge_cidr,
                 "-j", "MASQUERADE"
@@ -163,9 +163,9 @@ impl NetworkManager {
         };
 
         if !exists {
-            let output = Command::new("sudo")
+            let output = Command::new("iptables")
                 .args(&[
-                    "iptables", "-t", "nat", "-A", "POSTROUTING",
+                    "-t", "nat", "-A", "POSTROUTING",
                     "-s", bridge_cidr,
                     "!", "-d", bridge_cidr,
                     "-j", "MASQUERADE"
@@ -182,8 +182,8 @@ impl NetworkManager {
 
         // Enable IPv4 forwarding
         // sudo sysctl -w net.ipv4.ip_forward=1
-        let output = Command::new("sudo")
-            .args(&["sysctl", "-w", "net.ipv4.ip_forward=1"])
+        let output = Command::new("sysctl")
+            .args(&["-w", "net.ipv4.ip_forward=1"])
             .output()?;
 
         if !output.status.success() {
@@ -201,8 +201,7 @@ impl NetworkManager {
 
         // Function helper for tc commands
         let run_tc = |args: &[&str]| -> Result<()> {
-            let out = Command::new("sudo")
-                .arg("tc")
+            let out = Command::new("tc")
                 .args(args)
                 .output()?;
             if !out.status.success() {
