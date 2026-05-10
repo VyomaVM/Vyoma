@@ -1,4 +1,4 @@
-use tracing::{info, warn, error};
+use tracing::info;
 use rtnetlink::{new_connection, Handle};
 use netlink_packet_route::link::State;
 use netlink_packet_route::link::LinkAttribute;

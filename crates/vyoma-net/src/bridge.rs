@@ -77,7 +77,7 @@ impl BridgeManager {
     pub async fn set_ip(&self, name: &str, ip_cidr: &str) -> Result<()> {
         info!("Setting IP {} on bridge {}", ip_cidr, name);
         
-        let index = self.get_interface_index(name).await?;
+        let _index = self.get_interface_index(name).await?;
         
         let output = Command::new("ip")
             .args(&["addr", "add", ip_cidr, "dev", name])
