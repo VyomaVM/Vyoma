@@ -4,12 +4,19 @@ use axum::{
     response::sse::{Event, Sse},
     routing::{get, post},
     Json, Router,
+    body::Body,
 };
 use tower_http::cors::CorsLayer;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 // use tokio_stream::StreamExt;
 use futures::stream::Stream;
+use flate2::read::GzDecoder;
+use tar::Archive;
+use futures::StreamExt;
+use tokio_util::io::StreamReader;
+use uuid;
+use tempfile;
 use openraft::raft::{AppendEntriesRequest, InstallSnapshotRequest, VoteRequest};
 use openraft::Raft;
 use vyoma_core::api::{PortMapping, VolumeMount};
@@ -17,6 +24,7 @@ use vyoma_core::cgroups::CgroupManager;
 use vyoma_core::fs::VirtioFsManager;
 use vyoma_core::proxy::ProxyManager;
 use vyoma_core::vmm::VmmManager;
+use vyoma_build;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -28,15 +36,6 @@ use tracing::{error, info, warn};
 
 use crate::cluster;
 use crate::dns;
-use crate::ui;
-use crate::swarm;
-use axum::body::Body;
-use flate2::read::GzDecoder;
-use vyoma_core::builder::{Vyomafile, Instruction};
-use std::process::Command;
-use tar::Archive;
-use tokio::task::JoinHandle;
-use tokio_util::io::StreamReader;
 // use futures::StreamExt as FuturesStreamExt;
 
 use crate::state::{AppState, VmInstance, VmState, wal::WalEntry};
@@ -627,7 +626,7 @@ pub async fn build_image(
     State(_state): State<AppState>,
     body: Body,
 ) -> Result<String, (StatusCode, String)> {
-    info!("Received build request");
+    info!("Received build request using VM-isolated build system");
 
     // 1. Stream body to a temp file (tar.gz)
     let temp_dir =
@@ -649,7 +648,7 @@ pub async fn build_image(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
 
-    // 2. Unpack
+    // 2. Unpack context
     let tar_file = std::fs::File::open(&tar_path)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let decoder = GzDecoder::new(tar_file);
@@ -665,226 +664,40 @@ pub async fn build_image(
     })?;
 
     // 3. Parse Vyomafile
-    let ignitefile_path = context_dir.join("Vyomafile");
-    if !ignitefile_path.exists() {
+    let vyomafile_path = context_dir.join("Vyomafile");
+    if !vyomafile_path.exists() {
         return Err((
             StatusCode::BAD_REQUEST,
             "Vyomafile not found in build context".to_string(),
         ));
     }
 
-    let ignite_file = Vyomafile::parse(&ignitefile_path)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Parse error: {}", e)))?;
-
-    // 4. Build Process
-    // We need to track the "current image base".
-    // 1. FROM -> Pull image, setup as current base.
-    //    We need to work on a COPY of the base, not the shared base.
-    //    So we create a new "build artifact" (a raw ext4 file).
-
-    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let images_root = home.join(".ignite").join("images");
-    std::fs::create_dir_all(&images_root)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
+    // 4. Generate build ID and prepare work directory
     let build_id = uuid::Uuid::new_v4().to_string();
-    let image_store_path = images_root.join(&build_id);
-    std::fs::create_dir_all(&image_store_path)
+    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+    let work_dir = home.join(".vyoma").join("builds");
+    std::fs::create_dir_all(&work_dir)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let current_image_path = image_store_path.join("base.ext4");
+    // 5. Execute build using VM-isolated BuildRunner
+    let build_runner = vyoma_build::BuildRunner::new(work_dir);
+    let build_result = build_runner
+        .build(&vyomafile_path, &context_dir, &build_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Build failed: {:?}", e),
+            )
+        })?;
 
-    let current_image_path = image_store_path.join("base.ext4");
+    info!(
+        "Build completed successfully: {} -> {}",
+        build_id,
+        build_result.rootfs_path.display()
+    );
 
-    // Track if we have a base
-    let mut has_base = false;
-    let mut oci_config = vyoma_core::oci::OciImageConfig::default();
-
-    for instr in ignite_file.instructions {
-        match instr {
-            Instruction::From(image) => {
-                info!("Building FROM {}", image);
-
-                let base_cache = ensure_image_locally_handler(&image).await?;
-
-                // Copy base cache to current_image_path
-                std::fs::copy(&base_cache, &current_image_path).map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to copy base: {}", e),
-                    )
-                })?;
-                has_base = true;
-            }
-            Instruction::Run(cmd) => {
-                if !has_base {
-                    return Err((StatusCode::BAD_REQUEST, "RUN before FROM".to_string()));
-                }
-                info!("RUN: {}", cmd);
-
-                // Mount image
-                let loop_device = StorageManager::setup_loop_device(&current_image_path)
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-                // Mount the loop device to a temp dir
-                let mount_point = tempfile::tempdir()
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-                let mount_status = Command::new("mount")
-                    .args(&[&loop_device, mount_point.path().to_str().unwrap()])
-                    .status()
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-                if !mount_status.success() {
-                    let _ = StorageManager::detach_loop_device(&loop_device);
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Failed to mount for RUN".to_string(),
-                    ));
-                }
-
-                // Prepare resolv.conf for networking in chroot
-                // COPY host resolv.conf to chroot
-                let _ = std::fs::copy(
-                    "/etc/resolv.conf",
-                    mount_point.path().join("etc/resolv.conf"),
-                );
-
-                // Execute chroot
-                // cmd string might need splitting or sh -c
-                let chroot_status = Command::new("chroot")
-                    .args(&[
-                        mount_point.path().to_str().unwrap(),
-                        "/bin/sh",
-                        "-c",
-                        &cmd,
-                    ])
-                    .status()
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-                // Unmount
-                let umount_status = Command::new("umount")
-                    .args(&[mount_point.path().to_str().unwrap()])
-                    .status()
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-                let _ = StorageManager::detach_loop_device(&loop_device);
-
-                if !chroot_status.success() {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        format!("RUN command failed: {}", cmd),
-                    ));
-                }
-            }
-            Instruction::Copy { src, dest } => {
-                if !has_base {
-                    return Err((StatusCode::BAD_REQUEST, "COPY before FROM".to_string()));
-                }
-                info!("COPY {} -> {}", src, dest);
-
-                // Mount
-                let loop_device = StorageManager::setup_loop_device(&current_image_path)
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-                let mount_point = tempfile::tempdir()
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-                let mount_status = Command::new("mount")
-                    .args(&[&loop_device, mount_point.path().to_str().unwrap()])
-                    .status()
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-                if !mount_status.success() {
-                    let _ = StorageManager::detach_loop_device(&loop_device);
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Failed to mount for COPY".to_string(),
-                    ));
-                }
-
-                // Perform Copy
-                // src is relative to context_dir
-                let src_path = context_dir.join(&src);
-                // dest is relative to mount_point
-                // handle absolute dest paths by stripping leading /
-                let safe_dest = dest.trim_start_matches('/');
-                let dest_path = mount_point.path().join(safe_dest);
-
-                // Ensure parent dir exists
-                if let Some(parent) = dest_path.parent() {
-                    let _ = std::fs::create_dir_all(parent); // Ignore error (might need sudo?)
-                }
-
-                // Use sudo cp to preserve permissions if simple copy fails?
-                // Or just fs::copy since we are running as root (daemon)
-                // Daemon runs as root?
-                // Yes, per prerequisites.
-                if src_path.is_dir() {
-                    // Recursive copy not implemented in std::fs
-                    // Use Command cp -r
-                    let cp_status = Command::new("cp")
-                        .arg("-r")
-                        .arg(&src_path)
-                        .arg(&dest_path)
-                        .status()
-                        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-                    if !cp_status.success() {
-                        let _ = Command::new("umount")
-                            .args(&[mount_point.path().to_str().unwrap()])
-                            .status();
-                        let _ = StorageManager::detach_loop_device(&loop_device);
-                        return Err((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Failed to copy dir".to_string(),
-                        ));
-                    }
-                } else {
-                    match std::fs::copy(&src_path, &dest_path) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            // clean up
-                            let _ = Command::new("umount")
-                                .args(&[mount_point.path().to_str().unwrap()])
-                                .status();
-                            let _ = StorageManager::detach_loop_device(&loop_device);
-                            return Err((
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("Failed copy file: {}", e),
-                            ));
-                        }
-                    }
-                }
-
-                let _ = Command::new("umount")
-                    .args(&[mount_point.path().to_str().unwrap()])
-                    .status();
-                let _ = StorageManager::detach_loop_device(&loop_device);
-            }
-            Instruction::Cmd(args) => {
-                info!("CMD {:?}", args);
-                oci_config.cmd = Some(args);
-            }
-            Instruction::Entrypoint(args) => {
-                info!("ENTRYPOINT {:?}", args);
-                oci_config.entrypoint = Some(args);
-            }
-            Instruction::Env { key, value } => {
-                info!("ENV {}={}", key, value);
-                let current_envs = oci_config.env.get_or_insert_with(Vec::new);
-                current_envs.push(format!("{}={}", key, value));
-            }
-        }
-    }
-
-    // Save the built configuration
-    let config_path = image_store_path.join("vyoma-config.json");
-    if let Ok(json_str) = serde_json::to_string_pretty(&oci_config) {
-        if let Err(e) = std::fs::write(&config_path, json_str) {
-            warn!("Failed to write vyoma-config.json: {}", e);
-        }
-    }
-
-    // Done. The `current_image_path` is the result.
-    // Move it to images dir? Or return ID?
-    // For now return path.
+    // 6. Return the build ID
     Ok(build_id)
 }
 

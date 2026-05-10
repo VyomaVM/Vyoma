@@ -22,6 +22,7 @@ tracing-subscriber.workspace = true
 vyoma-core = { path = "../vyoma-core" }
 vyoma-storage = { path = "../vyoma-storage" }
 vyoma-image = { path = "../vyoma-image" }
+vyoma-build = { path = "../vyoma-build" }
 serde.workspace = true
 serde_json.workspace = true
 axum = "0.7"
