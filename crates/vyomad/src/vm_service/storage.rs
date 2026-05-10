@@ -29,29 +29,29 @@ impl StorageContext {
 
 pub async fn prepare_storage(
     state: &AppState,
-    base_image_path: &Path,
+    rootfs_sqfs_path: &Path,
     vm_dir: &Path,
     vm_id: &str,
 ) -> Result<PreparedStorage> {
-    info!("Preparing storage for VM {}", vm_id);
+    info!("Preparing VMIF storage for VM {} with squashfs base", vm_id);
 
     if state.rootless {
-        prepare_rootless_storage(base_image_path, vm_dir, vm_id)
+        prepare_rootless_storage(rootfs_sqfs_path, vm_dir, vm_id)
     } else {
-        prepare_privileged_storage(state, base_image_path, vm_dir, vm_id).await
+        prepare_privileged_storage(state, rootfs_sqfs_path, vm_dir, vm_id).await
     }
 }
 
 fn prepare_rootless_storage(
-    base_image_path: &Path,
+    rootfs_sqfs_path: &Path,
     vm_dir: &Path,
     _vm_id: &str,
 ) -> Result<PreparedStorage> {
     let vm_disk = vm_dir.join("disk.ext4");
-    info!("Rootless: Copying base image to {:?}", vm_disk);
+    info!("Rootless: Copying squashfs base image to {:?}", vm_disk);
     
-    std::fs::copy(base_image_path, &vm_disk)
-        .context("Rootless copy failed")?;
+    std::fs::copy(rootfs_sqfs_path, &vm_disk)
+        .context("Rootless copy failed for squashfs")?;
 
     Ok(PreparedStorage {
         dm_device_path: vm_disk.to_string_lossy().to_string(),
@@ -63,7 +63,7 @@ fn prepare_rootless_storage(
 
 async fn prepare_privileged_storage(
     state: &AppState,
-    base_image_path: &Path,
+    rootfs_sqfs_path: &Path,
     vm_dir: &Path,
     vm_id: &str,
 ) -> Result<PreparedStorage> {
@@ -76,16 +76,16 @@ async fn prepare_privileged_storage(
     let loop_mgr = LoopManager::new().context("Failed to create LoopManager")?;
     let dm_mgr = DmManager::new().context("Failed to create DmManager")?;
 
-    info!("Attaching base image to loop device");
-    let base_loop = loop_mgr.attach(base_image_path)
-        .context("Failed to attach base loop device")?;
+    info!("Attaching squashfs rootfs to loop device: {:?}", rootfs_sqfs_path);
+    let base_loop = loop_mgr.attach(rootfs_sqfs_path)
+        .context("Failed to attach squashfs loop device")?;
 
     info!("Attaching COW file to loop device");
     let cow_loop = loop_mgr.attach(&cow_file)
         .context("Failed to attach COW loop device")?;
 
-    let dm_name = format!("ign-{}", vm_id);
-    info!("Creating Device Mapper snapshot: {}", dm_name);
+    let dm_name = format!("vyoma-{}", vm_id);
+    info!("Creating Device Mapper snapshot with squashfs origin: {}", dm_name);
     
     let dm_device = dm_mgr.create_snapshot(&dm_name, base_loop.path(), cow_loop.path())
         .context("Failed to create DM snapshot")?;
@@ -94,7 +94,7 @@ async fn prepare_privileged_storage(
     let cow_loop_path = cow_loop.path().to_string_lossy().to_string();
 
     info!(
-        "Storage prepared: dm={}, base_loop={}, cow_loop={}",
+        "VMIF storage prepared: dm={}, base_loop={} (squashfs), cow_loop={}",
         dm_device.path().display(),
         base_loop_path,
         cow_loop_path
