@@ -4,15 +4,23 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+[lib]
+name = "vyomad"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vyomad"
+path = "src/main.rs"
+
 [features]
 default = []
-chaos = ["nix"]
 
 [dependencies]
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 vyoma-core = { path = "../vyoma-core" }
+vyoma-storage = { path = "../vyoma-storage" }
 serde.workspace = true
 serde_json.workspace = true
 axum = "0.7"
@@ -33,8 +41,7 @@ tower-http = { version = "0.5", features = ["cors"] }
 libc = "0.2.180"
 reqwest = { version = "0.13.1", features = ["json"] }
 clap = { version = "4.4", features = ["derive"] }
-nix = { version = "0.28", optional = true, features = ["signal", "process"] }
-
+nix = { version = "0.28", features = ["signal", "process", "fs", "sched"] }
 
 sled = "0.34"
 hyper-util = { version = "0.1.20", features = ["server-auto", "tokio"] }
@@ -48,3 +55,6 @@ vyoma-proto = { path = "../vyoma-proto" }
 openraft = { version = "0.9.22", features = ["serde"] }
 async-trait = "0.1.89"
 vyoma-teleport = { path = "../vyoma-teleport" }
+
+[dev-dependencies]
+mockall = "0.14"
