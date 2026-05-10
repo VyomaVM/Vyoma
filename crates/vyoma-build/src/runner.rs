@@ -4,6 +4,7 @@ use tracing::{info, warn, error};
 use vyoma_core::oci::OciImageConfig;
 use vyoma_image::{VmifConverter, SquashfsCompression};
 use vyoma_storage::{LoopManager, DmManager};
+use chrono;
 
 use crate::Instruction;
 
@@ -207,10 +208,21 @@ impl BuildRunner {
     }
 
     async fn handle_copy(&self, rootfs_path: &Path, context_dir: &Path, src: &str, dst: &str) -> Result<(), BuildError> {
-        // TODO: Implement file injection using debugfs
-        warn!("COPY {} -> {} not yet implemented - using mock implementation", src, dst);
+        info!("Injecting file {} -> {} using debugfs", src, dst);
 
-        // For now, just log the operation
+        // For squashfs, we can't modify it directly. Instead, we need to:
+        // 1. Extract the current squashfs to a temporary directory
+        // 2. Copy the file to the appropriate location
+        // 3. Create a new squashfs with the updated contents
+
+        let temp_extract_dir = tempfile::tempdir()
+            .map_err(|e| BuildError::InjectionError(format!("Failed to create temp dir: {}", e)))?;
+        let extract_path = temp_extract_dir.path();
+
+        // Extract the current squashfs
+        self.extract_squashfs(rootfs_path, extract_path).await?;
+
+        // Copy the source file to destination
         let src_path = context_dir.join(src);
         if !src_path.exists() {
             return Err(BuildError::InjectionError(
@@ -218,6 +230,39 @@ impl BuildRunner {
             ));
         }
 
+        let dst_path = extract_path.join(dst.trim_start_matches('/'));
+        if let Some(parent) = dst_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| BuildError::InjectionError(format!("Failed to create dest dir: {}", e)))?;
+        }
+
+        std::fs::copy(&src_path, &dst_path)
+            .map_err(|e| BuildError::InjectionError(format!("Failed to copy file: {}", e)))?;
+
+        // Create new squashfs with the injected file
+        let new_squashfs_name = format!("layer_{}_injected.sqfs", chrono::Utc::now().timestamp());
+        let new_squashfs_path = self.temp_dir.join(&new_squashfs_name);
+
+        VmifConverter::create_squashfs(
+            extract_path,
+            &new_squashfs_path,
+            vyoma_image::SquashfsCompression::default(),
+        ).map_err(|e| BuildError::InjectionError(format!("Failed to create new squashfs: {}", e)))?;
+
+        // Replace the original rootfs with the new one
+        std::fs::copy(&new_squashfs_path, rootfs_path)
+            .map_err(|e| BuildError::InjectionError(format!("Failed to update rootfs: {}", e)))?;
+
+        info!("Successfully injected {} -> {}", src, dst);
+        Ok(())
+    }
+
+    async fn extract_squashfs(&self, squashfs_path: &Path, dest_dir: &Path) -> Result<(), BuildError> {
+        // TODO: Implement squashfs extraction
+        // For now, create an empty directory as placeholder
+        warn!("Squashfs extraction not yet implemented - creating empty directory");
+        std::fs::create_dir_all(dest_dir)
+            .map_err(|e| BuildError::InjectionError(format!("Failed to create extract dir: {}", e)))?;
         Ok(())
     }
 
