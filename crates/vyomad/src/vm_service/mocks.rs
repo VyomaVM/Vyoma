@@ -137,14 +137,14 @@ pub trait AgentProvider: Send + Sync {
     async fn prepare_agent(
         &self,
         _state: &AppState,
-        dm_path: &str,
-        vm_dir: &PathBuf,
+        _dm_path: &str,
+        _vm_dir: &PathBuf,
         _config: &vyoma_core::oci::OciImageConfig,
     ) -> anyhow::Result<AgentConfig>;
 }
 
 pub struct MockAgentProvider {
-    agent_config: AgentConfig,
+    pub agent_config: AgentConfig,
 }
 
 impl MockAgentProvider {
@@ -159,14 +159,10 @@ impl AgentProvider for MockAgentProvider {
         &self,
         _state: &AppState,
         _dm_path: &str,
-        vm_dir: &PathBuf,
+        _vm_dir: &PathBuf,
         _config: &vyoma_core::oci::OciImageConfig,
     ) -> anyhow::Result<AgentConfig> {
-        let mut config = self.agent_config.clone();
-        if config.init_script_path.as_os_str().is_empty() {
-            config.init_script_path = vm_dir.join("mock-init.sh");
-        }
-        Ok(config)
+        Ok(self.agent_config.clone())
     }
 }
 
@@ -286,7 +282,6 @@ mod tests {
     fn test_agent_config_from_mock() {
         let agent = AgentConfig {
             initramfs_path: Some(PathBuf::from("/tmp/initramfs")),
-            init_script_path: PathBuf::from("/tmp/init.sh"),
             cmd: vec!["/sbin/init".to_string()],
             workdir: "/".to_string(),
             envs: vec![],
