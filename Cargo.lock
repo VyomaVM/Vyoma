@@ -4510,6 +4510,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "vyoma-net",
+ "vyoma-storage",
 ]
 
 [[package]]
