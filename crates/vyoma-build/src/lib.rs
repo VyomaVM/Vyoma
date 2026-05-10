@@ -40,3 +40,45 @@ pub enum BuildError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_build_runner_creation() {
+        let temp_dir = TempDir::new().unwrap();
+        let runner = BuildRunner::new(temp_dir.path().to_path_buf());
+        assert!(runner.work_dir.exists());
+    }
+
+    #[test]
+    fn test_vyomafile_parsing() {
+        let content = r#"
+FROM alpine:latest
+RUN echo "hello world"
+COPY app /app
+ENV PORT=8080
+"#;
+        let vyomafile = Vyomafile::parse_content(content).unwrap();
+        assert_eq!(vyomafile.instructions.len(), 4);
+
+        match &vyomafile.instructions[0] {
+            Instruction::From { image } => assert_eq!(image, "alpine:latest"),
+            _ => panic!("Expected FROM instruction"),
+        }
+    }
+
+    #[test]
+    fn test_vyomafile_parsing_env() {
+        let vyomafile = Vyomafile::parse_content("ENV DEBUG=true").unwrap();
+        match &vyomafile.instructions[0] {
+            Instruction::Env { key, value } => {
+                assert_eq!(key, "DEBUG");
+                assert_eq!(value, "true");
+            }
+            _ => panic!("Expected ENV instruction"),
+        }
+    }
+}

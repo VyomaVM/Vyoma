@@ -12,7 +12,7 @@ use crate::{BuildResult, BuildError, Vyomafile};
 
 /// Core build engine that executes Vyomafile instructions in isolated VMs
 pub struct BuildRunner {
-    work_dir: PathBuf,
+    pub work_dir: PathBuf,
     temp_dir: PathBuf,
 }
 

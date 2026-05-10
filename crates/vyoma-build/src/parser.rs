@@ -110,34 +110,49 @@ impl Vyomafile {
     }
 
     fn parse_shell_args(args: &str) -> Result<Vec<String>> {
-        // Simple shell-like argument parsing
-        // For now, just split on spaces and handle quotes
-        let mut result = Vec::new();
-        let mut current = String::new();
-        let mut in_quotes = false;
+        // Parse JSON array format like ["echo", "done"]
+        let trimmed = args.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            // Parse as JSON array
+            let json_str = trimmed;
+            let parsed: Vec<String> = serde_json::from_str(json_str)
+                .map_err(|e| anyhow::anyhow!("Failed to parse CMD args as JSON: {}", e))?;
+            Ok(parsed)
+        } else {
+            // Simple shell-like argument parsing
+            // Split on spaces, handling quotes
+            let mut result = Vec::new();
+            let mut current = String::new();
+            let mut in_quotes = false;
+            let mut quote_char = '"';
 
-        for ch in args.chars() {
-            match ch {
-                '"' | '\'' => {
-                    in_quotes = !in_quotes;
-                }
-                ' ' if !in_quotes => {
-                    if !current.is_empty() {
-                        result.push(current);
-                        current = String::new();
+            for ch in args.chars() {
+                match ch {
+                    '"' | '\'' if !in_quotes => {
+                        in_quotes = true;
+                        quote_char = ch;
+                    }
+                    '"' | '\'' if in_quotes && ch == quote_char => {
+                        in_quotes = false;
+                    }
+                    ' ' if !in_quotes => {
+                        if !current.is_empty() {
+                            result.push(current);
+                            current = String::new();
+                        }
+                    }
+                    _ => {
+                        current.push(ch);
                     }
                 }
-                _ => {
-                    current.push(ch);
-                }
             }
-        }
 
-        if !current.is_empty() {
-            result.push(current);
-        }
+            if !current.is_empty() {
+                result.push(current);
+            }
 
-        Ok(result)
+            Ok(result)
+        }
     }
 }
 
