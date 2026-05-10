@@ -116,11 +116,11 @@ ENV TEST_VAR=test_value
         // This will fail because we don't have real VMs, but it tests the parsing and structure
         let result = build_runner.build(&vyomafile_path, &context_dir, "test-image").await;
 
-        // Should fail due to missing base image in expected location, but structure should work
+        // Should fail due to invalid squashfs file, but structure should work
         assert!(result.is_err());
-        // The error should be about the image not being found, not a parsing error
+        // The error should be about squashfs extraction failing, not a parsing error
         let error_msg = format!("{}", result.unwrap_err());
-        assert!(error_msg.contains("not found") || error_msg.contains("hash"));
+        assert!(error_msg.contains("unsquashfs") || error_msg.contains("SQUASHFS") || error_msg.contains("EOF"));
     }
 
     #[test]

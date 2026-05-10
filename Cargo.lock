@@ -4488,6 +4488,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "vyoma-build"
+version = "2.1.2"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+ "toml",
+ "tracing",
+ "vyoma-core",
+ "vyoma-image",
+ "vyoma-storage",
+]
+
+[[package]]
 name = "vyoma-compose"
 version = "2.1.2"
 dependencies = [
@@ -4700,6 +4719,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "vyoma-build",
  "vyoma-core",
  "vyoma-image",
  "vyoma-net",
