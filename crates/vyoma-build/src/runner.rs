@@ -3,8 +3,10 @@ use anyhow::{Context, Result};
 use tracing::{info, warn, error};
 use vyoma_core::oci::OciImageConfig;
 use vyoma_image::{VmifConverter, SquashfsCompression};
-use vyoma_storage::{LoopManager, DmManager};
 use chrono;
+use std::process::Command;
+use tokio::time::{timeout, Duration};
+use std::sync::Arc;
 
 use crate::Instruction;
 
@@ -125,88 +127,181 @@ impl BuildRunner {
     async fn handle_run(&self, rootfs_path: &Path, command: &str) -> Result<PathBuf, BuildError> {
         info!("Executing RUN command in isolated VM: {}", command);
 
-        // Create a temporary directory for this build step
-        let build_temp_dir = tempfile::tempdir()
+        // For RUN commands, we need to:
+        // 1. Extract the current squashfs to a temporary directory
+        // 2. Launch a VM with the extracted directory as root (but readonly)
+        // 3. VM executes command and modifies files in a writable overlay
+        // 4. After VM exits, create new squashfs from modified directory
+
+        let temp_dir = tempfile::tempdir()
             .map_err(|e| BuildError::ExecutionError(format!("Failed to create temp dir: {}", e)))?;
-        let temp_path = build_temp_dir.path();
+        let extract_dir = temp_dir.path().join("extract");
+        let overlay_dir = temp_dir.path().join("overlay");
 
-        // Create COW file for the overlay
-        let cow_file = temp_path.join("build.cow");
-        let cow_size_mb = 1024; // 1GB should be enough for most build operations
+        // Extract current squashfs
+        self.extract_squashfs(rootfs_path, &extract_dir).await?;
 
-        LoopManager::create_cow_file(&cow_file, cow_size_mb as u64)
-            .map_err(|e| BuildError::ExecutionError(format!("Failed to create COW file: {}", e)))?;
+        // Create overlay directory for writable changes
+        std::fs::create_dir_all(&overlay_dir)
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to create overlay dir: {}", e)))?;
 
-        // Set up loop devices and DM snapshot
-        let loop_mgr = LoopManager::new()
-            .map_err(|e| BuildError::VmError(format!("Failed to create LoopManager: {}", e)))?;
-        let dm_mgr = DmManager::new()
-            .map_err(|e| BuildError::VmError(format!("Failed to create DmManager: {}", e)))?;
+        // For now, we'll simulate the RUN command execution
+        // In a full implementation, we'd need to:
+        // 1. Create a union filesystem (overlayfs) with extract_dir as lower, overlay_dir as upper
+        // 2. Launch VM with the union mount as root
+        // 3. VM executes command and modifies overlay_dir
+        // 4. After VM exits, merge changes back
 
-        // Attach base image to loop device
-        let base_loop = loop_mgr.attach(rootfs_path)
-            .map_err(|e| BuildError::VmError(format!("Failed to attach base loop: {}", e)))?;
+        warn!("RUN command execution simulation - command: {}", command);
 
-        // Attach COW file to loop device
-        let cow_loop = loop_mgr.attach(&cow_file)
-            .map_err(|e| BuildError::VmError(format!("Failed to attach COW loop: {}", e)))?;
-
-        // Create DM snapshot
-        let dm_name = format!("build-{}", std::process::id());
-        let dm_device = dm_mgr.create_snapshot(&dm_name, base_loop.path(), cow_loop.path())
-            .map_err(|e| BuildError::VmError(format!("Failed to create DM snapshot: {}", e)))?;
-
-        // Launch VM to execute the command
-        let exit_code = self.execute_in_vm(&dm_device, command).await?;
-
-        // Clean up VM resources
-        if let Err(e) = dm_mgr.remove_snapshot(&dm_name) {
-            error!("Failed to remove DM snapshot {}: {}", dm_name, e);
-        }
-        if let Err(e) = loop_mgr.detach(&cow_loop) {
-            error!("Failed to detach COW loop: {}", e);
-        }
-        if let Err(e) = loop_mgr.detach(&base_loop) {
-            error!("Failed to detach base loop: {}", e);
-        }
+        // Simulate success/failure
+        let exit_code = if command.contains("false") || command.contains("exit 1") {
+            1
+        } else {
+            0
+        };
 
         if exit_code == 0 {
-            // Commit the changes - convert COW file to new squashfs
-            info!("Command succeeded, committing changes to new layer");
-            self.commit_cow_to_squashfs(&cow_file, temp_path).await
+            // Create new squashfs from the (unchanged) extracted directory
+            // In real implementation, this would include overlay changes
+            let new_layer_name = format!("layer_{}.sqfs", chrono::Utc::now().timestamp());
+            let new_layer_path = self.temp_dir.join(&new_layer_name);
+
+            VmifConverter::create_squashfs(&extract_dir, &new_layer_path, SquashfsCompression::default())
+                .map_err(|e| BuildError::LayerError(format!("Failed to create new squashfs: {}", e)))?;
+
+            info!("Created new layer: {:?}", new_layer_path);
+            Ok(new_layer_path)
         } else {
-            // Command failed, discard changes
-            warn!("Command failed with exit code {}, discarding changes", exit_code);
             Err(BuildError::ExecutionError(format!("Build command failed with exit code {}", exit_code)))
         }
     }
 
-    async fn execute_in_vm(&self, dm_device: &vyoma_storage::DmDevice, command: &str) -> Result<i32, BuildError> {
-        // TODO: Implement actual VM launch with Cloud Hypervisor
-        // For now, simulate success/failure based on command content
-        warn!("VM execution not yet implemented - simulating based on command: {}", command);
+    async fn execute_in_vm(&self, command: &str) -> Result<i32, BuildError> {
+        info!("Launching Cloud Hypervisor VM to execute: {}", command);
 
-        // Simulate some commands succeeding, others failing
-        if command.contains("false") || command.contains("exit 1") {
-            Ok(1) // Simulate failure
+        // Create build-specific initramfs
+        let initramfs_path = self.create_build_initramfs(command).await?;
+
+        // Find kernel path (assume default for now)
+        let kernel_path = self.find_kernel_path()?;
+
+        // Create temporary VM directory
+        let vm_id = format!("build-{}", std::process::id());
+        let vm_dir = self.temp_dir.join(&vm_id);
+        std::fs::create_dir_all(&vm_dir)?;
+
+        // Build Cloud Hypervisor configuration
+        let socket_path = vm_dir.join("ch.sock");
+        let rootfs_path = self.temp_dir.join("temp_root.sqfs"); // Placeholder rootfs
+        let ch_args = self.build_ch_args(&rootfs_path, &kernel_path, &initramfs_path, &socket_path);
+
+        // Launch Cloud Hypervisor
+        info!("Starting Cloud Hypervisor with args: {:?}", ch_args);
+        let mut child = Command::new("cloud-hypervisor")
+            .args(&ch_args)
+            .spawn()
+            .map_err(|e| BuildError::VmError(format!("Failed to start Cloud Hypervisor: {}", e)))?;
+
+        // Wait for VM to complete with timeout (using tokio::time::timeout with async block)
+        let timeout_duration = Duration::from_secs(300); // 5 minute timeout for builds
+
+        let exit_status_result = timeout(timeout_duration, async {
+            child.wait()
+        }).await;
+
+        let exit_status = match exit_status_result {
+            Ok(result) => result.map_err(|e| BuildError::VmError(format!("VM process error: {}", e)))?,
+            Err(_) => {
+                // Timeout - kill the process
+                let _ = child.kill();
+                return Err(BuildError::VmError("VM execution timed out".to_string()));
+            }
+        };
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&vm_dir);
+
+        let exit_code = exit_status.code().unwrap_or(1);
+        info!("VM execution completed with exit code: {}", exit_code);
+
+        Ok(exit_code)
+    }
+
+    async fn create_build_initramfs(&self, command: &str) -> Result<PathBuf, BuildError> {
+        let initramfs_path = self.temp_dir.join("build-initramfs.cpio.gz");
+
+        // Generate build-specific init script
+        let init_script = format!(r#"#!/bin/sh
+# Build init script - runs command and exits
+set -e
+
+# Mount basic filesystems
+mount -t proc proc /proc 2>/dev/null || true
+mount -t sysfs sys /sys 2>/dev/null || true
+mount -t devtmpfs dev /dev 2>/dev/null || true
+
+# Execute the build command
+echo "Build VM: Executing command: {}"
+{}
+
+# Capture exit code
+exit_code=$?
+echo "Build VM: Command completed with exit code: $exit_code"
+
+# Power off (this will cause Cloud Hypervisor to exit)
+poweroff -f
+"#, command, command);
+
+        vyoma_core::initramfs::create_initramfs(&init_script, None, &initramfs_path)
+            .map_err(|e| BuildError::VmError(format!("Failed to create build initramfs: {}", e)))?;
+
+        info!("Created build initramfs at: {:?}", initramfs_path);
+        Ok(initramfs_path)
+    }
+
+    fn find_kernel_path(&self) -> Result<PathBuf, BuildError> {
+        // For now, assume the default kernel location
+        // In a real implementation, this would check multiple locations
+        let kernel_path = PathBuf::from("/usr/lib/vyoma/vmlinux");
+
+        if kernel_path.exists() {
+            Ok(kernel_path)
         } else {
-            Ok(0) // Simulate success
+            Err(BuildError::VmError("Kernel not found at /usr/lib/vyoma/vmlinux".to_string()))
         }
     }
 
-    async fn commit_cow_to_squashfs(&self, cow_file: &Path, temp_dir: &Path) -> Result<PathBuf, BuildError> {
-        // TODO: Properly convert COW file back to squashfs
-        // For now, create a new squashfs file as placeholder
-        let new_layer_name = format!("layer_{}.sqfs", chrono::Utc::now().timestamp());
-        let new_layer_path = self.temp_dir.join(&new_layer_name);
-
-        // Copy the COW file as a temporary stand-in
-        std::fs::copy(cow_file, &new_layer_path)
-            .map_err(|e| BuildError::LayerError(format!("Failed to create new layer: {}", e)))?;
-
-        info!("Created new layer: {:?}", new_layer_path);
-        Ok(new_layer_path)
+    fn build_ch_args(
+        &self,
+        rootfs_path: &Path,
+        kernel_path: &Path,
+        initramfs_path: &Path,
+        socket_path: &Path,
+    ) -> Vec<String> {
+        vec![
+            "--kernel".to_string(),
+            kernel_path.to_string_lossy().to_string(),
+            "--initramfs".to_string(),
+            initramfs_path.to_string_lossy().to_string(),
+            "--disk".to_string(),
+            format!("path={},readonly=on", rootfs_path.display()),
+            "--console".to_string(),
+            "off".to_string(), // Disable console to avoid hanging
+            "--serial".to_string(),
+            "tty".to_string(),
+            "--api-socket".to_string(),
+            socket_path.to_string_lossy().to_string(),
+            "--cpus".to_string(),
+            "1".to_string(), // Single CPU for builds
+            "--memory".to_string(),
+            "size=512M".to_string(), // 512MB RAM for builds
+            "--rng".to_string(),
+            "src=/dev/urandom".to_string(),
+        ]
     }
+
+
 
     async fn handle_copy(&self, rootfs_path: &Path, context_dir: &Path, src: &str, dst: &str) -> Result<(), BuildError> {
         info!("Injecting file {} -> {} using debugfs", src, dst);
@@ -259,11 +354,29 @@ impl BuildRunner {
     }
 
     async fn extract_squashfs(&self, squashfs_path: &Path, dest_dir: &Path) -> Result<(), BuildError> {
-        // TODO: Implement squashfs extraction
-        // For now, create an empty directory as placeholder
-        warn!("Squashfs extraction not yet implemented - creating empty directory");
+        info!("Extracting squashfs: {:?} -> {:?}", squashfs_path, dest_dir);
+
+        // Create destination directory
         std::fs::create_dir_all(dest_dir)
             .map_err(|e| BuildError::InjectionError(format!("Failed to create extract dir: {}", e)))?;
+
+        // Use unsquashfs to extract the squashfs file
+        let output = Command::new("unsquashfs")
+            .args(&[
+                "-f", // force overwrite
+                "-d", // destination directory
+                &dest_dir.to_string_lossy(),
+                &squashfs_path.to_string_lossy(),
+            ])
+            .output()
+            .map_err(|e| BuildError::InjectionError(format!("Failed to run unsquashfs: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(BuildError::InjectionError(format!("unsquashfs failed: {}", stderr)));
+        }
+
+        info!("Successfully extracted squashfs to: {:?}", dest_dir);
         Ok(())
     }
 
@@ -297,11 +410,15 @@ impl BuildRunner {
             user: config.user.clone(),
         };
 
+        // Compute actual hash of the rootfs
+        let hash = VmifConverter::compute_squashfs_hash(&final_rootfs)
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to compute hash: {}", e)))?;
+
         let manifest = vyoma_image::VmifManifest::new(
             "amd64".to_string(),
             None,
             None,
-            format!("sha256:{}", "placeholder"), // TODO: compute actual hash
+            format!("sha256:{}", hash),
             image_config,
             std::fs::metadata(&final_rootfs)?.len(),
         );
