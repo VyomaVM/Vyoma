@@ -243,6 +243,7 @@ impl Default for VmifConverter {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum SquashfsCompression {
     Zstd(u32),
     Gzip,
@@ -491,7 +492,7 @@ mod tests {
         let dest_dir = temp_dir.path().join("image");
         std::fs::create_dir_all(&dest_dir).unwrap();
 
-        let mut config = OciImageConfig::default();
+        let config = OciImageConfig::default();
         let mut labels = std::collections::HashMap::new();
         labels.insert("version".to_string(), "1.0".to_string());
         labels.insert("maintainer".to_string(), "test@example.com".to_string());
@@ -519,5 +520,278 @@ mod tests {
         let loaded = VmifConverter::load_manifest(&manifest_path).unwrap();
         assert_eq!(loaded.labels.get("version"), Some(&"1.0".to_string()));
         assert_eq!(loaded.labels.get("maintainer"), Some(&"test@example.com".to_string()));
+    }
+
+    #[test]
+    fn test_squashfs_all_compression_types() {
+        let temp_dir = TempDir::new().unwrap();
+        let source_dir = temp_dir.path().join("source");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::write(source_dir.join("test.txt"), "hello world").unwrap();
+
+        let compressions = vec![
+            SquashfsCompression::Zstd(3),
+            SquashfsCompression::Gzip,
+            SquashfsCompression::Xz,
+            SquashfsCompression::Lz4,
+        ];
+
+        for compression in compressions {
+            let dest_file = temp_dir.path().join("test.sqfs");
+            let result = VmifConverter::create_squashfs(&source_dir, &dest_file, compression);
+            assert!(result.is_ok());
+            assert!(dest_file.exists());
+        }
+    }
+
+    #[test]
+    fn test_converter_with_all_compression_sizes() {
+        let temp_dir = TempDir::new().unwrap();
+        let source_dir = temp_dir.path().join("source");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        
+        for i in 0..100 {
+            std::fs::write(source_dir.join(format!("file_{}.txt", i)), format!("content {}", i)).unwrap();
+        }
+
+        let dest_dir = temp_dir.path().join("image");
+        let converter = VmifConverter::new();
+        let config = OciImageConfig::default();
+
+        let result = converter.convert_directory_to_vmif(
+            &source_dir,
+            &dest_dir,
+            "multi-file-test",
+            "amd64",
+            config,
+            None,
+            None,
+            SquashfsCompression::default(),
+        );
+
+        assert!(result.is_ok());
+        let vmif_image = result.unwrap();
+        assert!(vmif_image.manifest.size_bytes > 0);
+        assert_eq!(vmif_image.manifest.arch, "amd64");
+    }
+
+    #[test]
+    fn test_verify_complete_vmif_image() {
+        let temp_dir = TempDir::new().unwrap();
+        let source_dir = temp_dir.path().join("source");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        
+        std::fs::create_dir_all(source_dir.join("etc")).unwrap();
+        std::fs::write(source_dir.join("etc/passwd"), "root:x:0:0::/:/bin/sh\n").unwrap();
+        
+        std::fs::create_dir_all(source_dir.join("bin")).unwrap();
+        std::fs::write(source_dir.join("bin/sh"), "#!/bin/sh\necho hello\n").unwrap();
+        
+        std::fs::create_dir_all(source_dir.join("usr/bin")).unwrap();
+        std::fs::write(source_dir.join("usr/bin/test"), "#!/bin/sh\n").unwrap();
+
+        let dest_dir = temp_dir.path().join("image");
+        let keypair = SigningKeyPair::generate();
+        let converter = VmifConverter::with_signing_key(keypair);
+        let config = OciImageConfig::default();
+
+        converter
+            .convert_directory_to_vmif(
+                &source_dir,
+                &dest_dir,
+                "verified-image",
+                "amd64",
+                config,
+                Some("kernel:v2".to_string()),
+                Some("initrd:v2".to_string()),
+                SquashfsCompression::default(),
+            )
+            .unwrap();
+
+        let result = VmifConverter::verify_image(&dest_dir);
+        assert!(result.is_ok());
+        let verified = result.unwrap();
+        
+        assert!(verified.rootfs_path.exists());
+        assert_eq!(verified.manifest.kernel, Some("kernel:v2".to_string()));
+        assert_eq!(verified.manifest.initrd, Some("initrd:v2".to_string()));
+        
+        let sig_path = dest_dir.join("vyoma.toml.sig");
+        assert!(sig_path.exists());
+    }
+}
+
+pub struct VmifMigration;
+
+impl VmifMigration {
+    pub fn detect_old_ext4_cache(cache_dir: &Path) -> Vec<PathBuf> {
+        let mut old_images = Vec::new();
+        
+        if !cache_dir.exists() {
+            return old_images;
+        }
+
+        if let Ok(entries) = std::fs::read_dir(cache_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let ext4_path = path.join("base.ext4");
+                    if ext4_path.exists() {
+                        old_images.push(path);
+                    }
+                }
+            }
+        }
+        
+        old_images
+    }
+
+    pub fn is_vmif_cache(cache_dir: &Path) -> bool {
+        if !cache_dir.exists() {
+            return false;
+        }
+
+        if let Ok(entries) = std::fs::read_dir(cache_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let sqfs_path = path.join("rootfs.sqfs");
+                    let manifest_path = path.join("vyoma.toml");
+                    if sqfs_path.exists() && manifest_path.exists() {
+                        return true;
+                    }
+                }
+            }
+        }
+        
+        false
+    }
+
+    pub fn get_cache_info(cache_dir: &Path) -> CacheInfo {
+        let mut info = CacheInfo {
+            total_images: 0,
+            vmif_images: 0,
+            old_ext4_images: 0,
+            total_size_bytes: 0,
+        };
+
+        if !cache_dir.exists() {
+            return info;
+        }
+
+        if let Ok(entries) = std::fs::read_dir(cache_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    info.total_images += 1;
+                    
+                    let sqfs_path = path.join("rootfs.sqfs");
+                    let manifest_path = path.join("vyoma.toml");
+                    let ext4_path = path.join("base.ext4");
+                    
+                    if sqfs_path.exists() && manifest_path.exists() {
+                        info.vmif_images += 1;
+                        if let Ok(metadata) = std::fs::metadata(&sqfs_path) {
+                            info.total_size_bytes += metadata.len();
+                        }
+                    } else if ext4_path.exists() {
+                        info.old_ext4_images += 1;
+                        if let Ok(metadata) = std::fs::metadata(&ext4_path) {
+                            info.total_size_bytes += metadata.len();
+                        }
+                    }
+                }
+            }
+        }
+
+        info
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CacheInfo {
+    pub total_images: usize,
+    pub vmif_images: usize,
+    pub old_ext4_images: usize,
+    pub total_size_bytes: u64,
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_detect_old_ext4_cache() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("images");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        
+        let img1 = cache_dir.join("alpine_latest");
+        std::fs::create_dir_all(&img1).unwrap();
+        std::fs::write(img1.join("base.ext4"), "fake ext4").unwrap();
+        
+        let img2 = cache_dir.join("ubuntu_latest");
+        std::fs::create_dir_all(&img2).unwrap();
+        std::fs::write(img2.join("rootfs.sqfs"), "fake sqfs").unwrap();
+        std::fs::write(img2.join("vyoma.toml"), "{}").unwrap();
+        
+        let old_images = VmifMigration::detect_old_ext4_cache(&cache_dir);
+        assert_eq!(old_images.len(), 1);
+        assert!(old_images[0].to_string_lossy().contains("alpine"));
+    }
+
+    #[test]
+    fn test_is_vmif_cache() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("images");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        
+        let img1 = cache_dir.join("alpine_latest");
+        std::fs::create_dir_all(&img1).unwrap();
+        std::fs::write(img1.join("rootfs.sqfs"), "fake").unwrap();
+        std::fs::write(img1.join("vyoma.toml"), "{}").unwrap();
+        
+        assert!(VmifMigration::is_vmif_cache(&cache_dir));
+        
+        let img2 = cache_dir.join("old_image");
+        std::fs::create_dir_all(&img2).unwrap();
+        std::fs::write(img2.join("base.ext4"), "fake").unwrap();
+        
+        assert!(VmifMigration::is_vmif_cache(&cache_dir));
+    }
+
+    #[test]
+    fn test_get_cache_info() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("images");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        
+        let img1 = cache_dir.join("vmif_image");
+        std::fs::create_dir_all(&img1).unwrap();
+        std::fs::write(img1.join("rootfs.sqfs"), vec![0u8; 1024]).unwrap();
+        std::fs::write(img1.join("vyoma.toml"), "{}").unwrap();
+        
+        let img2 = cache_dir.join("old_image");
+        std::fs::create_dir_all(&img2).unwrap();
+        std::fs::write(img2.join("base.ext4"), vec![0u8; 2048]).unwrap();
+        
+        let info = VmifMigration::get_cache_info(&cache_dir);
+        assert_eq!(info.total_images, 2);
+        assert_eq!(info.vmif_images, 1);
+        assert_eq!(info.old_ext4_images, 1);
+        assert_eq!(info.total_size_bytes, 3072);
+    }
+
+    #[test]
+    fn test_empty_cache_info() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("empty_images");
+        
+        let info = VmifMigration::get_cache_info(&cache_dir);
+        assert_eq!(info.total_images, 0);
+        assert_eq!(info.vmif_images, 0);
+        assert_eq!(info.old_ext4_images, 0);
+        assert_eq!(info.total_size_bytes, 0);
     }
 }
