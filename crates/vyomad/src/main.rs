@@ -167,11 +167,13 @@ async fn main() {
 
     let timemachine = Arc::new(tokio::sync::RwLock::new(timemachine::TimeMachine::new(&sled_db)));
 
+    let data_dir_path = std::path::PathBuf::from(&args.data_dir);
+    
     let state = AppState {
         vms: Arc::new(StdMutex::new(HashMap::new())),
         cgroups,
         cni_manager,
-        cluster_manager: Arc::new(cluster::ClusterManager::new()),
+        cluster_manager: Arc::new(cluster::ClusterManager::new(data_dir_path)),
         rootless: false,
         events_tx,
         wal,
