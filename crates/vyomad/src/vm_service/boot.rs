@@ -43,7 +43,7 @@ pub async fn start_vm(
             .context("Failed to start slirp")?;
         slirp_mgr = Some(slirp);
 
-        vmm.set_boot_source(&ch_config.kernel_path, &ch_config.boot_args, None).await
+        vmm.set_boot_source(&ch_config.kernel_path, &ch_config.boot_args, ch_config.initramfs_path.as_deref()).await
             .context("Boot source")?;
         
         vmm.add_drive("rootfs", &ch_config.rootfs_path, true).await
@@ -57,7 +57,7 @@ pub async fn start_vm(
         vmm.start_daemon(&ch_config.ch_path, None, false)
             .context("Failed to start Cloud Hypervisor")?;
 
-        vmm.set_boot_source(&ch_config.kernel_path, &ch_config.boot_args, None).await
+        vmm.set_boot_source(&ch_config.kernel_path, &ch_config.boot_args, ch_config.initramfs_path.as_deref()).await
             .context("Boot source")?;
 
         vmm.add_drive("rootfs", &ch_config.rootfs_path, true).await
