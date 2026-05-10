@@ -7,6 +7,7 @@ members = [
     "crates/vyoma-net",
     "crates/vyoma-teleport",
     "crates/vyoma-proto",
+    "crates/vyoma-build",
     "crates/vyoma-image",
     "crates/vyoma-agent",
     "crates/vyoma-sdk",

@@ -1,0 +1,20 @@
+[package]
+name = "vyoma-build"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror = "1.0"
+tempfile.workspace = true
+vyoma-core = { path = "../vyoma-core" }
+vyoma-storage = { path = "../vyoma-storage" }
+vyoma-image = { path = "../vyoma-image" }
+
+[dev-dependencies]
+tokio-test = "0.4"
