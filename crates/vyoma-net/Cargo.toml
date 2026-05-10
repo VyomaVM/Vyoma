@@ -20,6 +20,7 @@ base64 = "0.22"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 rand_core = "0.6"
 rand = "0.8"
+hex = "0.4"
 
 [dev-dependencies]
 tempfile = "3.0"
