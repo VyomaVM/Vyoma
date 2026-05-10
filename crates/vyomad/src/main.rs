@@ -167,6 +167,8 @@ async fn main() {
 
     let timemachine = Arc::new(tokio::sync::RwLock::new(timemachine::TimeMachine::new(&sled_db)));
 
+    let swarm_raft = Arc::new(std::sync::Mutex::new(crate::swarm::SwarmRaft::new(node_id)));
+
     let data_dir_path = std::path::PathBuf::from(&args.data_dir);
     
     let state = AppState {
@@ -179,6 +181,7 @@ async fn main() {
         wal,
         data_dir: args.data_dir.clone(),
         raft,
+        swarm_raft,
         timemachine,
         policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
     };
