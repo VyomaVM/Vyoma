@@ -146,6 +146,7 @@ mod tests {
             rootfs_sqfs_path: PathBuf::from("/home/.vyoma/images/alpine_latest/rootfs.sqfs"),
             manifest: None,
             config: vyoma_core::oci::OciImageConfig::default(),
+            kernel_path: None,
         };
         assert!(img.rootfs_sqfs_path.to_string_lossy().contains("alpine"));
     }
