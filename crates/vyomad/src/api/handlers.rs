@@ -728,8 +728,8 @@ pub async fn build_image(
                 // Mount the loop device to a temp dir
                 let mount_point = tempfile::tempdir()
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-                let mount_status = Command::new("sudo")
-                    .args(&["mount", &loop_device, mount_point.path().to_str().unwrap()])
+                let mount_status = Command::new("mount")
+                    .args(&[&loop_device, mount_point.path().to_str().unwrap()])
                     .status()
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -750,9 +750,8 @@ pub async fn build_image(
 
                 // Execute chroot
                 // cmd string might need splitting or sh -c
-                let chroot_status = Command::new("sudo")
+                let chroot_status = Command::new("chroot")
                     .args(&[
-                        "chroot",
                         mount_point.path().to_str().unwrap(),
                         "/bin/sh",
                         "-c",
@@ -762,8 +761,8 @@ pub async fn build_image(
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
                 // Unmount
-                let umount_status = Command::new("sudo")
-                    .args(&["umount", mount_point.path().to_str().unwrap()])
+                let umount_status = Command::new("umount")
+                    .args(&[mount_point.path().to_str().unwrap()])
                     .status()
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -787,8 +786,8 @@ pub async fn build_image(
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
                 let mount_point = tempfile::tempdir()
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-                let mount_status = Command::new("sudo")
-                    .args(&["mount", &loop_device, mount_point.path().to_str().unwrap()])
+                let mount_status = Command::new("mount")
+                    .args(&[&loop_device, mount_point.path().to_str().unwrap()])
                     .status()
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -827,8 +826,8 @@ pub async fn build_image(
                         .status()
                         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
                     if !cp_status.success() {
-                        let _ = Command::new("sudo")
-                            .args(&["umount", mount_point.path().to_str().unwrap()])
+                        let _ = Command::new("umount")
+                            .args(&[mount_point.path().to_str().unwrap()])
                             .status();
                         let _ = StorageManager::detach_loop_device(&loop_device);
                         return Err((
@@ -841,8 +840,8 @@ pub async fn build_image(
                         Ok(_) => {}
                         Err(e) => {
                             // clean up
-                            let _ = Command::new("sudo")
-                                .args(&["umount", mount_point.path().to_str().unwrap()])
+                            let _ = Command::new("umount")
+                                .args(&[mount_point.path().to_str().unwrap()])
                                 .status();
                             let _ = StorageManager::detach_loop_device(&loop_device);
                             return Err((
@@ -853,8 +852,8 @@ pub async fn build_image(
                     }
                 }
 
-                let _ = Command::new("sudo")
-                    .args(&["umount", mount_point.path().to_str().unwrap()])
+                let _ = Command::new("umount")
+                    .args(&[mount_point.path().to_str().unwrap()])
                     .status();
                 let _ = StorageManager::detach_loop_device(&loop_device);
             }
