@@ -44,6 +44,7 @@ pub struct PreparedImage {
     pub rootfs_sqfs_path: PathBuf,
     pub manifest: Option<vyoma_image::VmifManifest>,
     pub config: vyoma_core::oci::OciImageConfig,
+    pub kernel_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -141,6 +142,7 @@ mod tests {
             rootfs_sqfs_path: PathBuf::from("/home/.vyoma/images/alpine_latest/rootfs.sqfs"),
             manifest: None,
             config: vyoma_core::oci::OciImageConfig::default(),
+            kernel_path: None,
         };
         assert!(img.rootfs_sqfs_path.to_string_lossy().contains("alpine"));
     }
