@@ -21,7 +21,7 @@ impl CompatMatrix {
     pub fn new(vyomad_url: impl Into<String>) -> Self {
         Self {
             vyomad_url: vyomad_url.into(),
-            data_dir: "~/.ignite".to_string(),
+            data_dir: "~/.vyoma".to_string(),
             pull_timeout: Duration::from_secs(300),
             boot_timeout: Duration::from_secs(120),
             health_timeout: Duration::from_secs(30),

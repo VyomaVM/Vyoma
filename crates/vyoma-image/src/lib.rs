@@ -9,6 +9,6 @@ pub use signing::{
     SignedManifest, SigningKeyPair, TrustPolicy, SigningError,
     BinarySignature, compute_hash, compute_file_hash,
 };
-pub use converter::{VmifConverter, ConverterError, SquashfsCompression};
+pub use converter::{VmifConverter, ConverterError, SquashfsCompression, VmifMigration, CacheInfo};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;

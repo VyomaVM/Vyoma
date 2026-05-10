@@ -333,4 +333,47 @@ mod tests {
         let image_dir = bridge.get_image_dir("my.registry.com:5000/ubuntu:latest");
         assert!(image_dir.to_string_lossy().contains("my.registry.com_5000_ubuntu_latest"));
     }
+
+    #[test]
+    fn test_cache_image_roundtrip() {
+        let temp_dir = TempDir::new().unwrap();
+        let bridge = HubBridge::new(temp_dir.path().to_path_buf());
+        
+        let manifest = VmifManifest::new(
+            "amd64".to_string(),
+            Some("kernel:v1".to_string()),
+            None,
+            "sha256:test123".to_string(),
+            OciImageConfig::default(),
+            1024,
+        );
+        
+        bridge.cache_image("test:latest", &manifest).unwrap();
+        
+        let loaded = bridge.get_cached_image("test:latest");
+        assert!(loaded.is_some());
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.arch, "amd64");
+        assert_eq!(loaded.rootfs, "sha256:test123");
+    }
+
+    #[test]
+    fn test_oci_manager_parse_image_ref() {
+        let oci = OciManagerHub::new();
+        
+        let (reg, repo, tag) = oci.parse_image_ref("ubuntu:latest");
+        assert_eq!(reg, "registry-1.docker.io");
+        assert_eq!(repo, "library/ubuntu");
+        assert_eq!(tag, "latest");
+        
+        let (reg, repo, tag) = oci.parse_image_ref("my.registry.com:5000/ubuntu:v1");
+        assert_eq!(reg, "my.registry.com:5000");
+        assert_eq!(repo, "ubuntu");
+        assert_eq!(tag, "v1");
+        
+        let (reg, repo, tag) = oci.parse_image_ref("localhost:5000/test:latest");
+        assert_eq!(reg, "localhost:5000");
+        assert_eq!(repo, "test");
+        assert_eq!(tag, "latest");
+    }
 }
