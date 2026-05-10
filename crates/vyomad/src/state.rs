@@ -41,7 +41,7 @@ impl AppState {
                 std::path::PathBuf::from("/tmp/test-cni-plugins"),
                 std::path::PathBuf::from("/tmp/test-cni-config"),
             )),
-            cluster_manager: Arc::new(cluster::ClusterManager::new()),
+            cluster_manager: Arc::new(cluster::ClusterManager::new(std::path::PathBuf::from("/tmp/test"))),
             rootless: true,
             events_tx,
             wal: Arc::new(wal::Wal::new_test()),
