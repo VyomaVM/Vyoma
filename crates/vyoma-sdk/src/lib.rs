@@ -338,17 +338,18 @@ mod tests {
         assert_eq!(client.config.endpoint(), "localhost:50051");
     }
 
-    #[test]
-    fn test_mock_client_create_vm() {
-        let client = mock::MockIgniteClient::new();
-        let request = CreateVmRequest {
-            image: "ubuntu:latest".to_string(),
-            vcpus: 2,
-            memory_mb: 2048,
-            name: "test-vm".to_string(),
-            ports: vec![],
-            volumes: vec![],
-        };
+     #[test]
+     fn test_mock_client_create_vm() {
+         let client = mock::MockIgniteClient::new();
+         let request = CreateVmRequest {
+             image: "ubuntu:latest".to_string(),
+             vcpus: 2,
+             memory_mb: 2048,
+             name: "test-vm".to_string(),
+             ports: vec![],
+             volumes: vec![],
+             networks: vec![],
+         };
         let response = client.create_vm(request).unwrap();
         assert_eq!(response.vm_id, "vm-mock-123");
     }
