@@ -56,7 +56,8 @@ impl BuildRunner {
                 Instruction::Run { command } => {
                     info!("Processing RUN {}", command);
                     if let Some(ref rootfs) = current_rootfs {
-                        current_rootfs = Some(self.handle_run(rootfs, command).await?);
+                        let new_rootfs = self.handle_run(rootfs, command).await?;
+                        current_rootfs = Some(new_rootfs);
                     } else {
                         return Err(BuildError::ExecutionError(
                             "RUN instruction without FROM".to_string()
