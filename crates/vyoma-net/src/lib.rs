@@ -10,4 +10,4 @@ pub mod wireguard;
 pub use error::{NetworkError, Result};
 pub use bridge::{BridgeManager, BridgeInfo};
 pub use tap::{TapManager, TapInfo};
-pub use wireguard::{WireGuardNode, WireGuardConfig, PeerConfig};
+pub use wireguard::{WireGuardNode, WireGuardConfig, PeerConfig, add_route_to_peer_endpoint, add_route_to_subnet, remove_route_to_subnet, get_interface_mtu};

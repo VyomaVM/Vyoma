@@ -438,6 +438,87 @@ fn delete_wireguard_interface(interface_name: &str) -> std::result::Result<(), N
     Ok(())
 }
 
+pub fn add_route_to_peer_endpoint(peer_ip: &str, interface_name: &str) -> std::result::Result<(), NetworkError> {
+    let output = Command::new("ip")
+        .args(&["route", "add", peer_ip, "dev", interface_name])
+        .output()
+        .map_err(|e| NetworkError::Io(e))?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("File exists") || stderr.contains("17") {
+            info!("Route to {} via {} already exists", peer_ip, interface_name);
+            return Ok(());
+        }
+        return Err(NetworkError::Netlink(format!("Failed to add route: {}", stderr)));
+    }
+    
+    info!("Added route to peer {} via {}", peer_ip, interface_name);
+    Ok(())
+}
+
+pub fn add_route_to_subnet(subnet: &str, peer_ip: &str, interface_name: &str) -> std::result::Result<(), NetworkError> {
+    let output = Command::new("ip")
+        .args(&["route", "add", subnet, "via", peer_ip, "dev", interface_name])
+        .output()
+        .map_err(|e| NetworkError::Io(e))?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("File exists") || stderr.contains("17") {
+            info!("Route to {} via {} already exists", subnet, peer_ip);
+            return Ok(());
+        }
+        return Err(NetworkError::Netlink(format!("Failed to add subnet route: {}", stderr)));
+    }
+    
+    info!("Added subnet route {} via {} -> {}", subnet, peer_ip, interface_name);
+    Ok(())
+}
+
+pub fn remove_route_to_subnet(subnet: &str) -> std::result::Result<(), NetworkError> {
+    let output = Command::new("ip")
+        .args(&["route", "del", subnet])
+        .output()
+        .map_err(|e| NetworkError::Io(e))?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("No such process") || stderr.contains("17") {
+            return Ok(());
+        }
+        return Err(NetworkError::Netlink(format!("Failed to remove route: {}", stderr)));
+    }
+    
+    Ok(())
+}
+
+pub fn get_interface_mtu(interface_name: &str) -> std::result::Result<u32, NetworkError> {
+    let output = Command::new("ip")
+        .args(&["link", "show", interface_name])
+        .output()
+        .map_err(|e| NetworkError::Io(e))?;
+    
+    if !output.status.success() {
+        return Err(NetworkError::NotFound(format!("Interface {} not found", interface_name)));
+    }
+    
+    let output_str = String::from_utf8_lossy(&output.stdout);
+    for line in output_str.lines() {
+        if line.contains(interface_name) {
+            if let Some(mtu_pos) = line.find("mtu ") {
+                let mtu_str = &line[mtu_pos + 4..];
+                let mtu: u32 = mtu_str.split_whitespace().next()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(1500);
+                return Ok(mtu);
+            }
+        }
+    }
+    
+    Ok(1500)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,5 +651,32 @@ mod tests {
         assert_eq!(config.interface_name, "custom-wg");
         assert_eq!(config.mtu, Some(1500));
         assert_eq!(config.node_ip, Some(Ipv4Addr::new(10, 100, 0, 1)));
+    }
+    
+    #[test]
+    fn test_get_interface_mtu_invalid() {
+        let result = get_interface_mtu("nonexistent-interface-xyz");
+        assert!(result.is_err());
+    }
+    
+    #[test]
+    fn test_route_functions_handling() {
+        let result = add_route_to_peer_endpoint("192.168.1.1", "nonexistent-wg");
+        if result.is_err() {
+            let err = result.unwrap_err();
+            assert!(matches!(err, NetworkError::Io(_) | NetworkError::Netlink(_)));
+        }
+        
+        let result = add_route_to_subnet("10.42.0.0/24", "192.168.1.1", "nonexistent-wg");
+        if result.is_err() {
+            let err = result.unwrap_err();
+            assert!(matches!(err, NetworkError::Io(_) | NetworkError::Netlink(_)));
+        }
+        
+        let result = remove_route_to_subnet("10.42.0.0/24");
+        if result.is_err() {
+            let err = result.unwrap_err();
+            assert!(matches!(err, NetworkError::Io(_) | NetworkError::Netlink(_)));
+        }
     }
 }

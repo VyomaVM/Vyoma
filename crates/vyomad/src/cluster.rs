@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::process::Command;
 use tracing::{info, error, warn};
 
-use vyoma_net::{WireGuardNode, WireGuardConfig, PeerConfig};
+use vyoma_net::{WireGuardNode, WireGuardConfig, PeerConfig, add_route_to_peer_endpoint, add_route_to_subnet, remove_route_to_subnet};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NodeInfo {
@@ -351,14 +351,29 @@ impl ClusterManager {
     }
     
     fn establish_route(&self, peer: &NodeInfo) {
-        // ip route add 10.42.{id}.0/24 encap vxlan id 42 dst {peer.ip} dev ign-vxlan
+        let wg_iface = "vyoma-wg0";
+        
+        if let Some(wg) = self.wireguard_node.lock().unwrap().as_ref() {
+            if wg.is_running() {
+                if let Err(e) = add_route_to_peer_endpoint(&peer.ip, wg_iface) {
+                    warn!("Failed to add route to peer {} via WG: {:?}", peer.ip, e);
+                }
+                
+                let subnet = format!("10.42.{}.0/24", peer.subnet_id);
+                if let Err(e) = add_route_to_subnet(&subnet, &peer.ip, wg_iface) {
+                    warn!("Failed to add subnet route {}: {:?}", subnet, e);
+                }
+                
+                info!("Established WireGuard route to {} (Subnet {})", peer.ip, subnet);
+                return;
+            }
+        }
+        
         let peer_subnet = format!("10.42.{}.0/24", peer.subnet_id);
         let if_name = "ign-vxlan";
         
         info!("Adding route to {} via VXLAN -> {}", peer_subnet, peer.ip);
         
-        // Check if route exists?
-        // ip route add ...
         let res = Command::new("ip")
             .args(&[
                 "route", "add", &peer_subnet,
@@ -372,9 +387,33 @@ impl ClusterManager {
         } else {
              let out = res.unwrap();
              if !out.status.success() {
-                  // Might actuall fail if exists
                   warn!("Route add failed (maybe exists): {}", String::from_utf8_lossy(&out.stderr));
              }
         }
+    }
+    
+    pub fn remove_route_for_peer(&self, peer: &NodeInfo) -> anyhow::Result<()> {
+        let subnet = format!("10.42.{}.0/24", peer.subnet_id);
+        
+        if let Err(e) = remove_route_to_subnet(&subnet) {
+            warn!("Failed to remove subnet route {}: {:?}", subnet, e);
+        }
+        
+        info!("Removed route for peer {} (Subnet {})", peer.id, peer.subnet_id);
+        Ok(())
+    }
+    
+    pub fn shutdown(&self) {
+        info!("Shutting down ClusterManager WireGuard...");
+        
+        if let Some(mut wg) = self.wireguard_node.lock().unwrap().take() {
+            for peer in self.peers.lock().unwrap().values() {
+                let subnet = format!("10.42.{}.0/24", peer.subnet_id);
+                let _ = remove_route_to_subnet(&subnet);
+            }
+            let _ = wg.stop();
+        }
+        
+        info!("ClusterManager WireGuard shutdown complete");
     }
 }
