@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
-use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
 
@@ -26,17 +26,10 @@ pub async fn prepare_agent(
     vyoma_core::initramfs::create_initramfs(&init_script, agent_path, &initramfs_path)
         .context("Failed to create initramfs")?;
 
-    let temp_init_path = vm_dir.join("vyoma-init.sh");
-    fs::write(&temp_init_path, "#!/bin/sh\nset -e\n")?;
-
-    info!(
-        "Agent prepared with initramfs at {:?} and init script at {:?}",
-        initramfs_path, temp_init_path
-    );
+    info!("Agent prepared with initramfs at {:?}", initramfs_path);
 
     Ok(AgentConfig {
         initramfs_path: Some(initramfs_path),
-        init_script_path: temp_init_path,
         cmd: vec!["/sbin/init".to_string()],
         workdir: "/".to_string(),
         envs: vec![],
@@ -72,22 +65,19 @@ mod tests {
         assert!(script.contains("mount"));
     }
 
-    #[test]
-    fn test_prepare_agent_without_agent() {
+    #[tokio::test]
+    async fn test_prepare_agent_without_agent() {
         let temp_dir = TempDir::new().unwrap();
         let config = vyoma_core::oci::OciImageConfig::default();
-        
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        
-        let result = rt.block_on(prepare_agent(
-            &crate::state::AppState::with_vm_service(Arc::new(crate::state::AppState::new_test())),
+
+        let state = Arc::new(crate::state::AppState::new_test());
+        let result = prepare_agent(
+            &crate::state::AppState::with_vm_service(state),
             "/dev/null",
             temp_dir.path(),
             &config,
-        ));
-        
+        ).await;
+
         assert!(result.is_ok());
         let agent_config = result.unwrap();
         assert!(agent_config.initramfs_path.is_some());
