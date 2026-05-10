@@ -41,7 +41,8 @@ pub struct VmRunResponse {
 
 #[derive(Debug, Clone)]
 pub struct PreparedImage {
-    pub path: PathBuf,
+    pub rootfs_sqfs_path: PathBuf,
+    pub manifest: Option<vyoma_image::VmifManifest>,
     pub config: vyoma_core::oci::OciImageConfig,
 }
 
@@ -137,10 +138,11 @@ mod tests {
     #[test]
     fn test_prepared_image_paths() {
         let img = PreparedImage {
-            path: PathBuf::from("/home/.ignite/images/alpine_latest/base.ext4"),
+            rootfs_sqfs_path: PathBuf::from("/home/.vyoma/images/alpine_latest/rootfs.sqfs"),
+            manifest: None,
             config: vyoma_core::oci::OciImageConfig::default(),
         };
-        assert!(img.path.to_string_lossy().contains("alpine"));
+        assert!(img.rootfs_sqfs_path.to_string_lossy().contains("alpine"));
     }
 
     #[test]

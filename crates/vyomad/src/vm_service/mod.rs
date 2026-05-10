@@ -105,7 +105,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
 
     let storage = match storage::prepare_storage(
         &state,
-        &prepared_image.path,
+        &prepared_image.rootfs_sqfs_path,
         &vm_dir,
         &vm_id,
     ).await {
@@ -192,7 +192,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         config_volumes: request.volumes.clone(),
         hostname: request.hostname.clone(),
         labels: request.labels.clone(),
-        base_image_path: prepared_image.path.to_string_lossy().to_string(),
+        base_image_path: prepared_image.rootfs_sqfs_path.to_string_lossy().to_string(),
         vcpu: request.vcpu,
         mem_size_mib: request.mem_size_mib,
         networks: request.networks.clone(),
