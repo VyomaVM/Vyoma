@@ -12,7 +12,7 @@ use vyoma_net::{WireGuardNode, WireGuardConfig, PeerConfig, add_route_to_peer_en
 pub struct NodeInfo {
     pub id: String,
     pub ip: String,
-    pub role: String, // "seed" or "worker"
+    pub role: String,
     pub subnet_id: u8,
     pub wireguard_public_key: Option<String>,
     pub wireguard_port: Option<u16>,
@@ -38,6 +38,7 @@ impl NodeInfo {
 }
 
 #[derive(Clone)]
+#[deprecated(since = "0.2.0", note = "Use SwarmRaft instead - all swarm operations now go through Raft")]
 pub struct ClusterManager {
     pub self_node: Arc<Mutex<Option<NodeInfo>>>,
     pub peers: Arc<Mutex<HashMap<String, NodeInfo>>>,
@@ -47,7 +48,6 @@ pub struct ClusterManager {
 }
 
 fn get_outbound_ip() -> String {
-    // Best effort to find the primary interface IP
     match std::net::UdpSocket::bind("0.0.0.0:0") {
         Ok(s) => match s.connect("8.8.8.8:80") {
             Ok(_) => s.local_addr().map(|a| a.ip().to_string()).unwrap_or("127.0.0.1".to_string()),
@@ -57,7 +57,9 @@ fn get_outbound_ip() -> String {
     }
 }
 
+#[deprecated(since = "0.2.0", note = "Use SwarmRaft instead")]
 impl ClusterManager {
+    #[deprecated(since = "0.2.0", note = "Use SwarmRaft::new() instead")]
     pub fn new(data_dir: PathBuf) -> Self {
         Self {
             self_node: Arc::new(Mutex::new(None)),
@@ -68,6 +70,7 @@ impl ClusterManager {
         }
     }
     
+    #[deprecated(since = "0.2.0", note = "Use SwarmRaft instead")]
     fn get_wireguard_key_path(&self) -> PathBuf {
         let mut path = self.data_dir.clone();
         path.push("wireguard");
@@ -75,6 +78,7 @@ impl ClusterManager {
         path
     }
     
+    #[deprecated(since = "0.2.0", note = "Network operations now handled by NetworkIntegration")]
     fn ensure_wireguard_node(&self, subnet_id: u8) -> anyhow::Result<WireGuardNode> {
         let key_path = self.get_wireguard_key_path();
         
@@ -87,23 +91,15 @@ impl ClusterManager {
         let mut config = WireGuardConfig::default();
         config.node_ip = Some(node_ip);
         
-        let mut node = if key_path.exists() {
-            WireGuardNode::from_key(key_path, config)?
-        } else {
-            WireGuardNode::from_key(key_path, config)?
-        };
-        
+        let mut node = WireGuardNode::from_key(key_path, config)?;
         node.start()?;
-        
-        let listen_port = node.get_listen_port().unwrap_or(51820);
         
         Ok(node)
     }
     
+    #[deprecated(since = "0.2.0", note = "Use /swarm/init with Raft instead")]
     pub fn init(&self) -> String {
         let id = uuid::Uuid::new_v4().to_string();
-        
-        let node_ip = Ipv4Addr::new(10, 42, 1, 1);
         
         if let Ok(wg_node) = self.ensure_wireguard_node(1) {
             let pub_key = wg_node.get_public_key_base64();
@@ -122,7 +118,7 @@ impl ClusterManager {
             *self.self_node.lock().unwrap() = Some(node.clone());
             self.peers.lock().unwrap().insert(id.clone(), node.clone());
             *self.subnet_allocator.lock().unwrap() = 2;
-            info!("Swarm Initialized. Node ID: {} (Subnet 10.42.1.0/24, WG Port {})", id, listen_port);
+            info!("Swarm Initialized (Legacy). Node ID: {} (Subnet 10.42.1.0/24, WG Port {})", id, listen_port);
             self.setup_local_networking(1);
             id
         } else {
@@ -137,12 +133,13 @@ impl ClusterManager {
             *self.self_node.lock().unwrap() = Some(node.clone());
             self.peers.lock().unwrap().insert(id.clone(), node.clone());
             *self.subnet_allocator.lock().unwrap() = 2;
-            info!("Swarm Initialized (without WireGuard). Node ID: {} (Subnet 10.42.1.0/24)", id);
+            info!("Swarm Initialized (Legacy without WireGuard). Node ID: {} (Subnet 10.42.1.0/24)", id);
             self.setup_local_networking(1);
             id
         }
     }
 
+    #[deprecated(since = "0.2.0", note = "Use /swarm/join with Raft instead")]
     pub async fn join(&self, seed_ip: &str) -> anyhow::Result<()> {
         let id = uuid::Uuid::new_v4().to_string();
         let my_ip = get_outbound_ip();
@@ -172,7 +169,7 @@ impl ClusterManager {
             wireguard_port: Some(my_port),
         };
         
-        info!("Joining swarm at {}...", seed_ip);
+        info!("Joining swarm at {} (Legacy)...", seed_ip);
         
         let client = reqwest::Client::new();
         let port = std::env::var("IGNITE_DAEMON_PORT").unwrap_or_else(|_| "3000".to_string());
@@ -196,7 +193,7 @@ impl ClusterManager {
         let assigned_node = body.assigned;
         let peers = body.peers;
         
-        info!("Joined Swarm! Assigned Subnet: 10.42.{}.0/24, WG Port: {}", assigned_node.subnet_id, my_port);
+        info!("Joined Swarm (Legacy)! Assigned Subnet: 10.42.{}.0/24, WG Port: {}", assigned_node.subnet_id, my_port);
         
         *self.self_node.lock().unwrap() = Some(assigned_node.clone());
         self.setup_local_networking(assigned_node.subnet_id);
@@ -225,6 +222,7 @@ impl ClusterManager {
         Ok(())
     }
     
+    #[deprecated(since = "0.2.0", note = "WireGuard peers now managed by NetworkIntegration")]
     pub fn add_wireguard_peer(&self, peer: &NodeInfo) -> anyhow::Result<()> {
         let mut wg_guard = self.wireguard_node.lock().unwrap();
         if let Some(wg) = wg_guard.as_mut() {
@@ -235,13 +233,13 @@ impl ClusterManager {
                 let peer_config = PeerConfig::new(pub_key.clone(), endpoint)
                     .with_allowed_ips(vec![format!("10.42.{}.0/24", peer.subnet_id)]);
                 wg.add_peer(peer_config)?;
-                info!("Added WireGuard peer: {} at {}", peer.id, endpoint);
+                info!("Added WireGuard peer (legacy): {} at {}", peer.id, endpoint);
             }
         }
         Ok(())
     }
     
-    // Seed Logic: Validate and Assign
+    #[deprecated(since = "0.2.0", note = "Use Raft-based registration instead")]
     pub fn handle_registration(&self, mut node: NodeInfo) -> (NodeInfo, Vec<NodeInfo>) {
         let mut peers = self.peers.lock().unwrap();
         
@@ -253,7 +251,7 @@ impl ClusterManager {
         node.subnet_id = *alloc;
         *alloc += 1;
         
-        info!("Registered Node {} -> Subnet {}, WG Key: {:?}, Port: {:?}",
+        info!("Registered Node (Legacy) {} -> Subnet {}, WG Key: {:?}, Port: {:?}",
             node.id, node.subnet_id, node.wireguard_public_key, node.wireguard_port);
         
         peers.insert(node.id.clone(), node.clone());
@@ -280,28 +278,25 @@ impl ClusterManager {
     }
     
     #[allow(dead_code)]
+    #[deprecated(since = "0.2.0", note = "Node discovery now via Raft")]
     pub fn add_node_notify(&self, node: NodeInfo) {
         let mut peers = self.peers.lock().unwrap();
         if !peers.contains_key(&node.id) {
-             info!("Discovered Node {} (Subnet {})", node.id, node.subnet_id);
+             info!("Discovered Node (Legacy) {} (Subnet {})", node.id, node.subnet_id);
              self.establish_route(&node);
              peers.insert(node.id.clone(), node);
         }
     }
     
+    #[deprecated(since = "0.2.0", note = "Use /swarm/nodes with SwarmRaft instead")]
     pub fn list_nodes(&self) -> Vec<NodeInfo> {
         self.peers.lock().unwrap().values().cloned().collect()
     }
     
-    // --- Networking Logic ---
-    
+    #[deprecated(since = "0.2.0", note = "Network setup now handled by NetworkIntegration")]
     fn setup_local_networking(&self, subnet_id: u8) {
-        // 1. Configure CNI Config
         let subnet = format!("10.42.{}.0/24", subnet_id);
-        let bridge_ip = format!("10.42.{}.1", subnet_id);
         
-        // Write CNI (Overwrite existing)
-        // We need path to CNI dir. Hardcoded here as per main.rs
         let home = dirs::home_dir().expect("No home dir");
         let cni_config_dir = home.join(".ignite").join("cni").join("net.d");
         let bridge_conf = cni_config_dir.join("10-ignite-bridge.conf");
@@ -324,24 +319,19 @@ impl ClusterManager {
             serde_json::to_writer_pretty(f, &conf).unwrap();
         }
         
-        // 2. Configure Bridge IP manually (CNI does it on first Container run usually, 
-        // but for Overlay reachability we might want it up?
-        // Actually, CNI creates the bridge.
-        // We just need to Ensure VXLAN interface exists.
-        
         self.ensure_vxlan_device();
     }
     
+    #[deprecated(since = "0.2.0", note = "VXLAN now managed by NetworkIntegration")]
     fn ensure_vxlan_device(&self) {
-        // ip link add ign-vxlan type vxlan id 42 dstport 4789 external
         let if_name = "ign-vxlan";
         
         let output = Command::new("ip").args(&["link", "show", if_name]).output();
         if let Ok(o) = output {
-            if o.status.success() { return; } // Exists
+            if o.status.success() { return; }
         }
         
-        info!("Creating VXLAN device {}", if_name);
+        info!("Creating VXLAN device (legacy) {}", if_name);
         let _ = Command::new("ip")
             .args(&["link", "add", if_name, "type", "vxlan", "id", "42", "dstport", "4789", "external"])
             .output();
@@ -350,6 +340,7 @@ impl ClusterManager {
             .output();
     }
     
+    #[deprecated(since = "0.2.0", note = "Routes now managed by NetworkIntegration")]
     fn establish_route(&self, peer: &NodeInfo) {
         let wg_iface = "vyoma-wg0";
         
@@ -364,7 +355,7 @@ impl ClusterManager {
                     warn!("Failed to add subnet route {}: {:?}", subnet, e);
                 }
                 
-                info!("Established WireGuard route to {} (Subnet {})", peer.ip, subnet);
+                info!("Established WireGuard route (legacy) to {} (Subnet {})", peer.ip, subnet);
                 return;
             }
         }
@@ -372,7 +363,7 @@ impl ClusterManager {
         let peer_subnet = format!("10.42.{}.0/24", peer.subnet_id);
         let if_name = "ign-vxlan";
         
-        info!("Adding route to {} via VXLAN -> {}", peer_subnet, peer.ip);
+        info!("Adding route (legacy) to {} via VXLAN -> {}", peer_subnet, peer.ip);
         
         let res = Command::new("ip")
             .args(&[
@@ -392,6 +383,7 @@ impl ClusterManager {
         }
     }
     
+    #[deprecated(since = "0.2.0", note = "Routes now managed by NetworkIntegration")]
     pub fn remove_route_for_peer(&self, peer: &NodeInfo) -> anyhow::Result<()> {
         let subnet = format!("10.42.{}.0/24", peer.subnet_id);
         
@@ -399,12 +391,13 @@ impl ClusterManager {
             warn!("Failed to remove subnet route {}: {:?}", subnet, e);
         }
         
-        info!("Removed route for peer {} (Subnet {})", peer.id, peer.subnet_id);
+        info!("Removed route (legacy) for peer {} (Subnet {})", peer.id, peer.subnet_id);
         Ok(())
     }
     
+    #[deprecated(since = "0.2.0", note = "Shutdown now handled by NetworkIntegration")]
     pub fn shutdown(&self) {
-        info!("Shutting down ClusterManager WireGuard...");
+        info!("Shutting down ClusterManager WireGuard (legacy)...");
         
         if let Some(mut wg) = self.wireguard_node.lock().unwrap().take() {
             for peer in self.peers.lock().unwrap().values() {
@@ -414,6 +407,6 @@ impl ClusterManager {
             let _ = wg.stop();
         }
         
-        info!("ClusterManager WireGuard shutdown complete");
+        info!("ClusterManager WireGuard shutdown (legacy) complete");
     }
 }
