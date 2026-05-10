@@ -97,6 +97,14 @@ impl Wal {
         Ok(Self { tree, vm_state })
     }
 
+    pub fn new_test() -> Self {
+        let db = sled::Config::new()
+            .temporary(true)
+            .open()
+            .expect("Failed to create test DB");
+        Self::new(&db).expect("Failed to create test Wal")
+    }
+
     pub fn open_or_create(path: &Path) -> Result<(Db, Self)> {
         std::fs::create_dir_all(path)?;
         

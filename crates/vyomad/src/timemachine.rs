@@ -47,6 +47,14 @@ impl TimeMachine {
         Self { tree }
     }
 
+    pub fn new_test() -> Self {
+        let db = sled::Config::new()
+            .temporary(true)
+            .open()
+            .expect("Failed to create test DB");
+        Self::new(&db)
+    }
+
     fn get_snapshots(&self, vm_id: &str) -> Vec<SnapshotEntry> {
         if let Ok(Some(bytes)) = self.tree.get(vm_id) {
             serde_json::from_slice(&bytes).unwrap_or_default()
