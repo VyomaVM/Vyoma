@@ -167,9 +167,19 @@ async fn main() {
 
     let timemachine = Arc::new(tokio::sync::RwLock::new(timemachine::TimeMachine::new(&sled_db)));
 
-    let swarm_raft = Arc::new(std::sync::Mutex::new(crate::swarm::SwarmRaft::new(node_id)));
-
     let data_dir_path = std::path::PathBuf::from(&args.data_dir);
+
+    let network_integration = std::sync::Arc::new(std::sync::Mutex::new(Some(
+        crate::swarm::NetworkIntegration::new(data_dir_path.clone())
+    )));
+
+    let mut swarm_raft = crate::swarm::SwarmRaft::new(node_id);
+    
+    let net_integration = network_integration.lock().unwrap().as_ref().unwrap().clone();
+    let callback = crate::swarm::create_network_callback(net_integration);
+    swarm_raft.set_side_effect_callback(callback);
+    
+    let swarm_raft = Arc::new(std::sync::Mutex::new(swarm_raft));
     
     let state = AppState {
         vms: Arc::new(StdMutex::new(HashMap::new())),
@@ -182,6 +192,7 @@ async fn main() {
         data_dir: args.data_dir.clone(),
         raft,
         swarm_raft,
+        network_integration,
         timemachine,
         policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
     };

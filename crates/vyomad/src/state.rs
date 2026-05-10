@@ -12,7 +12,7 @@ use vyoma_core::policy::PolicyManager;
 
 use crate::cluster;
 use crate::swarm::raft_types::SwarmConfig;
-use crate::swarm::SwarmRaft;
+use crate::swarm::{SwarmRaft, NetworkIntegration};
 
 pub mod wal;
 pub mod recovery;
@@ -29,6 +29,7 @@ pub struct AppState {
     pub data_dir: String,
     pub raft: Option<openraft::Raft<SwarmConfig>>,
     pub swarm_raft: Arc<StdMutex<SwarmRaft>>,
+    pub network_integration: Arc<StdMutex<Option<NetworkIntegration>>>,
     pub timemachine: Arc<tokio::sync::RwLock<crate::timemachine::TimeMachine>>,
     pub policy_manager: Arc<StdMutex<PolicyManager>>,
 }
@@ -50,6 +51,7 @@ impl AppState {
             data_dir: "/tmp/test".to_string(),
             raft: None,
             swarm_raft: Arc::new(StdMutex::new(SwarmRaft::new(1))),
+            network_integration: Arc::new(StdMutex::new(None)),
             timemachine: Arc::new(tokio::sync::RwLock::new(crate::timemachine::TimeMachine::new_test())),
             policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
         }
@@ -67,6 +69,7 @@ impl AppState {
             data_dir: self.data_dir.clone(),
             raft: self.raft.clone(),
             swarm_raft: self.swarm_raft.clone(),
+            network_integration: self.network_integration.clone(),
             timemachine: self.timemachine.clone(),
             policy_manager: self.policy_manager.clone(),
         }
