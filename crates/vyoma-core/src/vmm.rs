@@ -86,8 +86,7 @@ impl VmmManager {
                 .spawn()
                 .map_err(|e| anyhow!("Failed to spawn cloud-hypervisor with unshare: {}", e))?
         } else if let Some(ns) = netns {
-             Command::new("sudo")
-                .arg("ip")
+             Command::new("ip")
                 .arg("netns")
                 .arg("exec")
                 .arg(ns)
