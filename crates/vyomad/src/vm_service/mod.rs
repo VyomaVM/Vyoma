@@ -134,7 +134,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         }
     };
 
-    let _agent_config = agent::prepare_agent(
+    let agent_config = agent::prepare_agent(
         &state,
         &storage.dm_device_path,
         &vm_dir,
@@ -148,6 +148,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         &vm_dir,
         &storage.dm_device_path,
         &network_config,
+        &agent_config,
     );
 
     let (vmm, proxy_tasks, slirp_mgr, fs_managers) = match boot::start_vm(
