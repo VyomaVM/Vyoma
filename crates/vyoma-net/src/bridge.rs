@@ -1,10 +1,11 @@
-use tracing::{info, warn, error};
+use tracing::info;
 use rtnetlink::{new_connection, Handle, Error as RtNetlinkError};
 use netlink_packet_route::link::State;
 use netlink_packet_route::link::LinkAttribute;
 use netlink_packet_route::link::LinkInfo;
 use netlink_packet_route::link::InfoKind;
 use futures::stream::TryStreamExt;
+use std::process::Command;
 
 use crate::error::{NetworkError, Result};
 
@@ -68,6 +69,26 @@ impl BridgeManager {
         
         if let Err(e) = self.handle.link().set(index).up().execute().await {
             return Err(NetworkError::Netlink(format!("Failed to set bridge up: {}", e)));
+        }
+        
+        Ok(())
+    }
+    
+    pub async fn set_ip(&self, name: &str, ip_cidr: &str) -> Result<()> {
+        info!("Setting IP {} on bridge {}", ip_cidr, name);
+        
+        let index = self.get_interface_index(name).await?;
+        
+        let output = Command::new("ip")
+            .args(&["addr", "add", ip_cidr, "dev", name])
+            .output()
+            .map_err(|e| NetworkError::Io(e))?;
+        
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.contains("File exists") && !stderr.contains("17") {
+                return Err(NetworkError::Netlink(format!("Failed to set IP: {}", stderr)));
+            }
         }
         
         Ok(())
