@@ -214,6 +214,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         vmm,
         id: vm_id.clone(),
         status: VmStatus::PendingAttestation,
+        attestation_status: None,
         ch_socket_path: ch_config.socket_path.clone(),
         tap_name: if state.rootless {
             String::new()

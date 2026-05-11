@@ -12,6 +12,8 @@ pub struct MeasuredBootPolicy {
     pub block_on_failure: bool,
     /// Path to the build signing key pair for signing manifests during build.
     pub build_signing_key_path: Option<String>,
+    /// Directory containing trusted public keys for manifest verification.
+    pub trusted_keys_dir: Option<String>,
 }
 
 impl Default for MeasuredBootPolicy {
@@ -23,6 +25,7 @@ impl Default for MeasuredBootPolicy {
             verification_timeout_secs: 30,
             block_on_failure: true,
             build_signing_key_path: None,
+            trusted_keys_dir: None,
         }
     }
 }

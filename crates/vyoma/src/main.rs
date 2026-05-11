@@ -120,6 +120,11 @@ enum Commands {
     },
     /// List active VMs
     Ps,
+    /// Perform attestation on a VM
+    Attest {
+        /// VM ID
+        id: String,
+    },
     /// Create a snapshot of a VM
     Snapshot {
         /// VM ID
@@ -566,8 +571,8 @@ async fn main() -> Result<()> {
                     if response.status().is_success() {
                         let body: ListResponse = response.json().await?;
                         println!(
-                            "{:<36} {:<15} {:<15} {:<30}",
-                            "VM ID", "IP ADDRESS", "HOSTNAME", "LABELS"
+                            "{:<36} {:<15} {:<15} {:<15} {:<30}",
+                            "VM ID", "IP ADDRESS", "HOSTNAME", "ATTESTATION", "LABELS"
                         );
                         for vm in body.vms {
                             let labels_str = vm
@@ -580,17 +585,73 @@ async fn main() -> Result<()> {
                                         format!("{}={}", k, v)
                                     }
                                 })
-                                .collect::<Vec<_>>()
+                                .collect::<Vec<_>>
                                 .join(", ");
                             let hostname_str = vm.hostname.unwrap_or_else(|| "-".to_string());
+                            let attest_str = vm.attestation_status.unwrap_or_else(|| "-".to_string());
 
                             println!(
-                                "{:<36} {:<15} {:<15} {:<30}",
-                                vm.id, vm.ip_address, hostname_str, labels_str
+                                "{:<36} {:<15} {:<15} {:<15} {:<30}",
+                                vm.id, vm.ip_address, hostname_str, attest_str, labels_str
                             );
                         }
                     } else {
                         error!("Daemon returned error: {}", response.status());
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to connect to daemon at {}: {}", daemon_url, e);
+                }
+            }
+        }
+        Commands::Attest { id } => {
+            info!("Requesting attestation for VM: {}", id);
+            let resp = client
+                .post(format!("{}/attest/{}", daemon_url, id))
+                .send()
+                .await;
+
+            match resp {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let attest_resp: serde_json::Value = response.json().await?;
+                        let verified = attest_resp.get("verified")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let vm_id = attest_resp.get("vm_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(&id);
+
+                        if verified {
+                            println!("VM {} attestation: {}", vm_id, "VERIFIED".green());
+                        } else {
+                            println!("VM {} attestation: {}", vm_id, "FAILED".red());
+                        }
+
+                        if let Some(pcr_results) = attest_resp.get("pcr_results").and_then(|v| v.as_array()) {
+                            println!("\nPCR Results:");
+                            println!("{:<10} {:<64} {:<64} {:<12}",
+                                "PCR Index", "Expected", "Actual", "Verified");
+                            for pcr in pcr_results {
+                                let pcr_index = pcr.get("pcr_index").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let expected = pcr.get("expected").and_then(|v| v.as_str()).unwrap_or("");
+                                let actual = pcr.get("actual").and_then(|v| v.as_str()).unwrap_or("");
+                                let verified = pcr.get("verified").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                                let status = if verified { "✓".green() } else { "✗".red() };
+                                println!(
+                                    "{:<10} {:<64} {:<64} {:<12}",
+                                    pcr_index, expected, actual, status
+                                );
+                            }
+                        }
+
+                        if let Some(error) = attest_resp.get("error").and_then(|v| v.as_str()) {
+                            println!("\nError: {}", error.red());
+                        }
+                    } else {
+                        let error_msg = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                        error!("Attestation failed: {}", error_msg);
                     }
                 }
                 Err(e) => {

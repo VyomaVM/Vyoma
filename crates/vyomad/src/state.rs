@@ -90,6 +90,7 @@ pub struct VmInstance {
     pub vmm: VmmManager,
     pub id: String,
     pub status: VmStatus,
+    pub attestation_status: Option<String>,
     pub ch_socket_path: String,
     pub tap_name: String,
     pub dm_name: String,

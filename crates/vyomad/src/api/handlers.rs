@@ -498,6 +498,7 @@ struct VmSummary {
     ip_address: String,
     hostname: Option<String>,
     labels: HashMap<String, String>,
+    attestation_status: Option<String>,
 
     // For restart
     base_image_path: String,
@@ -548,6 +549,7 @@ pub async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {
             ip_address: inst.ip_address.clone(),
             hostname: inst.hostname.clone(),
             labels: inst.labels.clone(),
+            attestation_status: inst.attestation_status.clone(),
             base_image_path: inst.base_image_path.clone(),
             vcpu: inst.vcpu,
             mem_size_mib: inst.mem_size_mib,
@@ -823,6 +825,7 @@ pub async fn initialize_state(state: &AppState) {
                 vmm,
                 id: vm_state.id.clone(),
                 status: VmStatus::Running, // Restored VMs are considered running
+                attestation_status: None,
                 ch_socket_path: socket_path.clone(),
                 tap_name: vm_state.tap_name,
                 dm_name: vm_state.dm_name,
@@ -860,6 +863,7 @@ pub async fn initialize_state(state: &AppState) {
                 vmm,
                 id: vm_state.id.clone(),
                 status: VmStatus::Error { reason: "VM was dead during recovery".to_string() },
+                attestation_status: Some("UNKNOWN".to_string()),
                 ch_socket_path: socket_path,
                 tap_name: vm_state.tap_name,
                 dm_name: vm_state.dm_name,
@@ -1373,6 +1377,7 @@ pub async fn adopt_teleported_vm(
         vmm,
         id: payload.vm_id.clone(),
         status: VmStatus::Running, // Adopted VMs are considered running
+        attestation_status: None,
         ch_socket_path: ch_socket,
         tap_name: String::new(),
         dm_name: String::new(),
@@ -1857,6 +1862,16 @@ pub async fn attest_vm_handler(
         id,
         if all_verified { "VERIFIED" } else { "FAILED" }
     );
+
+    // Update the VM instance's attestation status
+    {
+        let mut vm = vm_arc.lock().await;
+        vm.attestation_status = Some(if all_verified {
+            "VERIFIED".to_string()
+        } else {
+            "FAILED".to_string()
+        });
+    }
 
     Ok(Json(AttestResponse {
         vm_id: id,

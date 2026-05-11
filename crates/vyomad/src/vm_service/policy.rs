@@ -266,7 +266,7 @@ fn find_image_dir(image_name: &str) -> Result<std::path::PathBuf, String> {
 ///
 /// If the image is unsigned and `require_signed_manifest` is true, this fails.
 /// If `require_signed_manifest` is false, unsigned manifests are accepted
-/// but a warning is logged.
+/// but PCR verification is skipped (returns None for pcr_policy).
 async fn load_and_verify_manifest(
     image_name: &str,
     config: &MeasuredBootConfig,
@@ -344,9 +344,9 @@ async fn load_and_verify_manifest(
             ));
         }
 
-        // Accept unsigned manifest with warning
+        // Accept unsigned manifest but skip PCR verification - log warning
         warn!(
-            "Image {} has no signed manifest - accepting unsigned manifest (not recommended for production)",
+            "Image {} has no signed manifest - PCR verification will be SKIPPED (not recommended for production)",
             image_name
         );
 
@@ -417,9 +417,14 @@ fn build_attestation_config(state: &Arc<AppState>) -> MeasuredBootConfig {
         verification_timeout_secs: config.measured_boot.verification_timeout_secs,
         block_on_failure: config.measured_boot.block_on_failure,
         require_signed_manifest: true,
-        trusted_keys_dir: config.measured_boot.build_signing_key_path
+        trusted_keys_dir: config.measured_boot.trusted_keys_dir
             .as_ref()
             .map(PathBuf::from)
+            .or_else(|| {
+                config.measured_boot.build_signing_key_path
+                    .as_ref()
+                    .map(PathBuf::from)
+            })
             .or_else(|| {
                 let home = dirs::home_dir()?;
                 Some(home.join(".vyoma").join("keys").join("trusted"))
