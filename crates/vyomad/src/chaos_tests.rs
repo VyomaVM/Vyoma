@@ -238,7 +238,7 @@ fn get_wal_entries(data_dir: &Path) -> Result<Vec<(String, WalEntry)>> {
     use crate::state::wal::WalEntry as InternalWalEntry;
 
     let db = sled::Config::new()
-        .path(data_dir.join("ignite.db"))
+        .path(data_dir.join("vyoma.db"))
         .open()?;
 
     let tree = db.open_tree("wal")?;
@@ -368,7 +368,7 @@ mod tests {
         let entries = get_wal_entries(&data_dir).unwrap();
         if let Some((key, _)) = entries.first() {
             let db = sled::Config::new()
-                .path(data_dir.join("ignite.db"))
+                .path(data_dir.join("vyoma.db"))
                 .open().unwrap();
             let tree = db.open_tree("wal").unwrap();
             if let Some(entry) = tree.get(key.as_bytes()).unwrap() {

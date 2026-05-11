@@ -27,7 +27,7 @@ impl Recovery {
     pub fn recover_on_startup(home: &Path, wal: &Wal) -> Result<Vec<RecoveredVm>> {
         let mut recovered = Vec::new();
         
-        let vms_dir = home.join(".ignite").join("vms");
+        let vms_dir = home.join(".vyoma").join("vms");
         if !vms_dir.exists() {
             info!("No vms directory found, skipping recovery");
             return Ok(recovered);

@@ -51,7 +51,7 @@ struct Args {
     #[arg(short = 'p', long, default_value_t = 3000)]
     http_port: u16,
     /// Data directory containing kernel and firecracker binaries
-    #[arg(short, long, default_value = "/var/lib/ignite")]
+    #[arg(short, long, default_value = "/var/lib/vyoma")]
     data_dir: String,
     /// Enable chaos mode for crash injection testing
     #[arg(long)]
@@ -85,20 +85,20 @@ async fn main() {
 
     // CNI Initialization
     let home = dirs::home_dir().expect("No home dir");
-    let cni_config_dir = home.join(".ignite").join("cni").join("net.d");
-    let cni_plugin_dir = home.join(".ignite").join("cni").join("bin");
+    let cni_config_dir = home.join(".vyoma").join("cni").join("net.d");
+    let cni_plugin_dir = home.join(".vyoma").join("cni").join("bin");
 
     std::fs::create_dir_all(&cni_config_dir).unwrap();
     std::fs::create_dir_all(&cni_plugin_dir).unwrap();
 
     // Create default bridge
-    let bridge_conf = cni_config_dir.join("10-ignite-bridge.conf");
+    let bridge_conf = cni_config_dir.join("10-vyoma-bridge.conf");
     if !bridge_conf.exists() {
         let conf = r#"{
     "cniVersion": "0.4.0",
     "name": "vyoma-net",
     "type": "bridge",
-    "bridge": "ign0",
+    "bridge": "vyoma0",
     "isGateway": true,
     "ipMasq": true,
     "ipam": {
@@ -116,7 +116,7 @@ async fn main() {
     ));
 
     // Initialize WAL (ADR-023)
-    let state_dir = home.join(".ignite").join("state");
+    let state_dir = home.join(".vyoma").join("state");
     let (_db, wal) = match Wal::open_or_create(&state_dir) {
         Ok((db, wal)) => {
             info!("WAL initialized successfully");

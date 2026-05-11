@@ -109,7 +109,7 @@ impl Wal {
         std::fs::create_dir_all(path)?;
         
         let db = sled::Config::new()
-            .path(path.join("ignite.db"))
+            .path(path.join("vyoma.db"))
             .mode(sled::Mode::HighThroughput)
             .open()?;
         

@@ -30,7 +30,7 @@ pub enum BuildSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildConfig {
     pub context: String,
-    pub ignitefile: Option<String>,
+    pub vyomafile: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -381,7 +381,7 @@ services:
   worker:
     build:
       context: ./worker
-      ignitefile: CustomVyomafile
+      vyomafile: CustomVyomafile
 "#;
         let compose = VyomaCompose::from_str(yaml).unwrap();
         let app = compose.services.get("app").unwrap();
@@ -394,7 +394,7 @@ services:
         match worker.build.as_ref().unwrap() {
             BuildSource::Config(c) => {
                 assert_eq!(c.context, "./worker");
-                assert_eq!(c.ignitefile.as_ref().unwrap(), "CustomVyomafile");
+                assert_eq!(c.vyomafile.as_ref().unwrap(), "CustomVyomafile");
             }
             _ => panic!("Expected BuildSource::Config"),
         }

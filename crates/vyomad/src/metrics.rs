@@ -20,33 +20,33 @@ impl IgniteMetrics {
         let registry = Registry::new();
 
         let vms_running = Gauge::with_opts(Opts::new(
-            "ignite_vms_running",
+            "vyoma_vms_running",
             "Number of currently running VMs",
         ))?;
 
         let vms_total =
-            Counter::with_opts(Opts::new("ignite_vms_total", "Total number of VMs created"))?;
+            Counter::with_opts(Opts::new("vyoma_vms_total", "Total number of VMs created"))?;
 
         let vm_boot_duration = Histogram::with_opts(HistogramOpts::new(
-            "ignite_vm_boot_duration_seconds",
+            "vyoma_vm_boot_duration_seconds",
             "VM boot duration in seconds",
         ))?;
 
         let vm_memory_usage = GaugeVec::new(
             Opts::new(
-                "ignite_vm_memory_usage_bytes",
+                "vyoma_vm_memory_usage_bytes",
                 "Memory usage per VM in bytes",
             ),
             &["vm_id"],
         )?;
 
         let vm_cpu_usage = GaugeVec::new(
-            Opts::new("ignite_vm_cpu_usage_percent", "CPU usage percentage per VM"),
+            Opts::new("vyoma_vm_cpu_usage_percent", "CPU usage percentage per VM"),
             &["vm_id"],
         )?;
 
         let snapshot_count = GaugeVec::new(
-            Opts::new("ignite_snapshot_count", "Number of snapshots per VM"),
+            Opts::new("vyoma_snapshot_count", "Number of snapshots per VM"),
             &["vm_id"],
         )?;
 
@@ -203,8 +203,8 @@ mod tests {
         metrics.register_vm("test-vm-1");
         let output = metrics.gather();
         let text = String::from_utf8_lossy(&output);
-        assert!(text.contains("ignite_vms_running"));
-        assert!(text.contains("ignite_vms_total"));
+        assert!(text.contains("vyoma_vms_running"));
+        assert!(text.contains("vyoma_vms_total"));
     }
 
     #[test]

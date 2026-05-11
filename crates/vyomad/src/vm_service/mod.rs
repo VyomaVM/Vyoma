@@ -77,9 +77,9 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
     info!("VmService: Starting VM for image {}", request.image);
 
     let home = dirs::home_dir().context("No home dir")?;
-    let ignite_root = home.join(".ignite");
-    let images_root = ignite_root.join("images");
-    let vms_root = ignite_root.join("vms");
+    let vyoma_root = home.join(".vyoma");
+    let images_root = vyoma_root.join("images");
+    let vms_root = vyoma_root.join("vms");
 
     std::fs::create_dir_all(&images_root)?;
     std::fs::create_dir_all(&vms_root)?;

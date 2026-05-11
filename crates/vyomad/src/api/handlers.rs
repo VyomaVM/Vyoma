@@ -261,9 +261,9 @@ pub async fn restore_vm(
     );
 
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let ignite_root = home.join(".ignite");
-    let images_root = ignite_root.join("images");
-    let vms_root = ignite_root.join("vms");
+    let vyoma_root = home.join(".vyoma");
+    let images_root = vyoma_root.join("images");
+    let vms_root = vyoma_root.join("vms");
 
     // We still assume alpine:latest base for MVP clone
     let safe_image_name = "alpine_latest";
@@ -450,7 +450,7 @@ pub async fn time_travel_vm(
         .ok_or((StatusCode::NOT_FOUND, "Snapshot not found".to_string()))?;
 
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let vms_root = home.join(".ignite").join("vms");
+    let vms_root = home.join(".vyoma").join("vms");
     let source_vm_dir = vms_root.join(&payload.vm_id);
     let snaps_dir = source_vm_dir.join("snapshots").join(&payload.snapshot_id);
 
@@ -643,7 +643,7 @@ pub async fn inspect_vm_handler(
     // 2. Check disk (stopped)
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
     let state_file = home
-        .join(".ignite")
+        .join(".vyoma")
         .join("vms")
         .join(&id)
         .join("state.json");
@@ -768,7 +768,7 @@ pub async fn initialize_state(state: &AppState) {
         Some(h) => h,
         None => return,
     };
-    let vms_dir = home.join(".ignite").join("vms");
+    let vms_dir = home.join(".vyoma").join("vms");
     if !vms_dir.exists() {
         return;
     }
@@ -897,7 +897,7 @@ pub async fn initialize_state(state: &AppState) {
 
             // Also delete the state file so we don't loop on it next time?
             // cleanup() removes the VM dir?
-            // VM dir is in ~/.ignite/vms/<id>. cleanup usually removes things but maybe not the dir itself?
+            // VM dir is in ~/.vyoma/vms/<id>. cleanup usually removes things but maybe not the dir itself?
             // vyoma_core::storage/vmm doesn't remove the VM home dir automatically?
             // Let's check  logic.
             // It calls remove_dm_device, detach loop, etc.
@@ -1299,7 +1299,7 @@ pub async fn events_handler(
 
 pub async fn list_images_handler() -> Json<Vec<String>> {
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-    let images_root = home.join(".ignite").join("images");
+    let images_root = home.join(".vyoma").join("images");
     let mut images = Vec::new();
     if let Ok(entries) = std::fs::read_dir(images_root) {
         for entry in entries.flatten() {
@@ -1323,7 +1323,7 @@ pub struct VolumeInfo {
 
 pub async fn list_volumes_handler() -> Json<Vec<VolumeInfo>> {
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-    let vol_root = home.join(".ignite").join("volumes");
+    let vol_root = home.join(".vyoma").join("volumes");
     let mut vols = Vec::new();
     if let Ok(entries) = std::fs::read_dir(vol_root) {
         for entry in entries.flatten() {
@@ -1361,7 +1361,7 @@ pub async fn adopt_teleported_vm(
     info!("Handling POST /adopt-teleported-vm for VM {}", payload.vm_id);
 
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let vm_dir = home.join(".ignite").join("vms").join(&payload.vm_id);
+    let vm_dir = home.join(".vyoma").join("vms").join(&payload.vm_id);
 
     if !vm_dir.exists() {
         return Err((StatusCode::NOT_FOUND, format!("VM directory not found for {}", payload.vm_id)));
@@ -1669,7 +1669,7 @@ pub async fn receive_teleport_handler(
     
     // Create directories
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let vm_dir = home.join(".ignite").join("vms").join(&payload.vm_id);
+    let vm_dir = home.join(".vyoma").join("vms").join(&payload.vm_id);
     std::fs::create_dir_all(&vm_dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
     let ch_socket = vm_dir.join("ch.sock").to_string_lossy().to_string();
@@ -1929,7 +1929,7 @@ fn load_signed_manifest_for_attest(image_name: &str) -> Result<vyoma_image::Sign
     let home = dirs::home_dir().ok_or_else(|| "No home directory".to_string())?;
 
     let candidates = [
-        home.join(".ignite").join("images").join(image_name),
+        home.join(".vyoma").join("images").join(image_name),
         home.join(".vyoma").join("images").join(image_name),
     ];
 
@@ -1953,7 +1953,7 @@ fn load_signed_manifest_for_attest(image_name: &str) -> Result<vyoma_image::Sign
     }
 
     Err(format!(
-        "Image {} not found in ~/.ignite/images or ~/.vyoma/images",
+        "Image {} not found in ~/.vyoma/images or ~/.vyoma/images",
         image_name
     ))
 }

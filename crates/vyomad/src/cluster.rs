@@ -298,8 +298,8 @@ impl ClusterManager {
         let subnet = format!("10.42.{}.0/24", subnet_id);
         
         let home = dirs::home_dir().expect("No home dir");
-        let cni_config_dir = home.join(".ignite").join("cni").join("net.d");
-        let bridge_conf = cni_config_dir.join("10-ignite-bridge.conf");
+        let cni_config_dir = home.join(".vyoma").join("cni").join("net.d");
+        let bridge_conf = cni_config_dir.join("10-vyoma-bridge.conf");
         
         let conf = serde_json::json!({
             "cniVersion": "0.4.0",

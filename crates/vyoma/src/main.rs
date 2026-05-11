@@ -1292,14 +1292,14 @@ fn check_binary(name: &str) -> Result<bool> {
     use std::path::Path;
 
     // Check standard packaging paths (ADR 021)
-    if Path::new(&format!("/opt/ignite/bin/{}", name)).exists() {
+    if Path::new(&format!("/opt/vyoma/bin/{}", name)).exists() {
         return Ok(true);
     }
-    if Path::new(&format!("/usr/libexec/ignite/{}", name)).exists() {
+    if Path::new(&format!("/usr/libexec/vyoma/{}", name)).exists() {
         return Ok(true);
     }
     // Check bundled path from package
-    if Path::new(&format!("/usr/lib/ignite/{}", name)).exists() {
+    if Path::new(&format!("/usr/lib/vyoma/{}", name)).exists() {
         return Ok(true);
     }
 
@@ -1426,7 +1426,7 @@ async fn run_attest(
             .unwrap_or_else(|| vm_info.base_image_path.clone());
 
         let candidates = [
-            home.join(".ignite").join("images").join(&image_name),
+            home.join(".vyoma").join("images").join(&image_name),
             home.join(".vyoma").join("images").join(&image_name),
         ];
 
@@ -1471,7 +1471,7 @@ async fn run_attest(
         let keys_dir = if let Some(ref kp) = trust_keys_path {
             PathBuf::from(kp)
         } else {
-            home.join(".ignite").join("keys").join("trusted")
+            home.join(".vyoma").join("keys").join("trusted")
         };
         policy.load_trusted_keys_from_dir(keys_dir.clone())
             .map_err(|e| anyhow::anyhow!("Failed to load trusted keys from {:?}: {}", keys_dir, e))?;
@@ -1610,10 +1610,10 @@ async fn run_attest(
 
 fn export_vm(vm_id: &str, output_path: &str) -> Result<()> {
     // 1. Locate VM dir
-    // HACK: Accessing .ignite directly. CLI normally shouldn't allow this if daemon is remote.
+    // HACK: Accessing .vyoma directly. CLI normally shouldn't allow this if daemon is remote.
     // But for MVP, we assume local access.
     let home = dirs::home_dir().ok_or(anyhow::anyhow!("No home dir"))?;
-    let vm_dir = home.join(".ignite").join("vms").join(vm_id);
+    let vm_dir = home.join(".vyoma").join("vms").join(vm_id);
 
     if !vm_dir.exists() {
         return Err(anyhow::anyhow!("VM directory not found: {:?}", vm_dir));
@@ -1713,7 +1713,7 @@ async fn import_vm(input_path: &str, daemon_url: &str) -> Result<()> {
     // Move these files to a permanent location?
     // Since Daemon doesn't know about "Import", we are stuck.
     // Let's rely on standard practice: The User (CLI) is responsible for data validity.
-    // We should unpack to a PERMANENT "imports" folder in .ignite/imports/<uuid>/ ?
+    // We should unpack to a PERMANENT "imports" folder in .vyoma/imports/<uuid>/ ?
 
     Ok(()) // temp_dir drop here.
 }

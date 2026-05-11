@@ -28,10 +28,10 @@ impl VirtioFsManager {
         }
 
         // Try to find virtiofsd in priority order (ADR 021)
-        let binary = if Path::new("/opt/ignite/bin/virtiofsd").exists() {
-            "/opt/ignite/bin/virtiofsd"
-        } else if Path::new("/usr/libexec/ignite/virtiofsd").exists() {
-            "/usr/libexec/ignite/virtiofsd"
+        let binary = if Path::new("/opt/vyoma/bin/virtiofsd").exists() {
+            "/opt/vyoma/bin/virtiofsd"
+        } else if Path::new("/usr/libexec/vyoma/virtiofsd").exists() {
+            "/usr/libexec/vyoma/virtiofsd"
         } else if Path::new("bin/virtiofsd").exists() {
             "bin/virtiofsd"
         } else {

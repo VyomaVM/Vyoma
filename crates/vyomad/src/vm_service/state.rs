@@ -38,7 +38,7 @@ pub async fn load_vm_state(
     vm_id: &str,
 ) -> Result<Option<VmInstance>> {
     let home = dirs::home_dir().context("No home dir")?;
-    let state_file = home.join(".ignite").join("vms").join(vm_id).join("state.json");
+    let state_file = home.join(".vyoma").join("vms").join(vm_id).join("state.json");
     
     if !state_file.exists() {
         return Ok(None);
@@ -152,7 +152,7 @@ pub async fn snapshot_vm(
         };
 
         let home = dirs::home_dir().context("No home dir")?;
-        let vm_dir = home.join(".ignite").join("vms").join(vm_id);
+        let vm_dir = home.join(".vyoma").join("vms").join(vm_id);
         let snaps_dir = vm_dir.join("snapshots").join(&entry.id);
         
         std::fs::create_dir_all(&snaps_dir).context("Failed to create snapshots dir")?;
@@ -199,7 +199,7 @@ pub async fn commit_vm(
     let src_device = PathBuf::from(format!("/dev/mapper/{}", dm_name));
     
     let home = dirs::home_dir().context("No home dir")?;
-    let images_dir = home.join(".ignite").join("images").join(new_image_name);
+    let images_dir = home.join(".vyoma").join("images").join(new_image_name);
     
     std::fs::create_dir_all(&images_dir).context("Failed to create images dir")?;
     let dst_file = images_dir.join("root.ext4");
