@@ -156,7 +156,6 @@ impl BuildRunner {
 
         // 2. Build Cloud Hypervisor config for the measurement VM
         let ch_socket_path = measure_vm_dir.join("ch.sock");
-        let firmware_path = format!("{}/bin/cloud-hypervisor", self.work_dir.display());
 
         // We'll build the CH args manually for the measurement VM
         let mut ch_args = vec![
