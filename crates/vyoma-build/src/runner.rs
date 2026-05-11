@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use tracing::{info, warn, error};
 use vyoma_core::oci::OciImageConfig;
-use vyoma_image::{VmifConverter, SquashfsCompression};
+use vyoma_core::vtpm::VtpmManager;
+use vyoma_image::{VmifConverter, SquashfsCompression, SignedManifest, SigningKeyPair};
 use chrono;
 use std::process::Command;
 use tokio::time::{timeout, Duration};
@@ -16,12 +18,27 @@ use crate::{BuildResult, BuildError, Vyomafile};
 pub struct BuildRunner {
     pub work_dir: PathBuf,
     temp_dir: PathBuf,
+    /// If true, perform measured build: launch ephemeral VM, capture PCRs, sign manifest.
+    pub measured: bool,
+    /// Optional path to a signing key for manifest signing.
+    pub signing_key_path: Option<String>,
 }
 
 impl BuildRunner {
     pub fn new(work_dir: PathBuf) -> Self {
         let temp_dir = work_dir.join("temp");
-        Self { work_dir, temp_dir }
+        Self {
+            work_dir,
+            temp_dir,
+            measured: false,
+            signing_key_path: None,
+        }
+    }
+
+    pub fn with_measured(mut self, measured: bool, signing_key_path: Option<String>) -> Self {
+        self.measured = measured;
+        self.signing_key_path = signing_key_path;
+        self
     }
 
     /// Execute a complete build from Vyomafile
@@ -31,7 +48,7 @@ impl BuildRunner {
         context_dir: &Path,
         image_name: &str,
     ) -> Result<BuildResult, BuildError> {
-        info!("Starting VM-isolated build for {}", image_name);
+        info!("Starting VM-isolated build for {} (measured={})", image_name, self.measured);
 
         // Parse Vyomafile
         let vyomafile = Vyomafile::parse(vyomafile_path)
@@ -53,12 +70,12 @@ impl BuildRunner {
             match instruction {
                 Instruction::From { image } => {
                     info!("Processing FROM {}", image);
-                    current_rootfs = Some(self.handle_from(image).await?);
+                    current_rootfs = Some(self.handle_from(&image).await?);
                 }
                 Instruction::Run { command } => {
                     info!("Processing RUN {}", command);
                     if let Some(ref rootfs) = current_rootfs {
-                        let new_rootfs = self.handle_run(rootfs, command).await?;
+                        let new_rootfs = self.handle_run(rootfs, &command).await?;
                         current_rootfs = Some(new_rootfs);
                     } else {
                         return Err(BuildError::ExecutionError(
@@ -69,7 +86,7 @@ impl BuildRunner {
                 Instruction::Copy { src, dst } => {
                     info!("Processing COPY {} -> {}", src, dst);
                     if let Some(ref rootfs) = current_rootfs {
-                        self.handle_copy(rootfs, context_dir, src, dst).await?;
+                        self.handle_copy(rootfs, context_dir, &src, &dst).await?;
                     } else {
                         return Err(BuildError::ExecutionError(
                             "COPY instruction without FROM".to_string()
@@ -96,6 +113,11 @@ impl BuildRunner {
                     info!("Processing WORKDIR {}", path);
                     current_config.working_dir = Some(path.clone());
                 }
+                Instruction::VmMeasuredBoot => {
+                    info!("Processing VM_MEASURED_BOOT directive - measured boot enabled");
+                    // The measured flag is already set at the build runner level,
+                    // so we just log here for clarity
+                }
             }
         }
 
@@ -107,6 +129,161 @@ impl BuildRunner {
                 "No FROM instruction found".to_string()
             ))
         }
+    }
+
+    /// Launch an ephemeral VM to pre-compute expected PCR values.
+    /// The VM boots the final rootfs with OVMF firmware and a vTPM.
+    /// After boot, PCR values are read and the VM is destroyed.
+    async fn measure_boot_pcr(&self, rootfs_path: &Path) -> Result<HashMap<u32, String>, BuildError> {
+        info!("Starting ephemeral measurement VM for PCR pre-computation");
+
+        let measure_vm_dir = self.temp_dir.join("measure-vm");
+        std::fs::create_dir_all(&measure_vm_dir)
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to create measure VM dir: {}", e)))?;
+
+        // Find kernel and initrd from the built rootfs or use defaults
+        let kernel_path = self.find_kernel_path()
+            .map_err(|e| BuildError::ExecutionError(format!("Kernel not found: {}", e)))?;
+
+        // 1. Start vTPM
+        let mut vtpm = VtpmManager::new("measure-vm", &self.temp_dir)
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to create vTPM: {}", e)))?;
+        vtpm.start()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to start vTPM: {}", e)))?;
+        info!("vTPM started at {}", vtpm.socket_path());
+
+        let tpm_socket = vtpm.socket_path().to_string();
+
+        // 2. Build Cloud Hypervisor config for the measurement VM
+        let ch_socket_path = measure_vm_dir.join("ch.sock");
+        let firmware_path = format!("{}/bin/cloud-hypervisor", self.work_dir.display());
+
+        // We'll build the CH args manually for the measurement VM
+        let mut ch_args = vec![
+            "--kernel".to_string(),
+            kernel_path.to_string_lossy().to_string(),
+            "--memory".to_string(),
+            "size=512M".to_string(),
+            "--cpus".to_string(),
+            "1".to_string(),
+            "--console".to_string(),
+            "off".to_string(),
+            "--serial".to_string(),
+            "tty".to_string(),
+            "--api-socket".to_string(),
+            ch_socket_path.to_string_lossy().to_string(),
+            "--rng".to_string(),
+            "src=/dev/urandom".to_string(),
+            "--tpm".to_string(),
+            format!("socket={}", tpm_socket),
+        ];
+
+        // Add rootfs drive
+        let rootfs_str = rootfs_path.to_string_lossy().to_string();
+        ch_args.extend_from_slice(&[
+            "--disk".to_string(),
+            format!("path={},readonly=on", rootfs_str),
+        ]);
+
+        // Check if OVMF firmware exists
+        let ovmf_paths = [
+            Path::new("/usr/share/OVMF/OVMF_CODE.fd"),
+            Path::new("/usr/share/qemu/ovmf-x64/OVMF_CODE.fd"),
+            Path::new("/usr/share/edk2/ovmf/x64/OVMF_CODE.fd"),
+        ];
+
+        if let Some(fw_path) = ovmf_paths.iter().find(|p| p.exists()) {
+            ch_args.extend_from_slice(&[
+                "--firmware".to_string(),
+                fw_path.to_string_lossy().to_string(),
+            ]);
+            info!("Using OVMF firmware: {:?}", fw_path);
+        } else {
+            warn!("OVMF firmware not found in standard locations, measurement VM will use direct boot");
+        }
+
+        info!("Launching measurement VM with args: {:?}", ch_args);
+
+        // 3. Launch Cloud Hypervisor
+        let mut child = Command::new("cloud-hypervisor")
+            .args(&ch_args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to start cloud-hypervisor: {}", e)))?;
+
+        // Wait for socket
+        let timeout_duration = Duration::from_secs(10);
+        let start = std::time::Instant::now();
+        while !ch_socket_path.exists() {
+            if start.elapsed() > timeout_duration {
+                let _ = child.kill();
+                return Err(BuildError::ExecutionError(
+                    "Timed out waiting for Cloud Hypervisor socket".to_string()
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        // 4. Boot the VM via API
+        let client = reqwest::Client::builder()
+            .unix_socket(ch_socket_path)
+            .build()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to build HTTP client: {}", e)))?;
+
+        // Create VM
+        let vm_config = serde_json::json!({
+            "vcpu": { "boot_vcpus": 1, "max_vcpus": 1 },
+            "memory": { "size": 512 * 1024 * 1024, "shared": true },
+            "payload": {
+                "kernel": kernel_path.to_string_lossy().to_string(),
+                "cmdline": "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/bin/sh"
+            },
+            "disks": [{
+                "path": rootfs_path.to_string_lossy().to_string(),
+                "readonly": true
+            }],
+            "tpm": {
+                "socket": tpm_socket
+            }
+        });
+
+        // Allow time for firmware measurement during boot
+        // Use a generous boot timeout since firmware + kernel + initrd need to be measured
+        let boot_timeout = Duration::from_secs(30);
+
+        let _ = timeout(boot_timeout, async {
+            // Try to create and boot the VM
+            let _ = client
+                .put("http://localhost/api/v1/vm.create")
+                .json(&vm_config)
+                .send()
+                .await;
+            let _ = client
+                .put("http://localhost/api/v1/vm.boot")
+                .json(&serde_json::json!({}))
+                .send()
+                .await;
+        }).await;
+
+        // 5. Wait a bit more for measurements to settle
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        // 6. Read PCR values from vTPM
+        let pcrs = vtpm.read_pcrs(&[0, 1, 4, 5, 7, 9, 10, 14])
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to read PCRs: {}", e)))?;
+
+        info!("Captured PCR values: {:?}", pcrs);
+
+        // 7. Cleanup: kill the measurement VM and vTPM
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(vtpm);
+
+        // Clean up measurement VM directory
+        let _ = std::fs::remove_dir_all(&measure_vm_dir);
+
+        Ok(pcrs)
     }
 
     async fn handle_from(&self, image: &str) -> Result<PathBuf, BuildError> {
@@ -414,7 +591,16 @@ poweroff -f
         let hash = VmifConverter::compute_squashfs_hash(&final_rootfs)
             .map_err(|e| BuildError::ExecutionError(format!("Failed to compute hash: {}", e)))?;
 
-        let manifest = vyoma_image::VmifManifest::new(
+        // If measured build, pre-compute PCRs via ephemeral VM
+        let mut pcr_policy: Option<HashMap<u32, String>> = None;
+        if self.measured {
+            info!("Measured build requested - pre-computing PCR values");
+            let pcrs = self.measure_boot_pcr(&final_rootfs).await?;
+            pcr_policy = Some(pcrs);
+            info!("PCR pre-computation complete: {:?}", pcr_policy);
+        }
+
+        let mut manifest = vyoma_image::VmifManifest::new(
             "amd64".to_string(),
             None,
             None,
@@ -423,16 +609,112 @@ poweroff -f
             std::fs::metadata(&final_rootfs)?.len(),
         );
 
+        // Set measured boot PCR policy if measured build
+        if let Some(ref pcrs) = pcr_policy {
+            manifest.measured_boot.pcr_policy = Some(pcrs.clone());
+        }
+
         let content = toml::to_string_pretty(&manifest)
             .map_err(|e| BuildError::ExecutionError(e.to_string()))?;
         std::fs::write(&manifest_path, content)?;
+
+        // Sign the manifest if a signing key is available
+        let signing_key = self.resolve_signing_key().await?;
+        let manifest_signed = if let Some(ref keypair) = signing_key {
+            info!("Signing manifest with build key");
+            let signed = keypair.sign_manifest(&manifest)
+                .map_err(|e| BuildError::ExecutionError(format!("Failed to sign manifest: {}", e)))?;
+
+            let sig_path = output_dir.join("vyoma.toml.sig");
+            signed.save_to_file(&sig_path)
+                .map_err(|e| BuildError::ExecutionError(format!("Failed to save signed manifest: {}", e)))?;
+            info!("Signed manifest saved to {:?}", sig_path);
+            true
+        } else {
+            if self.measured {
+                warn!("Measured build requested but no signing key available - manifest will be unsigned");
+            }
+            false
+        };
 
         Ok(BuildResult {
             image_name: image_name.to_string(),
             rootfs_path: final_rootfs,
             manifest_path,
             config: config.clone(),
+            pcr_policy,
+            manifest_signed,
         })
+    }
+
+    /// Resolve the signing key from the configured path or generate a new one.
+    async fn resolve_signing_key(&self) -> Result<Option<SigningKeyPair>, BuildError> {
+        // 1. Check if a signing key path was explicitly provided
+        if let Some(ref key_path) = self.signing_key_path {
+            let path = Path::new(key_path);
+            if path.exists() {
+                info!("Loading signing key from: {:?}", path);
+                let secret_path = path.join("build_signing_key");
+                let public_path = path.join("build_signing_key.pub");
+
+                if secret_path.exists() && public_path.exists() {
+                    let seed = std::fs::read(&secret_path)
+                        .map_err(|e| BuildError::ExecutionError(format!("Failed to read signing key: {}", e)))?;
+                    let public = std::fs::read(&public_path)
+                        .map_err(|e| BuildError::ExecutionError(format!("Failed to read public key: {}", e)))?;
+
+                    let keypair = SigningKeyPair::from_seed_and_public(&seed, &public)
+                        .map_err(|e| BuildError::ExecutionError(format!("Failed to load signing key: {}", e)))?;
+                    return Ok(Some(keypair));
+                }
+            } else {
+                // Create directory and generate new key pair
+                std::fs::create_dir_all(path)
+                    .map_err(|e| BuildError::ExecutionError(format!("Failed to create key dir: {}", e)))?;
+
+                let keypair = SigningKeyPair::generate();
+                let (seed, public) = keypair.to_seed_and_public();
+
+                // Save public key
+                let public_path = path.join("build_signing_key.pub");
+                std::fs::write(&public_path, &public)
+                    .map_err(|e| BuildError::ExecutionError(format!("Failed to save public key: {}", e)))?;
+
+                // Save seed (private key material)
+                let secret_path = path.join("build_signing_key");
+                std::fs::write(&secret_path, &seed)
+                    .map_err(|e| BuildError::ExecutionError(format!("Failed to save signing key: {}", e)))?;
+
+                // Set restrictive permissions
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&secret_path, std::fs::Permissions::from_mode(0o600))
+                        .ok();
+                }
+
+                info!("Generated new build signing key at {:?}", path);
+                return Ok(Some(keypair));
+            }
+        }
+
+        // 2. Check standard location in work_dir
+        let standard_path = self.work_dir.join("build_signing_key");
+        if standard_path.exists() {
+            let public_path = self.work_dir.join("build_signing_key.pub");
+            if public_path.exists() {
+                let seed = std::fs::read(&standard_path)
+                    .map_err(|e| BuildError::ExecutionError(format!("Failed to read signing key: {}", e)))?;
+                let public = std::fs::read(&public_path)
+                    .map_err(|e| BuildError::ExecutionError(format!("Failed to read public key: {}", e)))?;
+
+                let keypair = SigningKeyPair::from_seed_and_public(&seed, &public)
+                    .map_err(|e| BuildError::ExecutionError(format!("Failed to load signing key: {}", e)))?;
+                return Ok(Some(keypair));
+            }
+        }
+
+        Ok(None)
     }
 }
 
