@@ -38,6 +38,7 @@ pub fn build_ch_config(
         vsock_cid: *cid,
         vsock_path,
         initramfs_path,
+        tpm_socket_path: None,
     }
 }
 
