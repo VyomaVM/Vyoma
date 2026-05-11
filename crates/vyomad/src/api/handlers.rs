@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::sse::{Event, Sse},
     routing::{get, post},
@@ -649,8 +649,8 @@ pub async fn inspect_vm_handler(
 
 pub async fn build_image(
     State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
     body: Body,
-    #[axum::extract::Query] params: axum::extract::Query<HashMap<String, String>>,
 ) -> Result<String, (StatusCode, String)> {
     info!("Received build request using VM-isolated build system");
 
