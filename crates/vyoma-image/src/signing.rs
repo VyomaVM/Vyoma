@@ -3,10 +3,10 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
-use std::path::PathBuf;
-use std::path::Path;
+use std::path::{PathBuf, Path};
 use thiserror::Error;
 use tracing::info;
+use rand::rngs::OsRng;
 
 #[derive(Error, Debug)]
 pub enum SigningError {
@@ -34,8 +34,7 @@ pub struct SigningKeyPair {
 
 impl SigningKeyPair {
     pub fn generate() -> Self {
-        let mut csprng = rand::rngs::OsRng;
-        let signing_key = SigningKey::generate(&mut csprng);
+        let signing_key = SigningKey::generate(&mut OsRng);
         let verifying_key = signing_key.verifying_key();
 
         Self {
@@ -44,23 +43,34 @@ impl SigningKeyPair {
         }
     }
 
-    pub fn from_bytes(secret: &[u8], public: &[u8]) -> Result<Self, SigningError> {
-        let signing_key = SigningKey::from_bytes(
-            secret
-                .try_into()
-                .map_err(|_| SigningError::KeyError("Invalid secret key".to_string()))?,
-        );
-        let verifying_key = VerifyingKey::from_bytes(
-            public
-                .try_into()
-                .map_err(|_| SigningError::KeyError("Invalid public key".to_string()))?,
-        )
-        .map_err(|e| SigningError::KeyError(format!("Invalid public key: {:?}", e)))?;
+    /// Load from raw bytes: expects seed (32 bytes) + public_key (32 bytes) = 64 bytes.
+    pub fn from_seed_and_public(seed: &[u8], public: &[u8]) -> Result<Self, SigningError> {
+        let seed: [u8; 32] = seed
+            .try_into()
+            .map_err(|_| SigningError::KeyError("Invalid seed length (expected 32 bytes)".to_string()))?;
+        let public: [u8; 32] = public
+            .try_into()
+            .map_err(|_| SigningError::KeyError("Invalid public key length (expected 32 bytes)".to_string()))?;
+
+        let signing_key = SigningKey::from_bytes(&seed);
+        let verifying_key = VerifyingKey::from_bytes(&public)
+            .map_err(|_| SigningError::KeyError("Invalid public key".to_string()))?;
+
+        // Verify consistency
+        let derived_pub = signing_key.verifying_key();
+        if derived_pub.as_bytes() != &public {
+            return Err(SigningError::KeyError("Seed does not match public key".to_string()));
+        }
 
         Ok(Self {
             signing_key,
             verifying_key,
         })
+    }
+
+    /// Serialize keypair as seed (32 bytes) || public_key (32 bytes) = 64 bytes.
+    pub fn to_seed_and_public(&self) -> (Vec<u8>, Vec<u8>) {
+        (self.signing_key.to_bytes().to_vec(), self.verifying_key.as_bytes().to_vec())
     }
 
     pub fn public_key_bytes(&self) -> Vec<u8> {

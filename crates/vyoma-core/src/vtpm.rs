@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -130,6 +131,45 @@ impl VtpmManager {
             state_dir: self.state_dir.clone(),
             tpm_version: "2.0".to_string(),
         })
+    }
+
+    /// Read PCR values from the vTPM using tpm2_pcrread.
+    /// Returns a HashMap of PCR index -> hex hash value.
+    pub fn read_pcrs(&self, pcr_indices: &[u32]) -> Result<HashMap<u32, String>> {
+        if !Path::new(&self.socket_path).exists() {
+            return Err(anyhow!("vTPM socket not found"));
+        }
+
+        let pcr_list = pcr_indices
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let output = std::process::Command::new("tpm2_pcrread")
+            .args(&[
+                "-T",
+                &format!("socket:path={}", self.socket_path),
+                "-g",
+                "sha256",
+                "-o",
+                &pcr_list,
+            ])
+            .output()
+            .map_err(|e| anyhow!("Failed to run tpm2_pcrread: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("tpm2_pcrread failed: {}", stderr);
+        }
+
+        crate::attest::parse_pcr_values(&output.stdout)
+    }
+
+    /// Read all standard PCR values (0, 1, 4, 5, 7, 9, 10, 14) from the vTPM.
+    pub fn read_all_pcrs(&self) -> Result<HashMap<u32, String>> {
+        let indices = [0u32, 1, 4, 5, 7, 9, 10, 14];
+        self.read_pcrs(&indices)
     }
 }
 
