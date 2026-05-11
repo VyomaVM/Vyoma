@@ -5,16 +5,26 @@ use vyoma_core::fs::VirtioFsManager;
 use vyoma_core::proxy::ProxyManager;
 use vyoma_core::slirp::SlirpManager;
 use vyoma_core::vmm::VmmManager;
+use vyoma_core::vtpm::VtpmManager;
 
 use super::types::{ChConfig, VmNetworkConfig, VmRunRequest};
 use crate::state::AppState;
 
+/// Determines whether TPM is needed based on policy and request.
+fn needs_tpm(state: &AppState, request: &VmRunRequest) -> bool {
+    let policy = state.policy_manager.lock().unwrap();
+    policy.must_verify_on_boot()
+}
+
 pub async fn start_vm(
+    state: &AppState,
     ch_config: &ChConfig,
     network_config: &VmNetworkConfig,
     request: &VmRunRequest,
-    state: &AppState,
-) -> Result<(VmmManager, Vec<JoinHandle<()>>, Option<SlirpManager>, Vec<VirtioFsManager>)> {
+) -> Result<(VmmManager, Vec<JoinHandle<()>>, Option<SlirpManager>, Vec<VirtioFsManager>, Option<VtpmManager>)> {
+    let use_tpm = needs_tpm(state, request);
+    let mut vtpm_manager: Option<VtpmManager> = None;
+
     let mut vmm = VmmManager::new(&ch_config.socket_path);
 
     if !std::path::Path::new(&ch_config.kernel_path).exists() {
@@ -22,6 +32,28 @@ pub async fn start_vm(
     }
     if !std::path::Path::new(&ch_config.ch_path).exists() {
         anyhow::bail!("Cloud Hypervisor binary not found at {}", ch_config.ch_path);
+    }
+
+    // Start vTPM if needed for measured boot attestation
+    if use_tpm {
+        info!("Starting vTPM for measured boot attestation");
+        let vm_id_str = request.labels.get("vm_id").cloned()
+            .unwrap_or_else(|| ch_config.socket_path.split('/').last().unwrap_or("unknown").to_string());
+        let base_dir = std::path::Path::new(&ch_config.socket_path).parent()
+            .unwrap_or(std::path::Path::new("/tmp"));
+        match VtpmManager::new(vm_id_str.as_str(), base_dir) {
+            Ok(mut vtpm) => {
+                if let Err(e) = vtpm.start() {
+                    error!("Failed to start vTPM: {}, continuing without TPM", e);
+                } else {
+                    info!("vTPM started at {}", vtpm.socket_path());
+                    vtpm_manager = Some(vtpm);
+                }
+            }
+            Err(e) => {
+                error!("Failed to create vTPM manager: {}, continuing without TPM", e);
+            }
+        }
     }
 
     let mut slirp_mgr = None;
@@ -100,6 +132,13 @@ pub async fn start_vm(
         fs_managers.push(fs_mgr);
     }
 
+    // Configure TPM if vTPM was started
+    if let Some(ref vtpm) = vtpm_manager {
+        vmm.set_tpm(&vtpm.socket_path()).await
+            .context("Failed to configure TPM")?;
+        info!("Configured vTPM at {}", vtpm.socket_path());
+    }
+
     vmm.set_machine_config(request.vcpu, request.mem_size_mib).await
         .context("Machine config")?;
 
@@ -118,5 +157,5 @@ pub async fn start_vm(
         }
     }
 
-    Ok((vmm, proxy_tasks, slirp_mgr, fs_managers))
+    Ok((vmm, proxy_tasks, slirp_mgr, fs_managers, vtpm_manager))
 }
