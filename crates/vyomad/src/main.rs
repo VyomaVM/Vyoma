@@ -243,6 +243,7 @@ async fn main() {
         .route("/teleport", post(handlers::teleport_handler))
         .route("/teleport/status/:session_id", get(handlers::teleport_status_handler))
         .route("/receive-teleport", post(handlers::receive_teleport_handler))
+        .route("/adopt-teleported-vm", post(handlers::adopt_teleported_vm))
         .route("/policy", get(handlers::get_policy_handler).post(handlers::set_policy_handler))
         .fallback(ui::ui_handler)
         .layer(CorsLayer::permissive())
