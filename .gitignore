@@ -19,7 +19,6 @@ dist/
 # Temporary files
 tmp/
 *.log
-docs/
 
 # Node.js
 ui/node_modules/

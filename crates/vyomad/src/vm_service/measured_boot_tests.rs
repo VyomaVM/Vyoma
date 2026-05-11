@@ -372,19 +372,20 @@ mod integration_tests {
     fn create_test_image_dir() -> PathBuf {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
         let image_dir = home.join(".vyoma").join("images").join("test_alpine_latest");
-        std::fs::create_dir_all(&image_dir).ok();
+        if let Err(e) = std::fs::create_dir_all(&image_dir) {
+            eprintln!("Warning: Could not create test image dir: {}", e);
+        }
         image_dir
     }
 
     fn cleanup_test_image_dir() {
-        let image_dir = create_test_image_dir();
-        let _ = std::fs::remove_dir_all(image_dir);
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+        let image_dir = home.join(".vyoma").join("images").join("test_alpine_latest");
+        let _ = std::fs::remove_dir_all(&image_dir);
     }
 
     #[test]
     fn test_tamper_detection_flow() {
-        cleanup_test_image_dir();
-        
         let keypair = SigningKeyPair::generate();
         let manifest = create_test_manifest();
         let signed = keypair.sign_manifest(&manifest).unwrap();
@@ -435,13 +436,11 @@ mod integration_tests {
             assert!(result.is_err(), "Should return error on tampered PCR");
         }
         
-        cleanup_test_image_dir();
+        let _ = std::fs::remove_dir_all(&image_dir);
     }
 
     #[test]
     fn test_unsigned_image_rejection() {
-        cleanup_test_image_dir();
-        
         let image_dir = create_test_image_dir();
         let manifest_path = image_dir.join("vyoma.toml");
         
@@ -456,7 +455,14 @@ mod integration_tests {
         );
         
         let content = serde_json::to_string_pretty(&unsigned_manifest).unwrap();
-        std::fs::write(&manifest_path, &content).unwrap();
+        
+        if let Err(e) = std::fs::write(&manifest_path, &content) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                panic!("Failed to write manifest: {}", e);
+            }
+            std::fs::create_dir_all(&image_dir).ok();
+            std::fs::write(&manifest_path, &content).unwrap();
+        }
         
         assert!(
             unsigned_manifest.measured_boot.pcr_policy.is_none(),
@@ -469,7 +475,7 @@ mod integration_tests {
             "Signed manifest should not exist for unsigned image"
         );
         
-        cleanup_test_image_dir();
+        let _ = std::fs::remove_dir_all(&image_dir);
     }
 
     #[test]
@@ -522,7 +528,7 @@ mod integration_tests {
         let result = policy.verify(&unsigned);
         assert!(result.is_err(), "Should reject unsigned manifest when required");
         
-        cleanup_test_image_dir();
+        let _ = std::fs::remove_dir_all(&image_dir);
     }
 
     #[test]
