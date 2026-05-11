@@ -41,7 +41,7 @@ use tracing::{error, info, warn};
 use crate::cluster;
 use crate::dns;
 use crate::swarm;
-use crate::state::{AppState, VmInstance, VmState, wal::WalEntry};
+use crate::state::{AppState, VmInstance, VmState, VmStatus, wal::WalEntry};
 use crate::vm_service::state as vm_service_state;
 use crate::vm_service::image::ensure_image_locally_handler;
 
@@ -609,8 +609,16 @@ pub async fn inspect_vm_handler(
     if let Some(vm_mutex) = vm_arc {
         let vm = vm_mutex.lock().await;
         // ... build json ...
+        let (status_str, error_reason) = match &vm.status {
+            VmStatus::PendingAttestation => ("pending_attestation", None),
+            VmStatus::Running => ("running", None),
+            VmStatus::Error { reason } => ("error", Some(reason.clone())),
+        };
+
         let val = serde_json::json!({
             "id": vm.id,
+            "status": status_str,
+            "error_reason": error_reason,
             "tap_name": vm.tap_name,
             "dm_name": vm.dm_name,
             "loop_devices": vm.loop_devices,
