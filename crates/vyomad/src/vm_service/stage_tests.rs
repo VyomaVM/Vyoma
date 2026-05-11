@@ -74,6 +74,7 @@ mod tests {
             vsock_cid: 99,
             vsock_path: PathBuf::from("/tmp/vsock.sock"),
             initramfs_path: Some("/tmp/initramfs.cpio.gz".to_string()),
+            tpm_socket_path: None,
         };
         
         assert!(config.boot_args.contains("init=/sbin/vyoma-init"));
