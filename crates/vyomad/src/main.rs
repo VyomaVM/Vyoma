@@ -245,6 +245,7 @@ async fn main() {
         .route("/receive-teleport", post(handlers::receive_teleport_handler))
         .route("/adopt-teleported-vm", post(handlers::adopt_teleported_vm))
         .route("/policy", get(handlers::get_policy_handler).post(handlers::set_policy_handler))
+        .route("/attest/:id", post(handlers::attest_vm_handler))
         .fallback(ui::ui_handler)
         .layer(CorsLayer::permissive())
         .with_state(state.clone());
