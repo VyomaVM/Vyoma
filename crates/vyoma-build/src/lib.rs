@@ -116,7 +116,7 @@ ENV TEST_VAR=test_value
         let rootfs_path = alpine_dir.join("rootfs.sqfs");
         std::fs::write(&rootfs_path, b"mock squashfs content").unwrap();
 
-        let build_runner = BuildRunner::new(work_dir);
+        let mut build_runner = BuildRunner::new(work_dir);
 
         // This will fail because we don't have real VMs, but it tests the parsing and structure
         let result = build_runner.build(&vyomafile_path, &context_dir, "test-image").await;
