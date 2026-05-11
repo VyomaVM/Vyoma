@@ -221,8 +221,8 @@ impl NetworkIntegration {
                 return;
             }
         };
-        let cni_config_dir = home.join(".ignite").join("cni").join("net.d");
-        let bridge_conf = cni_config_dir.join("10-ignite-bridge.conf");
+        let cni_config_dir = home.join(".vyoma").join("cni").join("net.d");
+        let bridge_conf = cni_config_dir.join("10-vyoma-bridge.conf");
         
         if !cni_config_dir.exists() {
             if let Err(e) = std::fs::create_dir_all(&cni_config_dir) {

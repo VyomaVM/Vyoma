@@ -9,9 +9,9 @@ fn test_network_lifecycle() -> Result<()> {
     // 2. Create TAP
     // 3. Cleanup
     
-    let bridge_name = "ignite-test-br";
+    let bridge_name = "vyoma-test-br";
     let bridge_cidr = "172.16.200.1/24"; // Use a safe subnet
-    let tap_name = "ignite-test-tap";
+    let tap_name = "vyoma-test-tap";
 
     // 1. Setup Bridge
     NetworkManager::setup_bridge(bridge_name, bridge_cidr)?;

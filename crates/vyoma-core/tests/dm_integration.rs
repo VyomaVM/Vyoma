@@ -17,7 +17,7 @@ fn test_dm_snapshot_lifecycle() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let base_path = dir.path().join("base.ext4");
     let cow_path = dir.path().join("cow.img");
-    let dm_name = "ignite-test-snapshot";
+    let dm_name = "vyoma-test-snapshot";
 
     // 1. Base
     StorageManager::create_empty_file(&base_path, 100)?;

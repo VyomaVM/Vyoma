@@ -23,7 +23,7 @@ pub fn create_build_id() -> String {
 
 pub fn get_images_root() -> Result<PathBuf> {
     let home = dirs::home_dir().context("No home dir")?;
-    Ok(home.join(".ignite").join("images"))
+    Ok(home.join(".vyoma").join("images"))
 }
 
 pub fn get_image_path(build_id: &str) -> Result<PathBuf> {

@@ -70,10 +70,10 @@ async fn handle_conn(buf: &[u8], state: &AppState) -> anyhow::Result<Vec<u8>> {
     for question in packet.questions {
         let name_str = question.qname.to_string();
         
-        // Only handle A records for .ignite domain or simple hostnames
-        if question.qtype == QTYPE::TYPE(TYPE::A) && (name_str.ends_with(".ignite") || !name_str.contains('.')) {
+        // Only handle A records for .vyoma domain or simple hostnames
+        if question.qtype == QTYPE::TYPE(TYPE::A) && (name_str.ends_with(".vyoma") || !name_str.contains('.')) {
              
-             let search_name = name_str.trim_end_matches(".ignite").trim_end_matches('.').to_string();
+             let search_name = name_str.trim_end_matches(".vyoma").trim_end_matches('.').to_string();
              
              // 1. Get Candidates (Sync)
              let candidates = {

@@ -11,11 +11,11 @@ impl CgroupManager {
     pub fn new() -> Self {
         // Cgroup v2 mount point
         Self {
-            root_path: "/sys/fs/cgroup/ignite.slice".to_string(),
+            root_path: "/sys/fs/cgroup/vyoma.slice".to_string(),
         }
     }
 
-    /// Initializes the root ignite slice.
+    /// Initializes the root vyoma slice.
     pub fn init(&self) -> Result<()> {
         let path = Path::new(&self.root_path);
         if !path.exists() {
@@ -44,7 +44,7 @@ impl CgroupManager {
     /// Creates a cgroup for a specific VM.
     /// Returns the absolute path to the created cgroup directory.
     pub fn create_vm_cgroup(&self, vm_id: &str) -> Result<String> {
-        let vm_cgroup_path = Path::new(&self.root_path).join(format!("ignite-{}", vm_id));
+        let vm_cgroup_path = Path::new(&self.root_path).join(format!("vyoma-{}", vm_id));
         if !vm_cgroup_path.exists() {
             fs::create_dir_all(&vm_cgroup_path)?;
         }
@@ -54,7 +54,7 @@ impl CgroupManager {
     /// Sets CPU limit (quota/period).
     /// vcpu_percentage: 100 = 1 core, 50 = 0.5 core.
     pub fn set_cpu_limit(&self, vm_id: &str, vcpu_percentage: u32) -> Result<()> {
-        let path = Path::new(&self.root_path).join(format!("ignite-{}", vm_id));
+        let path = Path::new(&self.root_path).join(format!("vyoma-{}", vm_id));
         
         // cpu.max: "quota period"
         // period usually 100000 (100ms)
@@ -69,7 +69,7 @@ impl CgroupManager {
 
     /// Sets Memory limit in bytes.
     pub fn set_memory_limit(&self, vm_id: &str, bytes: u64) -> Result<()> {
-        let path = Path::new(&self.root_path).join(format!("ignite-{}", vm_id));
+        let path = Path::new(&self.root_path).join(format!("vyoma-{}", vm_id));
         let file_path = path.join("memory.max");
         fs::write(file_path, bytes.to_string())?;
         Ok(())
@@ -77,14 +77,14 @@ impl CgroupManager {
 
     /// Adds a process ID to the cgroup.
     pub fn add_process(&self, vm_id: &str, pid: u32) -> Result<()> {
-        let path = Path::new(&self.root_path).join(format!("ignite-{}", vm_id));
+        let path = Path::new(&self.root_path).join(format!("vyoma-{}", vm_id));
         let file_path = path.join("cgroup.procs");
         fs::write(file_path, pid.to_string())?;
         Ok(())
     }
     
     pub fn remove_vm_cgroup(&self, vm_id: &str) -> Result<()> {
-         let path = Path::new(&self.root_path).join(format!("ignite-{}", vm_id));
+         let path = Path::new(&self.root_path).join(format!("vyoma-{}", vm_id));
          if path.exists() {
              fs::remove_dir(&path)?;
          }
@@ -92,7 +92,7 @@ impl CgroupManager {
     }
 
     pub fn get_oom_kill_count(&self, vm_id: &str) -> Result<u64> {
-        let path = Path::new(&self.root_path).join(format!("ignite-{}", vm_id)).join("memory.events");
+        let path = Path::new(&self.root_path).join(format!("vyoma-{}", vm_id)).join("memory.events");
         if !path.exists() {
              return Ok(0);
         }

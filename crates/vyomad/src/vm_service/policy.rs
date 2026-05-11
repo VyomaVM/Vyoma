@@ -240,9 +240,9 @@ fn find_image_dir(image_name: &str) -> Result<std::path::PathBuf, String> {
     let home = dirs::home_dir()
         .ok_or_else(|| "No home directory".to_string())?;
 
-    // Try ~/.ignite/images/ first (used by the build pipeline)
-    let ignite_images = home.join(".ignite").join("images");
-    let image_dir = ignite_images.join(image_name.replace('/', "_").replace(':', "_"));
+    // Try ~/.vyoma/images/ first (used by the build pipeline)
+    let vyoma_images = home.join(".vyoma").join("images");
+    let image_dir = vyoma_images.join(image_name.replace('/', "_").replace(':', "_"));
     if image_dir.exists() {
         return Ok(image_dir);
     }
@@ -290,7 +290,7 @@ async fn load_and_verify_manifest(
                 .unwrap_or_else(|| {
                     let home = dirs::home_dir()
                         .expect("No home directory");
-                    home.join(".ignite").join("keys").join("trusted")
+                    home.join(".vyoma").join("keys").join("trusted")
                 });
 
             let mut trust_policy = vyoma_image::signing::TrustPolicy::new(true);
@@ -310,7 +310,7 @@ async fn load_and_verify_manifest(
                 .unwrap_or_else(|| {
                     let home = dirs::home_dir()
                         .expect("No home directory");
-                    home.join(".ignite").join("keys").join("trusted")
+                    home.join(".vyoma").join("keys").join("trusted")
                 });
 
             if trusted_keys_dir.exists() {
@@ -422,7 +422,7 @@ fn build_attestation_config(state: &Arc<AppState>) -> MeasuredBootConfig {
             .map(PathBuf::from)
             .or_else(|| {
                 let home = dirs::home_dir()?;
-                Some(home.join(".ignite").join("keys").join("trusted"))
+                Some(home.join(".vyoma").join("keys").join("trusted"))
             }),
     }
 }

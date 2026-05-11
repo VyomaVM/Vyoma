@@ -228,7 +228,7 @@ mod tests {
             config_volumes: vec![],
             hostname: Some("test-vm".to_string()),
             labels: std::collections::HashMap::from([("app".to_string(), "test".to_string())]),
-            base_image_path: "/home/.ignite/images/alpine".to_string(),
+            base_image_path: "/home/.vyoma/images/alpine".to_string(),
             vcpu: 4,
             mem_size_mib: 2048,
             networks: vec!["default".to_string()],

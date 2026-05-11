@@ -177,7 +177,7 @@ impl VmInstance {
         };
 
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home dir"))?;
-        let vm_dir = home.join(".ignite").join("vms").join(&self.id);
+        let vm_dir = home.join(".vyoma").join("vms").join(&self.id);
         if !vm_dir.exists() {
             std::fs::create_dir_all(&vm_dir)?;
         }
@@ -266,7 +266,7 @@ impl VmInstance {
 
         // 9. Remove VM Directory
         if let Some(home) = dirs::home_dir() {
-            let vm_dir = home.join(".ignite").join("vms").join(&self.id);
+            let vm_dir = home.join(".vyoma").join("vms").join(&self.id);
             if vm_dir.exists() {
                 if let Err(e) = std::fs::remove_dir_all(&vm_dir) {
                     error!("Failed to remove VM directory {}: {}", vm_dir.display(), e);

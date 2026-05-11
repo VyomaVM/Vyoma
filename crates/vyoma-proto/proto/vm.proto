@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package ignite.v1;
+package vyoma.v1;
 
-option go_package = "ignite/v1;ignitev1";
+option go_package = "vyoma/v1;vyomav1";
 
 import "google/protobuf/empty.proto";
 

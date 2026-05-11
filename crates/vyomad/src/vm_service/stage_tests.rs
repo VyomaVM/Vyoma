@@ -95,7 +95,7 @@ mod tests {
                 ("service".to_string(), "web".to_string()),
                 ("env".to_string(), "prod".to_string()),
             ]),
-            base_image_path: "/home/.ignite/images/nginx".to_string(),
+            base_image_path: "/home/.vyoma/images/nginx".to_string(),
         };
         
         assert_eq!(req.vcpu, 4);
@@ -130,7 +130,7 @@ mod tests {
             config_volumes: vec![],
             hostname: Some("test-vm".to_string()),
             labels: std::collections::HashMap::from([("app".to_string(), "test".to_string())]),
-            base_image_path: "/home/.ignite/images/alpine".to_string(),
+            base_image_path: "/home/.vyoma/images/alpine".to_string(),
             vcpu: 4,
             mem_size_mib: 2048,
             networks: vec!["default".to_string()],
@@ -172,7 +172,7 @@ mod tests {
         
         let result = SnapshotResult {
             id: "snap-abc123".to_string(),
-            path: PathBuf::from("/home/.ignite/vms/test/snapshots/snap-abc123/snapshot.bin"),
+            path: PathBuf::from("/home/.vyoma/vms/test/snapshots/snap-abc123/snapshot.bin"),
         };
         
         assert_eq!(result.id, "snap-abc123");

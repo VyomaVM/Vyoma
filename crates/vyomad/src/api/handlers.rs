@@ -261,9 +261,9 @@ pub async fn restore_vm(
     );
 
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let ignite_root = home.join(".ignite");
-    let images_root = ignite_root.join("images");
-    let vms_root = ignite_root.join("vms");
+    let vyoma_root = home.join(".vyoma");
+    let images_root = vyoma_root.join("images");
+    let vms_root = vyoma_root.join("vms");
 
     // We still assume alpine:latest base for MVP clone
     let safe_image_name = "alpine_latest";
@@ -450,7 +450,7 @@ pub async fn time_travel_vm(
         .ok_or((StatusCode::NOT_FOUND, "Snapshot not found".to_string()))?;
 
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let vms_root = home.join(".ignite").join("vms");
+    let vms_root = home.join(".vyoma").join("vms");
     let source_vm_dir = vms_root.join(&payload.vm_id);
     let snaps_dir = source_vm_dir.join("snapshots").join(&payload.snapshot_id);
 
@@ -643,7 +643,7 @@ pub async fn inspect_vm_handler(
     // 2. Check disk (stopped)
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
     let state_file = home
-        .join(".ignite")
+        .join(".vyoma")
         .join("vms")
         .join(&id)
         .join("state.json");
@@ -768,7 +768,7 @@ pub async fn initialize_state(state: &AppState) {
         Some(h) => h,
         None => return,
     };
-    let vms_dir = home.join(".ignite").join("vms");
+    let vms_dir = home.join(".vyoma").join("vms");
     if !vms_dir.exists() {
         return;
     }
@@ -897,7 +897,7 @@ pub async fn initialize_state(state: &AppState) {
 
             // Also delete the state file so we don't loop on it next time?
             // cleanup() removes the VM dir?
-            // VM dir is in ~/.ignite/vms/<id>. cleanup usually removes things but maybe not the dir itself?
+            // VM dir is in ~/.vyoma/vms/<id>. cleanup usually removes things but maybe not the dir itself?
             // vyoma_core::storage/vmm doesn't remove the VM home dir automatically?
             // Let's check  logic.
             // It calls remove_dm_device, detach loop, etc.
@@ -1299,7 +1299,7 @@ pub async fn events_handler(
 
 pub async fn list_images_handler() -> Json<Vec<String>> {
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-    let images_root = home.join(".ignite").join("images");
+    let images_root = home.join(".vyoma").join("images");
     let mut images = Vec::new();
     if let Ok(entries) = std::fs::read_dir(images_root) {
         for entry in entries.flatten() {
@@ -1323,7 +1323,7 @@ pub struct VolumeInfo {
 
 pub async fn list_volumes_handler() -> Json<Vec<VolumeInfo>> {
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-    let vol_root = home.join(".ignite").join("volumes");
+    let vol_root = home.join(".vyoma").join("volumes");
     let mut vols = Vec::new();
     if let Ok(entries) = std::fs::read_dir(vol_root) {
         for entry in entries.flatten() {
@@ -1361,7 +1361,7 @@ pub async fn adopt_teleported_vm(
     info!("Handling POST /adopt-teleported-vm for VM {}", payload.vm_id);
 
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let vm_dir = home.join(".ignite").join("vms").join(&payload.vm_id);
+    let vm_dir = home.join(".vyoma").join("vms").join(&payload.vm_id);
 
     if !vm_dir.exists() {
         return Err((StatusCode::NOT_FOUND, format!("VM directory not found for {}", payload.vm_id)));
@@ -1669,7 +1669,7 @@ pub async fn receive_teleport_handler(
     
     // Create directories
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let vm_dir = home.join(".ignite").join("vms").join(&payload.vm_id);
+    let vm_dir = home.join(".vyoma").join("vms").join(&payload.vm_id);
     std::fs::create_dir_all(&vm_dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
     let ch_socket = vm_dir.join("ch.sock").to_string_lossy().to_string();
@@ -1781,6 +1781,181 @@ pub struct PolicyResponse {
     pub policy: String,
     pub enabled: bool,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttestResponse {
+    pub vm_id: String,
+    pub verified: bool,
+    pub pcr_results: Vec<PcrResult>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PcrResult {
+    pub pcr_index: u32,
+    pub expected: String,
+    pub actual: String,
+    pub verified: bool,
+}
+
+pub async fn attest_vm_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<AttestResponse>, (StatusCode, String)> {
+    info!("Attestation request for VM {}", id);
+
+    let vm_arc = {
+        let vms = state.vms.lock().unwrap();
+        vms.get(&id).cloned()
+    };
+
+    let vm_arc = match vm_arc {
+        Some(arc) => arc,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                format!("VM {} not found", id),
+            ));
+        }
+    };
+
+    let (tpm_socket, base_image_path) = {
+        let vm = vm_arc.lock().await;
+        let socket = vm.vtpm_manager.as_ref().map(|vtpm| vtpm.socket_path().to_string());
+        let path = vm.base_image_path.clone();
+        (socket, path)
+    };
+
+    let tpm_socket = match tpm_socket {
+        Some(s) => s,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("VM {} has no vTPM - measured boot not enabled", id),
+            ));
+        }
+    };
+
+    let image_name = resolve_image_name_from_path(&base_image_path);
+    let signed_manifest = match load_signed_manifest_for_attest(&image_name) {
+        Ok(m) => m,
+        Err(e) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                format!("Failed to load manifest: {}", e),
+            ));
+        }
+    };
+
+    let expected_pcrs = match signed_manifest.manifest.measured_boot.pcr_policy {
+        Some(pcrs) => pcrs,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("Image {} has no PCR policy defined", image_name),
+            ));
+        }
+    };
+
+    let pcrs = read_pcrs_from_socket(&tpm_socket, &[0u32, 1, 4, 5, 7, 9, 10, 14])
+        .map_err(|e| {
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read PCRs from vTPM: {}", e))
+        })?;
+
+    let mut pcr_results = Vec::new();
+    let mut all_verified = true;
+
+    for (pcr_idx, expected_hash) in &expected_pcrs {
+        let actual_hash = pcrs.get(pcr_idx).cloned().unwrap_or_default();
+        let verified = actual_hash == *expected_hash;
+
+        if !verified {
+            all_verified = false;
+        }
+
+        pcr_results.push(PcrResult {
+            pcr_index: *pcr_idx,
+            expected: expected_hash.clone(),
+            actual: actual_hash.clone(),
+            verified,
+        });
+    }
+
+    info!(
+        "Attestation for VM {}: {}",
+        id,
+        if all_verified { "VERIFIED" } else { "FAILED" }
+    );
+
+    Ok(Json(AttestResponse {
+        vm_id: id,
+        verified: all_verified,
+        pcr_results,
+        error: if all_verified { None } else { Some("PCR mismatch detected".to_string()) },
+    }))
+}
+
+fn read_pcrs_from_socket(socket: &str, indices: &[u32]) -> Result<std::collections::HashMap<u32, String>, String> {
+    let pcr_list = indices.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
+    let output = std::process::Command::new("tpm2_pcrread")
+        .args(&[
+            "-T", &format!("socket:path={}", socket),
+            "-g", "sha256",
+            "-o", &pcr_list,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run tpm2_pcrread: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!("tpm2_pcrread failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    vyoma_core::attest::parse_pcr_values(&output.stdout)
+        .map_err(|e| format!("Failed to parse PCR values: {}", e))
+}
+
+fn resolve_image_name_from_path(base_image_path: &str) -> String {
+    use std::path::Path;
+    if let Some(path) = Path::new(base_image_path).parent() {
+        if let Some(name) = path.file_name() {
+            return name.to_string_lossy().to_string();
+        }
+    }
+    base_image_path.to_string()
+}
+
+fn load_signed_manifest_for_attest(image_name: &str) -> Result<vyoma_image::SignedManifest, String> {
+    let home = dirs::home_dir().ok_or_else(|| "No home directory".to_string())?;
+
+    let candidates = [
+        home.join(".vyoma").join("images").join(image_name),
+        home.join(".vyoma").join("images").join(image_name),
+    ];
+
+    for image_dir in &candidates {
+        let sig_path = image_dir.join("vyoma.toml.sig");
+        if sig_path.exists() {
+            return vyoma_image::VmifConverter::load_signed_manifest(&sig_path)
+                .map_err(|e| format!("Failed to load signed manifest: {}", e));
+        }
+
+        let manifest_path = image_dir.join("vyoma.toml");
+        if manifest_path.exists() {
+            let manifest = vyoma_image::VmifConverter::load_manifest(&manifest_path)
+                .map_err(|e| format!("Failed to load manifest: {}", e))?;
+            return Ok(vyoma_image::SignedManifest {
+                manifest,
+                signature: Vec::new(),
+                public_key: Vec::new(),
+            });
+        }
+    }
+
+    Err(format!(
+        "Image {} not found in ~/.vyoma/images or ~/.vyoma/images",
+        image_name
+    ))
 }
 
 pub async fn set_policy_handler(

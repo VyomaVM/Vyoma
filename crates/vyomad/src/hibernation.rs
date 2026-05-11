@@ -197,7 +197,7 @@ impl HibernationManager {
 
 impl Default for HibernationManager {
     fn default() -> Self {
-        Self::new(PathBuf::from("/var/lib/ignite/hibernation"))
+        Self::new(PathBuf::from("/var/lib/vyoma/hibernation"))
     }
 }
 
