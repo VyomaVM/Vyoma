@@ -14,6 +14,15 @@ on:
           - daemon_restart
           - resource_cleanup
 
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'crates/vyomad/**'
+      - 'Cargo.toml'
+      - '.github/workflows/chaos.yml'
+
   schedule:
     - cron: '0 2 * * 0'
 
@@ -29,30 +38,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - scenario: daemon_start_stop
+            test_path: chaos_tests::tests::test_daemon_start_stop
           - scenario: sigkill_vm_create
-            test_path: tests/chaos/wal_recovery.rs::tests::test_sigkill_during_vm_create
-          - scenario: sigkill_snapshot
-            test_path: tests/chaos/wal_recovery.rs::tests::test_sigkill_during_snapshot
-          - scenario: sigkill_stop
-            test_path: tests/chaos/wal_recovery.rs::tests::test_sigkill_during_vm_stop
+            test_path: chaos_tests::tests::test_sigkill_during_vm_create
           - scenario: wal_corruption
-            test_path: tests/chaos/wal_recovery.rs::tests::test_wal_corruption_recovery
-          - scenario: graceful_restart
-            test_path: tests/chaos/daemon_restart.rs::tests::test_graceful_restart_vm_recovery
-          - scenario: state_preserved
-            test_path: tests/chaos/daemon_restart.rs::tests::test_state_preserved_after_crash
-          - scenario: rapid_restart
-            test_path: tests/chaos/daemon_restart.rs::tests::test_rapid_restart_stress
-          - scenario: loop_cleanup
-            test_path: tests/chaos/resource_cleanup.rs::tests::test_loop_device_cleanup_after_vm_destroy
-          - scenario: dm_cleanup
-            test_path: tests/chaos/resource_cleanup.rs::tests::test_dm_device_cleanup_after_crash
-          - scenario: tap_cleanup
-            test_path: tests/chaos/resource_cleanup.rs::tests::test_tap_interface_cleanup_on_stop
+            test_path: chaos_tests::tests::test_wal_corruption_recovery
+          - scenario: running_vm_survives
+            test_path: chaos_tests::tests::test_running_vm_survives_restart
+          - scenario: resource_cleanup
+            test_path: chaos_tests::tests::test_resource_cleanup_after_destroy
           - scenario: netns_leak
-            test_path: tests/chaos/resource_cleanup.rs::tests::test_netns_leak_recovery
-          - scenario: cgroup_cleanup
-            test_path: tests/chaos/resource_cleanup.rs::tests::test_cgroup_cleanup_after_destroy
+            test_path: chaos_tests::tests::test_netns_leak_recovery
+          - scenario: rapid_restart
+            test_path: chaos_tests::tests::test_rapid_restart_stress
 
     steps:
       - name: Checkout Code
@@ -75,18 +74,14 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           sudo VYOMAD_PATH=./target/debug/vyomad \
-            cargo test --features chaos \
-            --test chaos \
-            -- --ignored \
+            cargo test --features chaos --package vyomad --lib \
             ${{ matrix.test_path }}
 
-      - name: Run scheduled chaos test
-        if: github.event_name == 'schedule'
+      - name: Run push/schedule chaos test
+        if: github.event_name != 'workflow_dispatch'
         run: |
           sudo VYOMAD_PATH=./target/debug/vyomad \
-            cargo test --features chaos \
-            --test chaos \
-            -- --ignored
+            cargo test --features chaos --package vyomad --lib chaos_tests::tests
 
       - name: Collect logs on failure
         if: failure()
@@ -97,24 +92,80 @@ jobs:
       - name: Cleanup resources
         if: always()
         run: |
-          sudo tests/chaos/cleanup_resources.sh || true
+          set -e
+
+          echo "Cleaning up TAP interfaces..."
+          for iface in $(ip -o link show | awk -F': ' '{print $2}' | grep -E 'tap|vyoma' 2>/dev/null || true); do
+            sudo ip link del "$iface" 2>/dev/null || true
+          done
+
+          echo "Cleaning up DM devices..."
+          for dev in $(ls /dev/mapper/ 2>/dev/null | grep -E 'vyoma|vm-' || true); do
+            sudo dmsetup remove "$dev" 2>/dev/null || true
+          done
+
+          echo "Cleaning up network namespaces..."
+          for ns in $(ls /var/run/netns/ 2>/dev/null | grep -E 'vyoma|vm-' || true); do
+            sudo ip netns del "$ns" 2>/dev/null || true
+          done
+
+          echo "Cleaning up loop devices..."
+          for loop in $(losetup -a 2>/dev/null | grep -E 'vyoma|vm-' | awk -F: '{print $1}' || true); do
+            sudo losetup -d "$loop" 2>/dev/null || true
+          done
+
+          echo "Cleaning up cgroups..."
+          for controller in cpu memory devices pids; do
+            for cgroup in $(ls /sys/fs/cgroup/$controller/ 2>/dev/null | grep -E 'vyoma|vm-' || true); do
+              sudo rmdir "/sys/fs/cgroup/$controller/$cgroup" 2>/dev/null || true
+            done
+          done
+
+          echo "Cleaning up leftover processes..."
+          pkill -9 -f "vyomad.*test" 2>/dev/null || true
+          pkill -9 -f "cloud-hypervisor" 2>/dev/null || true
+
+          echo "Cleanup complete"
 
   chaos-report:
-    name: Generate Chaos Report
+    name: Chaos Test Report
     runs-on: ubuntu-latest
     needs: chaos-tests
     if: always()
     steps:
+      - name: Determine results
+        run: |
+          RESULT="${{ needs.chaos-tests.result }}"
+          echo "Chaos tests result: $RESULT"
+
+          if [ "$RESULT" = "failure" ]; then
+            echo "::warning::Some chaos tests failed. Check the test jobs for details."
+            exit 1
+          elif [ "$RESULT" = "success" ]; then
+            echo "All chaos tests passed!"
+          fi
+
       - name: Generate report
         run: |
           echo "## Chaos Test Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          TOTAL=${{ needs.chaos-tests.result == 'success' && '12' || '0' }}
-          PASSED=$(($TOTAL - $(echo '${{ needs.chaos-tests.result }}' | grep -c 'failure' || echo 0)))
+          SCENARIOS=("daemon_start_stop" "sigkill_vm_create" "wal_corruption" "running_vm_survives" "resource_cleanup" "netns_leak" "rapid_restart")
+          TOTAL=${#SCENARIOS[@]}
 
           echo "| Scenario | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Total | $TOTAL |" >> $GITHUB_STEP_SUMMARY
-          echo "| Passed | $PASSED |" >> $GITHUB_STEP_SUMMARY
-          echo "| Failed | $(($TOTAL - $PASSED)) |" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.chaos-tests.result }}" = "success" ]; then
+            echo "| Passed | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| Failed | 0 |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo ":white_check_mark: All chaos tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Passed | 0 |" >> $GITHUB_STEP_SUMMARY
+            echo "| Failed | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo ":x: Some chaos tests failed. Review the job logs for details." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi

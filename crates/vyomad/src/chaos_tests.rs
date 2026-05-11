@@ -164,33 +164,12 @@ impl Drop for DaemonHandle {
 
 #[cfg(feature = "chaos")]
 fn cleanup_resources(data_dir: &Path) -> Result<()> {
-    if let Ok(entries) = fs::read_dir("/sys/class/net") {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy().to_string();
-            if name_str.starts_with("tap") {
-                let _ = Command::new("ip").args(["link", "del", &name_str]).output();
-            }
-        }
-    }
-
-    if let Ok(entries) = fs::read_dir("/dev/mapper") {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("vyoma-") {
-                let _ = Command::new("dmsetup").args(["remove", &name]).output();
-            }
-        }
-    }
-
-    if let Ok(entries) = fs::read_dir("/var/run/netns") {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("vyoma-") {
-                let _ = Command::new("ip").args(["netns", "del", &name]).output();
-            }
-        }
-    }
+    cleanup_tap_interfaces();
+    cleanup_dm_devices();
+    cleanup_netns();
+    cleanup_loop_devices();
+    cleanup_cgroups();
+    cleanup_vhost_net_devices();
 
     if data_dir.exists() {
         let _ = fs::remove_dir_all(data_dir);
@@ -200,13 +179,132 @@ fn cleanup_resources(data_dir: &Path) -> Result<()> {
 }
 
 #[cfg(feature = "chaos")]
+fn cleanup_tap_interfaces() {
+    if let Ok(entries) = fs::read_dir("/sys/class/net") {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy().to_string();
+            if name_str.starts_with("tap") || name_str.contains("vyoma") {
+                let _ = Command::new("ip").args(["link", "del", &name_str]).output();
+            }
+        }
+    }
+}
+
+#[cfg(feature = "chaos")]
+fn cleanup_dm_devices() {
+    if let Ok(entries) = fs::read_dir("/dev/mapper") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("vyoma-") || name.contains("vm-") {
+                let _ = Command::new("dmsetup").args(["remove", &name]).output();
+            }
+        }
+    }
+
+    if let Ok(entries) = fs::read_dir("/dev") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("loop") {
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.is_block_device() {
+                        let _ = Command::new("losetup").args(["-d", &format!("/dev/{}", name)]).output();
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "chaos")]
+fn cleanup_loop_devices() {
+    let output = Command::new("losetup").args(["-a"]).output();
+    if let Ok(output) = output {
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        for line in output_str.lines() {
+            if line.contains("vyoma") || line.contains("vm-") {
+                if let Some(device) = line.split(':').next() {
+                    let device = device.trim();
+                    if !device.is_empty() {
+                        let _ = Command::new("losetup").args(["-d", device]).output();
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "chaos")]
+fn cleanup_netns() {
+    if let Ok(entries) = fs::read_dir("/var/run/netns") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("vyoma-") || name.contains("vm-") {
+                let _ = Command::new("ip").args(["netns", "del", &name]).output();
+            }
+        }
+    }
+}
+
+#[cfg(feature = "chaos")]
+fn cleanup_vhost_net_devices() {
+    if let Ok(entries) = fs::read_dir("/dev/vhost-net") {
+        for entry in entries.flatten() {
+            let _ = entry;
+        }
+    }
+    if let Ok(entries) = fs::read_dir("/sys/class/vhost-net") {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy().to_string();
+            if name_str.starts_with("vhost-") {
+                let _ = Command::new("ip").args(["link", "del", &name_str]).output();
+            }
+        }
+    }
+}
+
+#[cfg(feature = "chaos")]
+fn cleanup_cgroups() {
+    let cgroup_paths = vec![
+        "/sys/fs/cgroup",
+        "/sys/fs/cgroup/unified",
+    ];
+
+    for cgroup_path in cgroup_paths {
+        if let Ok(entries) = fs::read_dir(cgroup_path) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("vyoma-") || name.starts_with("vm-") {
+                    let path = entry.path();
+                    let _ = Command::new("rmdir").arg(&path).output();
+                }
+            }
+        }
+    }
+
+    for controller in &["cpu", "memory", "devices", "pids"] {
+        let controller_path = format!("/sys/fs/cgroup/{}", controller);
+        if let Ok(entries) = fs::read_dir(&controller_path) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("vyoma-") || name.starts_with("vm-") {
+                    let path = entry.path();
+                    let _ = Command::new("rmdir").arg(&path).output();
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "chaos")]
 fn check_dangling_resources() -> Result<Vec<String>> {
     let mut dangling = Vec::new();
 
     if let Ok(entries) = fs::read_dir("/sys/class/net") {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("tap") {
+            if name.starts_with("tap") || name.contains("vyoma") {
                 dangling.push(format!("TAP interface: {}", name));
             }
         }
@@ -215,7 +313,7 @@ fn check_dangling_resources() -> Result<Vec<String>> {
     if let Ok(entries) = fs::read_dir("/dev/mapper") {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("vyoma-") {
+            if name.starts_with("vyoma-") || name.contains("vm-") {
                 dangling.push(format!("DM device: {}", name));
             }
         }
@@ -224,8 +322,30 @@ fn check_dangling_resources() -> Result<Vec<String>> {
     if let Ok(entries) = fs::read_dir("/var/run/netns") {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("vyoma-") {
+            if name.starts_with("vyoma-") || name.contains("vm-") {
                 dangling.push(format!("Network namespace: {}", name));
+            }
+        }
+    }
+
+    let output = Command::new("losetup").args(["-a"]).output();
+    if let Ok(output) = output {
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        for line in output_str.lines() {
+            if line.contains("vyoma") || line.contains("vm-") {
+                dangling.push(format!("Loop device: {}", line.trim()));
+            }
+        }
+    }
+
+    for controller in &["cpu", "memory", "devices", "pids"] {
+        let controller_path = format!("/sys/fs/cgroup/{}", controller);
+        if let Ok(entries) = fs::read_dir(&controller_path) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("vyoma-") || name.starts_with("vm-") {
+                    dangling.push(format!("Cgroup ({}) : {}", controller, name));
+                }
             }
         }
     }
@@ -313,7 +433,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "requires KVM and root"]
     fn test_daemon_start_stop() {
         let temp_dir = tempfile::tempdir().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
@@ -325,7 +444,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires KVM and root"]
     fn test_sigkill_during_vm_create() {
         let temp_dir = tempfile::tempdir().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
@@ -349,7 +467,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires KVM and root"]
     fn test_wal_corruption_recovery() {
         let temp_dir = tempfile::tempdir().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
@@ -397,7 +514,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires KVM and root"]
     fn test_running_vm_survives_restart() {
         let temp_dir = tempfile::tempdir().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
@@ -423,7 +539,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires KVM and root"]
     fn test_resource_cleanup_after_destroy() {
         let temp_dir = tempfile::tempdir().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
@@ -459,7 +574,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires KVM and root"]
     fn test_netns_leak_recovery() {
         let temp_dir = tempfile::tempdir().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
@@ -502,7 +616,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires KVM and root"]
     fn test_rapid_restart_stress() {
         let temp_dir = tempfile::tempdir().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
