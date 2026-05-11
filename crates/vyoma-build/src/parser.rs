@@ -18,6 +18,7 @@ pub enum Instruction {
     Entrypoint { args: Vec<String> },
     Env { key: String, value: String },
     Workdir { path: String },
+    VmMeasuredBoot,
 }
 
 impl Vyomafile {
@@ -44,6 +45,11 @@ impl Vyomafile {
         }
 
         Ok(Vyomafile { instructions })
+    }
+
+    /// Check if this Vyomafile requests measured boot
+    pub fn has_measured_boot(&self) -> bool {
+        self.instructions.iter().any(|inst| matches!(inst, Instruction::VmMeasuredBoot))
     }
 
     fn parse_line(line: &str, line_num: usize) -> Result<Instruction> {
@@ -102,6 +108,13 @@ impl Vyomafile {
                     anyhow::bail!("WORKDIR requires a path at line {}", line_num);
                 }
                 Ok(Instruction::Workdir { path: args.to_string() })
+            }
+            "VM_MEASURED_BOOT" => {
+                // VM_MEASURED_BOOT is a flag instruction, no arguments expected
+                if !args.is_empty() {
+                    anyhow::bail!("VM_MEASURED_BOOT does not take arguments at line {}", line_num);
+                }
+                Ok(Instruction::VmMeasuredBoot)
             }
             _ => {
                 anyhow::bail!("Unknown instruction '{}' at line {}", instruction, line_num);
@@ -215,5 +228,34 @@ CMD ["echo", "done"]
             Instruction::Workdir { path } => assert_eq!(path, "/app"),
             _ => panic!("Expected WORKDIR instruction"),
         }
+    }
+
+    #[test]
+    fn test_parse_vm_measured_boot_instruction() {
+        let vyomafile = Vyomafile::parse_content("VM_MEASURED_BOOT").unwrap();
+        assert_eq!(vyomafile.instructions.len(), 1);
+        match &vyomafile.instructions[0] {
+            Instruction::VmMeasuredBoot => {},
+            _ => panic!("Expected VM_MEASURED_BOOT instruction"),
+        }
+        assert!(vyomafile.has_measured_boot());
+    }
+
+    #[test]
+    fn test_parse_vm_measured_boot_with_args_fails() {
+        let result = Vyomafile::parse_content("VM_MEASURED_BOOT some_arg");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_has_measured_boot_false() {
+        let vyomafile = Vyomafile::parse_content("FROM alpine\nRUN echo hello").unwrap();
+        assert!(!vyomafile.has_measured_boot());
+    }
+
+    #[test]
+    fn test_has_measured_boot_true() {
+        let vyomafile = Vyomafile::parse_content("FROM alpine\nVM_MEASURED_BOOT\nRUN echo hello").unwrap();
+        assert!(vyomafile.has_measured_boot());
     }
 }
