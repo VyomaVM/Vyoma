@@ -39,12 +39,21 @@ use tokio::sync::Mutex as TokioMutex;
 use std::path::PathBuf;
 use tracing::{error, info, warn};
 
-use crate::cluster;
 use crate::dns;
 use crate::swarm;
 use crate::state::{AppState, VmInstance, VmState, VmStatus, wal::WalEntry};
 use crate::vm_service::state as vm_service_state;
 use crate::vm_service::image::ensure_image_locally_handler;
+
+#[derive(serde::Deserialize, Serialize)]
+pub struct LegacyNodeInfo {
+    pub id: String,
+    pub ip: String,
+    pub role: String,
+    pub subnet_id: u8,
+    pub wireguard_public_key: Option<String>,
+    pub wireguard_port: Option<u16>,
+}
 
 use vyoma_teleport::MigrationProgress as TeleportProgress;
 use std::sync::OnceLock;
@@ -546,26 +555,6 @@ pub async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {
     }
 
     Json(ListResponse { vms: summaries })
-}
-
-// Git Helper Functions - moved to vm_service::mod.rs
-// git_init is now in vm_service
-
-fn git_commit(path: &std::path::Path, message: &str) -> std::io::Result<()> {
-    Command::new("git")
-        .arg("add")
-        .arg(".")
-        .current_dir(path)
-        .output()?;
-
-    Command::new("git")
-        .arg("commit")
-        .arg("--allow-empty")
-        .arg("-m")
-        .arg(message)
-        .current_dir(path)
-        .output()?;
-    Ok(())
 }
 
 pub async fn stream_logs(
@@ -1235,7 +1224,7 @@ pub struct RegisterResponse {
 #[deprecated(since = "0.2.0", note = "Use /swarm/join instead - registration is now Raft-based")]
 pub async fn swarm_register_handler(
     State(state): State<AppState>,
-    Json(node): Json<cluster::NodeInfo>,
+    Json(node): Json<LegacyNodeInfo>,
 ) -> Result<Json<RegisterResponse>, (StatusCode, String)> {
     info!("Deprecated /swarm/register called - redirecting to Raft-based flow");
     

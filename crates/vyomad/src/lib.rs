@@ -1,5 +1,4 @@
 pub mod api;
-pub mod cluster;
 pub mod dns;
 pub mod grpc;
 pub mod hibernation;
