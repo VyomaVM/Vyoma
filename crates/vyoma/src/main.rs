@@ -5,7 +5,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use futures::stream::StreamExt;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -628,6 +628,31 @@ async fn main() -> Result<()> {
         }
         Commands::Teleport { id, target, bandwidth, progress } => {
             info!("Initiating Live Teleportation for VM {} to target {}", id, target);
+
+            let target_daemon = format!("http://{}:3000", target);
+            let status_check = client.get(format!("{}/teleport/status/test", target_daemon)).send().await;
+            
+            let use_live_migration = status_check.map(|r| r.status().as_u16() != 404).unwrap_or(false);
+            
+            if !use_live_migration {
+                warn!("Target node {} doesn't support live migration, falling back to snapshot mode", target);
+                let payload = serde_json::json!({
+                    "vm_id": id,
+                    "target_node_ip": target
+                });
+                let resp = client
+                    .post(format!("{}/teleport", daemon_url))
+                    .json(&payload)
+                    .send()
+                    .await?;
+                if !resp.status().is_success() {
+                    error!("Teleport (fallback) failed: {}", resp.text().await.unwrap_or_default());
+                    return Ok(());
+                }
+                println!("{}", resp.text().await.unwrap_or_default());
+                return Ok(());
+            }
+
             let payload = serde_json::json!({
                 "vm_id": id,
                 "target_node_ip": target,
