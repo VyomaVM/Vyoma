@@ -22,6 +22,8 @@ pub struct BuildRunner {
     pub measured: bool,
     /// Optional path to a signing key for manifest signing.
     pub signing_key_path: Option<String>,
+    /// Cache of converted ext4 base images (image name -> ext4 path)
+    ext4_cache: std::collections::HashMap<String, PathBuf>,
 }
 
 impl BuildRunner {
@@ -32,6 +34,7 @@ impl BuildRunner {
             temp_dir,
             measured: false,
             signing_key_path: None,
+            ext4_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -43,7 +46,7 @@ impl BuildRunner {
 
     /// Execute a complete build from Vyomafile
     pub async fn build(
-        &self,
+        &mut self,
         vyomafile_path: &Path,
         context_dir: &Path,
         image_name: &str,
@@ -300,7 +303,7 @@ impl BuildRunner {
         Ok(rootfs_path)
     }
 
-    async fn handle_run(&self, rootfs_path: &Path, command: &str) -> Result<PathBuf, BuildError> {
+    async fn handle_run(&mut self, rootfs_path: &Path, command: &str) -> Result<PathBuf, BuildError> {
         info!("Executing RUN command in real VM: {}", command);
         
         let build_id = format!("build-{}", chrono::Utc::now().timestamp_millis());
@@ -316,20 +319,31 @@ impl BuildRunner {
     }
     
     async fn execute_build_in_vm(
-        &self,
+        &mut self,
         base_squashfs: &Path,
         command: &str,
         build_dir: &Path,
     ) -> Result<PathBuf, BuildError> {
-        let ext4_path = build_dir.join("base.ext4");
+        let cache_key = base_squashfs.to_string_lossy().to_string();
+        
+        // Check cache first
+        let ext4_path = if let Some(cached_ext4) = self.ext4_cache.get(&cache_key) {
+            if cached_ext4.exists() {
+                info!("Using cached ext4 base image: {:?}", cached_ext4);
+                cached_ext4.clone()
+            } else {
+                self.create_cached_ext4(base_squashfs, &cache_key).await?
+            }
+        } else {
+            self.create_cached_ext4(base_squashfs, &cache_key).await?
+        };
+        
         let cow_path = build_dir.join("cow.img");
         let dm_name = format!("vyoma-build-{}", std::process::id());
         let new_layer_path = build_dir.join("layer.sqfs");
         
-        info!("Converting squashfs to ext4: {:?}", base_squashfs);
-        self.squashfs_to_ext4(base_squashfs, &ext4_path).await?;
+        info!("Using ext4 base: {:?}", ext4_path);
         
-        info!("Creating COW file for writable layer");
         vyoma_storage::cow::LoopManager::create_cow_file(&cow_path, 1024)
             .map_err(|e| BuildError::ExecutionError(format!("Failed to create COW file: {}", e)))?;
         
@@ -421,6 +435,24 @@ impl BuildRunner {
         cp_result.map_err(|e| BuildError::ExecutionError(format!("Failed to copy files to ext4: {}", e)))?;
         
         Ok(())
+    }
+    
+    async fn create_cached_ext4(&mut self, squashfs: &Path, cache_key: &str) -> Result<PathBuf, BuildError> {
+        let cache_dir = self.work_dir.join("ext4-cache");
+        std::fs::create_dir_all(&cache_dir)
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to create cache dir: {}", e)))?;
+        
+        let safe_key = cache_key.replace('/', "_").replace(':', "_").replace('\\', "_");
+        let ext4_path = cache_dir.join(format!("{}.ext4", safe_key));
+        
+        if !ext4_path.exists() {
+            info!("Creating cached ext4 from {:?} -> {:?}", squashfs, ext4_path);
+            self.squashfs_to_ext4(squashfs, &ext4_path).await?;
+            self.ext4_cache.insert(cache_key.to_string(), ext4_path.clone());
+            info!("Cached ext4 created and stored in cache");
+        }
+        
+        Ok(ext4_path)
     }
     
     async fn ext4_to_squashfs(&self, ext4: &Path, squashfs: &Path) -> Result<(), BuildError> {
@@ -628,7 +660,7 @@ poweroff -f
 
 
 
-    async fn handle_copy(&self, rootfs_path: &Path, context_dir: &Path, src: &str, dst: &str) -> Result<(), BuildError> {
+    async fn handle_copy(&mut self, rootfs_path: &Path, context_dir: &Path, src: &str, dst: &str) -> Result<(), BuildError> {
         info!("Injecting file {} -> {} using debugfs", src, dst);
 
         // For squashfs, we can't modify it directly. Instead, we need to:
