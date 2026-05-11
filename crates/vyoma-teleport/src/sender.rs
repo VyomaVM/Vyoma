@@ -208,26 +208,17 @@ impl Teleporter {
                 callback(progress.clone());
             }
 
-            let err_msg = error.clone();
             if completed {
                 info!("Migration completed!");
                 return Ok(());
             }
 
-            if let Some(e) = err_msg {
+            if let Some(e) = error {
                 error!("Migration failed: {}", e);
                 return Err(e);
             }
 
             match migration_status {
-                "completed" => {
-                    info!("Migration completed!");
-                    return Ok(());
-                }
-                "failed" => {
-                    error!("Migration failed");
-                    return Err("Migration failed".to_string());
-                }
                 "active" | "Setup" | "PreEmpty" | "PreCopy" | "Install" => {
                     info!(
                         "Migration ongoing: round {}, transferred {:.2}%, dirty ~{:.2}%",
