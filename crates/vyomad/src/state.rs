@@ -79,9 +79,17 @@ impl AppState {
 }
 
 #[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum VmStatus {
+    PendingAttestation,
+    Running,
+    Error { reason: String },
+}
+
 pub struct VmInstance {
     pub vmm: VmmManager,
     pub id: String,
+    pub status: VmStatus,
     pub ch_socket_path: String,
     pub tap_name: String,
     pub dm_name: String,
@@ -130,6 +138,8 @@ pub struct VmState {
     pub mem_size_mib: u32,
     #[serde(default)]
     pub networks: Vec<String>,
+    #[serde(default)]
+    pub status: VmStatus,
 }
 
 use tracing::{info, error};
@@ -156,6 +166,7 @@ impl VmInstance {
             vcpu: self.vcpu,
             mem_size_mib: self.mem_size_mib,
             networks: self.networks.clone(),
+            status: self.status.clone(),
         };
 
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home dir"))?;
