@@ -18,7 +18,9 @@ use tokio_util::io::StreamReader;
 use uuid;
 use tempfile;
 use openraft::raft::{AppendEntriesRequest, InstallSnapshotRequest, VoteRequest};
+use vyoma_teleport::{MigrationProgress, Teleporter, TeleportReceiver};
 use openraft::Raft;
+use std::process::Command;
 use vyoma_core::api::{PortMapping, VolumeMount};
 use vyoma_core::cgroups::CgroupManager;
 use vyoma_core::fs::VirtioFsManager;
@@ -29,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
 use std::path::PathBuf;
@@ -36,11 +39,31 @@ use tracing::{error, info, warn};
 
 use crate::cluster;
 use crate::dns;
-// use futures::StreamExt as FuturesStreamExt;
-
+use crate::swarm;
 use crate::state::{AppState, VmInstance, VmState, wal::WalEntry};
 use crate::vm_service::state as vm_service_state;
 use crate::vm_service::image::ensure_image_locally_handler;
+
+use vyoma_teleport::MigrationProgress as TeleportProgress;
+use std::sync::OnceLock;
+
+static MIGRATION_SESSIONS: OnceLock<StdMutex<HashMap<String, MigrationSession>>> = OnceLock::new();
+
+fn get_migration_sessions() -> &'static StdMutex<HashMap<String, MigrationSession>> {
+    MIGRATION_SESSIONS.get_or_init(|| StdMutex::new(HashMap::new()))
+}
+
+#[derive(Clone, Debug)]
+pub struct MigrationSession {
+    pub session_id: String,
+    pub vm_id: String,
+    pub source_node: String,
+    pub target_node: String,
+    pub status: String,
+    pub progress: Option<TeleportProgress>,
+    pub started_at: u64,
+    pub completed_at: Option<u64>,
+}
 
 
 
@@ -555,15 +578,16 @@ pub async fn stream_logs(
     if let Some(vm_mutex) = vm_arc {
         let vm = vm_mutex.lock().await;
         let rx = vm.vmm.subscribe_logs();
-        use tokio_stream::StreamExt;
 
-        // Transform broadcast receiver into SSE stream
-        let stream = BroadcastStream::new(rx).filter_map(|try_msg| {
-            match try_msg {
-                Ok(msg) => Some(Ok(Event::default().data(msg))),
-                Err(_) => None, // Skip missed messages
-            }
-        });
+        let stream = tokio_stream::StreamExt::filter_map(
+            BroadcastStream::new(rx),
+            |try_msg| {
+                match try_msg {
+                    Ok(msg) => Some(Ok(Event::default().data(msg))),
+                    Err(_) => None,
+                }
+            },
+        );
 
         Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
     } else {
@@ -1217,15 +1241,13 @@ pub async fn swarm_register_handler(
 pub async fn events_handler(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    use tokio_stream::StreamExt;
     let rx = state.events_tx.subscribe();
     let stream = BroadcastStream::new(rx);
 
-    Sse::new(
-        stream.map(|msg| {
+    Sse::new(tokio_stream::StreamExt::filter_map(stream, |msg| {
             match msg {
-                Ok(data) => Ok(Event::default().data(data)),
-                Err(_) => Ok(Event::default().comment("missed message")),
+                Ok(data) => Some(Ok(Event::default().data(data))),
+                Err(_) => Some(Ok(Event::default().comment("missed message"))),
             }
         })
     )
@@ -1276,63 +1298,179 @@ pub async fn list_volumes_handler() -> Json<Vec<VolumeInfo>> {
 pub struct TeleportRequest {
     pub vm_id: String,
     pub target_node_ip: String,
+    pub bandwidth_mbps: Option<u32>,
+}
+
+#[derive(Serialize)]
+pub struct TeleportResponse {
+    pub session_id: String,
+    pub status: String,
+    pub message: String,
 }
 
 pub async fn teleport_handler(
     State(state): State<AppState>,
     Json(payload): Json<TeleportRequest>,
-) -> Result<String, (StatusCode, String)> {
+) -> Result<Json<TeleportResponse>, (StatusCode, String)> {
     info!("Handling POST /teleport for VM {} to {}", payload.vm_id, payload.target_node_ip);
-    
-    // 1. Get VM
+
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let started_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let migration_session = MigrationSession {
+        session_id: session_id.clone(),
+        vm_id: payload.vm_id.clone(),
+        source_node: "local".to_string(),
+        target_node: payload.target_node_ip.clone(),
+        status: "initiating".to_string(),
+        progress: None,
+        started_at,
+        completed_at: None,
+    };
+
+    {
+        let sessions = get_migration_sessions();
+        let mut sessions = sessions.lock().unwrap();
+        sessions.insert(session_id.clone(), migration_session.clone());
+    }
+
     let vm_arc = {
         let vms = state.vms.lock().unwrap();
         vms.get(&payload.vm_id).cloned()
     };
 
     if let Some(vm_mutex) = vm_arc {
-        let vm = vm_mutex.lock().await;
-
-        let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-        let vm_dir = home.join(".ignite").join("vms").join(&payload.vm_id);
-        let snapshot_path = vm_dir.join("snapshot.snap");
-        let mem_path = vm_dir.join("memory.mem");
-        let ch_socket = vm.ch_socket_path.clone();
-
-        // We do not need to manually pause and snapshot for Cloud Hypervisor live migration.
-        // The hypervisor handles the memory tracking and handoff natively.
+        let (ch_socket, mem_size_mib_for_spawn) = {
+            let vm = vm_mutex.lock().await;
+            (vm.ch_socket_path.clone(), vm.mem_size_mib)
+        };
         let target_url = payload.target_node_ip.clone();
-        
-        let client = reqwest::Client::new();
+        let vms_for_cleanup = Arc::clone(&state.vms);
+
+        let http_client = reqwest::Client::new();
         let target_api = format!("http://{}:3000/receive-teleport", target_url);
-        
+
         info!("Telling target node at {} to prepare for reception...", target_api);
-        
-        let res = client.post(&target_api)
+
+        let res = http_client.post(&target_api)
             .json(&ReceiveTeleportRequest { vm_id: payload.vm_id.clone() })
             .send()
             .await;
-            
+
         if let Err(e) = res {
+            {
+                let sessions = get_migration_sessions();
+                let mut sessions = sessions.lock().unwrap();
+                if let Some(s) = sessions.get_mut(&session_id) {
+                    s.status = "failed".to_string();
+                }
+            }
             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Target node unreachable: {}", e)));
         } else if let Ok(resp) = res {
             if !resp.status().is_success() {
+                {
+                    let sessions = get_migration_sessions();
+                    let mut sessions = sessions.lock().unwrap();
+                    if let Some(s) = sessions.get_mut(&session_id) {
+                        s.status = "failed".to_string();
+                    }
+                }
                 return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Target node refused: {:?}", resp.text().await)));
             }
         }
 
-        let teleporter = vyoma_teleport::sender::Teleporter::new(payload.vm_id.clone(), target_url, vm.mem_size_mib as u64);
-        
-        let teleport_vm_id = payload.vm_id.clone();
-        tokio::spawn(async move {
-            match teleporter.teleport_vm(PathBuf::new(), PathBuf::new(), &ch_socket).await {
-                Ok(_) => info!("Teleportation of VM {} succeeded!", teleport_vm_id),
-                Err(e) => error!("Teleportation of VM {} failed: {}", teleport_vm_id, e),
+        let bandwidth = payload.bandwidth_mbps;
+        let session_id_clone = session_id.clone();
+
+        let progress_callback = Box::new(move |progress: TeleportProgress| {
+            let sessions = get_migration_sessions();
+            if let Ok(mut sessions) = sessions.lock() {
+                if let Some(session) = sessions.get_mut(&session_id_clone) {
+                    session.status = progress.status.clone();
+                    session.progress = Some(progress);
+                }
             }
         });
 
-        Ok(format!("Teleportation initiated for VM {}", payload.vm_id))
+let session_id_for_spawn = session_id.clone();
+        let target_url_for_spawn = target_url.clone();
+        let vm_id_for_cleanup = payload.vm_id.clone();
+        let vms_for_cleanup = vms_for_cleanup.clone();
+
+        tokio::spawn(async move {
+            let teleporter = vyoma_teleport::sender::Teleporter::new(
+                payload.vm_id.clone(),
+                target_url_for_spawn,
+                mem_size_mib_for_spawn as u64,
+            );
+
+            let result = teleporter.teleport_vm_with_config(
+                &ch_socket,
+                bandwidth,
+                Some(progress_callback),
+            ).await;
+
+            if result.is_ok() {
+                let vm_id = vm_id_for_cleanup.clone();
+                let vms = Arc::clone(&vms_for_cleanup);
+                
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    
+                if let Some(_vm_arc) = vms.lock().unwrap().remove(&vm_id) {
+                    info!("Source VM {} removed from registry after migration", vm_id);
+                }
+                
+                let sessions = get_migration_sessions();
+                if let Ok(mut sessions) = sessions.lock() {
+                    if let Some(session) = sessions.get_mut(&session_id_for_spawn) {
+                        session.status = "completed".to_string();
+                        session.completed_at = Some(
+                            SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0)
+                        );
+                    }
+                }
+            } else {
+                let sessions = get_migration_sessions();
+                if let Ok(mut sessions) = sessions.lock() {
+                    if let Some(session) = sessions.get_mut(&session_id_for_spawn) {
+                        session.status = "failed".to_string();
+                    }
+                }
+            }
+
+            match result {
+                Ok(_) => info!("Teleportation of VM {} succeeded!", payload.vm_id),
+                Err(e) => error!("Teleportation of VM {} failed: {}", payload.vm_id, e),
+            }
+        });
+
+        {
+            let sessions = get_migration_sessions();
+            let mut sessions = sessions.lock().unwrap();
+            if let Some(s) = sessions.get_mut(&session_id) {
+                s.status = "in_progress".to_string();
+            }
+        }
+
+        Ok(Json(TeleportResponse {
+            session_id,
+            status: "in_progress".to_string(),
+            message: "Live migration initiated".to_string(),
+        }))
     } else {
+        {
+            let sessions = get_migration_sessions();
+            let mut sessions = sessions.lock().unwrap();
+            if let Some(s) = sessions.get_mut(&session_id) {
+                s.status = "failed".to_string();
+            }
+        }
         Err((StatusCode::NOT_FOUND, "VM not found".to_string()))
     }
 }
@@ -1376,6 +1514,41 @@ pub async fn receive_teleport_handler(
     // In a complete implementation, we would wait for it and insert into `state.vms`.
     
     Ok(format!("Cloud Hypervisor ready to receive VM {} on TCP port 9000", payload.vm_id))
+}
+
+#[derive(Serialize)]
+pub struct TeleportStatusResponse {
+    pub session_id: String,
+    pub vm_id: String,
+    pub source_node: String,
+    pub target_node: String,
+    pub status: String,
+    pub progress: Option<TeleportProgress>,
+    pub started_at: u64,
+    pub completed_at: Option<u64>,
+}
+
+pub async fn teleport_status_handler(
+    State(_state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> Result<Json<TeleportStatusResponse>, (StatusCode, String)> {
+    let sessions = get_migration_sessions();
+    let sessions = sessions.lock().unwrap();
+
+    if let Some(session) = sessions.get(&session_id) {
+        Ok(Json(TeleportStatusResponse {
+            session_id: session.session_id.clone(),
+            vm_id: session.vm_id.clone(),
+            source_node: session.source_node.clone(),
+            target_node: session.target_node.clone(),
+            status: session.status.clone(),
+            progress: session.progress.clone(),
+            started_at: session.started_at,
+            completed_at: session.completed_at,
+        }))
+    } else {
+        Err((StatusCode::NOT_FOUND, "Session not found".to_string()))
+    }
 }
 
 // --- Raft Core API Handlers ---

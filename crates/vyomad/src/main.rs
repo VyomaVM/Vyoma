@@ -241,6 +241,7 @@ async fn main() {
         .route("/raft/snapshot", post(handlers::raft_snapshot_handler))
         .route("/raft/vote", post(handlers::raft_vote_handler))
         .route("/teleport", post(handlers::teleport_handler))
+        .route("/teleport/status/:session_id", get(handlers::teleport_status_handler))
         .route("/receive-teleport", post(handlers::receive_teleport_handler))
         .route("/policy", get(handlers::get_policy_handler).post(handlers::set_policy_handler))
         .fallback(ui::ui_handler)
