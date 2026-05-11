@@ -16,6 +16,7 @@ use tracing::{error, info, warn};
 use vyoma_compose::VyomaCompose;
 use vyoma_core::api::PortMapping;
 use vyoma_core::api::VolumeMount;
+use vyoma_image::signing::TrustPolicy;
 use vyoma_image::SignedManifest;
 
 /// Resolve socket path with fallback to user-writable location
@@ -1398,7 +1399,106 @@ async fn run_attest(
 ) -> Result<bool> {
     info!("Attesting VM: {}", vm_id);
 
-    // Step 1: Call the daemon's attest endpoint
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home directory"))?;
+    let (signed_manifest, manifest_source) = if let Some(ref mpath) = manifest_path {
+        let path = PathBuf::from(mpath);
+        let signed = SignedManifest::load_from_file(&path)
+            .map_err(|e| anyhow::anyhow!("Failed to load manifest from {}: {}", mpath, e))?;
+        (signed, format!("explicit: {}", mpath))
+    } else {
+        let inspect_url = format!("{}/vm/{}", daemon_url, vm_id);
+        let resp = client.get(&inspect_url).send().await
+            .map_err(|e| anyhow::anyhow!("Failed to inspect VM {}: {}", vm_id, e))?;
+
+        if resp.status() != StatusCode::OK {
+            return Err(anyhow::anyhow!("VM {} not found (daemon returned {})", vm_id, resp.status()));
+        }
+
+        #[derive(Deserialize)]
+        struct VmInspect { base_image_path: String }
+
+        let vm_info: VmInspect = resp.json().await
+            .map_err(|e| anyhow::anyhow!("Failed to parse VM info: {}", e))?;
+
+        let image_name = std::path::Path::new(&vm_info.base_image_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| vm_info.base_image_path.clone());
+
+        let candidates = [
+            home.join(".ignite").join("images").join(&image_name),
+            home.join(".vyoma").join("images").join(&image_name),
+        ];
+
+        let mut loaded = None;
+        let mut source = String::new();
+        for dir in &candidates {
+            let sig_path = dir.join("vyoma.toml.sig");
+            if sig_path.exists() {
+                match SignedManifest::load_from_file(&sig_path) {
+                    Ok(sm) => {
+                        loaded = Some(sm);
+                        source = format!("auto-discovered signed: {}", sig_path.display());
+                        break;
+                    }
+                    Err(e) => warn!("Failed to load {}: {}", sig_path.display(), e),
+                }
+            }
+            let plain_path = dir.join("vyoma.toml");
+            if plain_path.exists() {
+                match vyoma_image::VmifConverter::load_signed_manifest(&plain_path) {
+                    Ok(sm) => {
+                        loaded = Some(sm);
+                        source = format!("auto-discovered: {}", plain_path.display());
+                        break;
+                    }
+                    Err(e) => warn!("Failed to load {}: {}", plain_path.display(), e),
+                }
+            }
+        }
+
+        match loaded {
+            Some(sm) => (sm, source),
+            None => return Err(anyhow::anyhow!(
+                "No manifest found for image '{}'. Searched: {:?}. Build image first.",
+                image_name, candidates
+            )),
+        }
+    };
+
+    if !no_verify_signature {
+        let mut policy = TrustPolicy::new(true);
+        let keys_dir = if let Some(ref kp) = trust_keys_path {
+            PathBuf::from(kp)
+        } else {
+            home.join(".ignite").join("keys").join("trusted")
+        };
+        policy.load_trusted_keys_from_dir(keys_dir.clone())
+            .map_err(|e| anyhow::anyhow!("Failed to load trusted keys from {:?}: {}", keys_dir, e))?;
+
+        match policy.verify(&signed_manifest) {
+            Ok(()) => {
+                let key_hex: String = signed_manifest.public_key.iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>();
+                info!("Manifest signature verified. Signing key: {}...", &key_hex[..16]);
+                if !json_output {
+                    println!("  {}", format!("Manifest signed by: {}...", &key_hex[..16]).green());
+                }
+            }
+            Err(e) => {
+                error!("Manifest signature verification FAILED: {}", e);
+                return Err(anyhow::anyhow!("Signature verification failed: {}. Use --no-verify-signature to skip.", e));
+            }
+        }
+    } else if !json_output {
+        println!("  Note: Signature verification skipped (--no-verify-signature)");
+    }
+
+    if !json_output {
+        println!("  Manifest: {}", manifest_source);
+    }
+
     let url = format!("{}/attest/{}", daemon_url, vm_id);
     let resp = client.post(&url).send().await
         .map_err(|e| anyhow::anyhow!("Failed to contact daemon at {}: {}", daemon_url, e))?;
@@ -1435,12 +1535,14 @@ async fn run_attest(
             verified: bool,
             pcr_results: &'a Vec<PcrResult>,
             error: &'a Option<String>,
+            manifest: String,
         }
         let out = JsonOutput {
             vm_id: &attest_resp.vm_id,
             verified: attest_resp.verified,
             pcr_results: &attest_resp.pcr_results,
             error: &attest_resp.error,
+            manifest: manifest_source.clone(),
         };
         println!("{}", serde_json::to_string_pretty(&out).unwrap());
         return Ok(attest_resp.verified);
@@ -1501,12 +1603,7 @@ async fn run_attest(
         }
     }
 
-    println!();
-    if manifest_path.is_none() {
-        println!("  Note: Using auto-discovered manifest. To verify manifest signature,");
-        println!("  provide --manifest and --trust-keys flags.");
-        println!("  Or ensure trusted keys are in ~/.ignite/keys/trusted/");
-    }
+    println!("  Manifest: {}", manifest_source);
 
     Ok(attest_resp.verified)
 }
