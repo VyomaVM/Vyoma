@@ -1087,102 +1087,83 @@ fn get_outbound_ip() -> String {
 }
 
 pub async fn swarm_init_handler(State(state): State<AppState>) -> Result<Json<InitResponse>, (StatusCode, String)> {
-    if let Some(raft) = &state.raft {
-        let node_id = 1u64;
-        let addr = format!("{}:7946", get_outbound_ip());
-        
-        let mut nodes = std::collections::BTreeMap::new();
-        nodes.insert(
-            node_id, 
-            crate::swarm::raft_types::SwarmNode {
-                addr: addr.clone(),
-                public_key: format!("init_key_{}", node_id),
-            }
-        );
-        
-        raft.initialize(nodes).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Raft Init Error: {}", e)))?;
-        
-        let subnet_id = ((node_id % 254) + 1) as u8;
-        
-        let mut swarm_raft = state.swarm_raft.lock().unwrap();
-        swarm_raft.bootstrap(addr, format!("init_key_{}", node_id), None, None)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SwarmRaft Error: {}", e)))?;
-        
-        info!("Swarm initialized via Raft - Node ID: {}, Subnet: 10.42.{}.0/24", node_id, subnet_id);
-        
-        Ok(Json(InitResponse {
-            node_id,
-            subnet_id,
-            wireguard_port: None,
-            wireguard_key: None,
-        }))
-    } else {
-        Err((StatusCode::INTERNAL_SERVER_ERROR, "Raft is not enabled".to_string()))
-    }
+    let node_id = 1u64;
+    let addr = format!("{}:7946", get_outbound_ip());
+    
+    let mut swarm_raft = state.swarm_raft.lock().unwrap();
+    swarm_raft.bootstrap(addr, format!("init_key_{}", node_id), None, None)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SwarmRaft Error: {}", e)))?;
+    
+    let subnet_id = ((node_id % 254) + 1) as u8;
+    
+    info!("Swarm initialized - Node ID: {}, Subnet: 10.42.{}.0/24", node_id, subnet_id);
+    
+    Ok(Json(InitResponse {
+        node_id,
+        subnet_id,
+        wireguard_port: None,
+        wireguard_key: None,
+    }))
 }
 
 pub async fn swarm_join_handler(
     State(state): State<AppState>,
     Json(payload): Json<JoinRequest>,
 ) -> Result<Json<JoinResponse>, (StatusCode, String)> {
-    if let Some(raft) = &state.raft {
-        let client = reqwest::Client::new();
-        
-        let leader_addr = payload.addr.clone();
-        let join_url = format!("http://{}/swarm/join-propose", leader_addr);
-        
-        let req = serde_json::json!({
-            "node_id": payload.node_id,
-            "addr": payload.addr,
-            "public_key": payload.public_key,
-            "wireguard_key": payload.wireguard_key,
-            "wireguard_port": payload.wireguard_port,
-        });
-        
-        let response = client.post(&join_url)
-            .json(&req)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to contact leader: {}", e)))?;
-        
-        if !response.status().is_success() {
-            return Err((StatusCode::BAD_REQUEST, format!("Join rejected: {}", response.text().await.unwrap_or_default())));
-        }
-        
-        let subnet_id = ((payload.node_id % 254) + 1) as u8;
-        
-        {
-            let mut swarm_raft = state.swarm_raft.lock().unwrap();
-            if !swarm_raft.is_initialized() {
-                let addr = format!("{}:7946", get_outbound_ip());
-                swarm_raft.bootstrap(addr, format!("init_key_{}", payload.node_id), None, None)
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-            }
-            swarm_raft.add_node(
-                payload.node_id,
-                payload.addr,
-                payload.public_key,
-                payload.wireguard_key.clone(),
-                payload.wireguard_port,
-            ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to add node locally: {}", e)))?;
-        }
-        
-        let peers: Vec<swarm::NodeInfo> = {
-            let swarm_raft = state.swarm_raft.lock().unwrap();
-            swarm_raft.get_nodes().iter().map(|n| (*n).clone()).collect()
-        };
-        
-        info!("Node {} joined swarm via Raft - Subnet: 10.42.{}.0/24, Peers: {}", payload.node_id, subnet_id, peers.len());
-        
-        Ok(Json(JoinResponse {
-            node_id: payload.node_id,
-            subnet_id,
-            peers,
-        }))
-    } else {
-        Err((StatusCode::INTERNAL_SERVER_ERROR, "Raft is not enabled".to_string()))
+    let client = reqwest::Client::new();
+    
+    let leader_addr = payload.addr.clone();
+    let join_url = format!("http://{}/swarm/join-propose", leader_addr);
+    
+    let req = serde_json::json!({
+        "node_id": payload.node_id,
+        "addr": payload.addr,
+        "public_key": payload.public_key,
+        "wireguard_key": payload.wireguard_key,
+        "wireguard_port": payload.wireguard_port,
+    });
+    
+    let response = client.post(&join_url)
+        .json(&req)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to contact leader: {}", e)))?;
+    
+    if !response.status().is_success() {
+        return Err((StatusCode::BAD_REQUEST, format!("Join rejected: {}", response.text().await.unwrap_or_default())));
     }
+    
+    let subnet_id = ((payload.node_id % 254) + 1) as u8;
+    
+    {
+        let mut swarm_raft = state.swarm_raft.lock().unwrap();
+        if !swarm_raft.is_initialized() {
+            let addr = format!("{}:7946", get_outbound_ip());
+            swarm_raft.bootstrap(addr, format!("init_key_{}", payload.node_id), None, None)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        }
+        swarm_raft.add_node(
+            payload.node_id,
+            payload.addr,
+            payload.public_key,
+            payload.wireguard_key.clone(),
+            payload.wireguard_port,
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to add node locally: {}", e)))?;
+    }
+    
+    let peers: Vec<swarm::NodeInfo> = {
+        let swarm_raft = state.swarm_raft.lock().unwrap();
+        swarm_raft.get_nodes().iter().map(|n| (*n).clone()).collect()
+    };
+    
+    info!("Node {} joined swarm - Subnet: 10.42.{}.0/24, Peers: {}", payload.node_id, subnet_id, peers.len());
+    
+    Ok(Json(JoinResponse {
+        node_id: payload.node_id,
+        subnet_id,
+        peers,
+    }))
 }
 
 #[derive(Serialize)]
