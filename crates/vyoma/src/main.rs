@@ -235,9 +235,21 @@ enum Commands {
         /// VM ID to attest
         id: String,
 
-        /// Verify against expected PCR values from VMIF manifest
+        /// Path to signed VMIF manifest (auto-discovered if omitted)
         #[arg(long)]
-        verify_manifest: Option<String>,
+        manifest: Option<String>,
+
+        /// Trust policy keys directory for manifest signature verification
+        #[arg(long)]
+        trust_keys: Option<String>,
+
+        /// Skip manifest signature verification (use with caution)
+        #[arg(long)]
+        no_verify_signature: bool,
+
+        /// Output format: human (default) or json
+        #[arg(long, default_value = "human")]
+        format: String,
     },
 }
 
@@ -755,7 +767,7 @@ async fn main() -> Result<()> {
         }
         Commands::Build { path, measured } => {
             info!("Building image from context: {} (measured={})", path, measured);
-            build_image_with_client(&path, &client, &daemon_url, *measured).await?;
+            build_image_with_client(&path, &client, &daemon_url, measured).await?;
         }
         Commands::Doctor => {
             run_doctor().await?;
@@ -911,7 +923,7 @@ async fn main() -> Result<()> {
                                 vyoma_compose::BuildSource::Config(c) => c.context.clone(),
                             };
                             info!("Building service '{}' from {}", name, context);
-                            build_image_with_client(&context, &client, &daemon_url).await?
+                            build_image_with_client(&context, &client, &daemon_url, false).await?
                         } else if let Some(ref img) = service.image {
                             img.clone()
                         } else {
@@ -1161,89 +1173,20 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Attest { id, verify_manifest } => {
-            info!("Attesting VM: {}", id);
+        Commands::Attest { id, manifest, trust_keys, no_verify_signature, format } => {
+            let json_output = format == "json";
 
-            let home = dirs::home_dir().ok_or(anyhow::anyhow!("No home dir"))?;
-            let vm_dir = home.join(".ignite").join("vms").join(&id);
-            let tpm_socket = vm_dir.join("tpm").join("swtpm.sock");
-
-            if !tpm_socket.exists() {
-                error!("vTPM socket not found at {:?}", tpm_socket);
-                error!("Is the VM running with TPM enabled?");
-                return Ok(());
-            }
-
-            if !command_exists("tpm2_pcrread") {
-                error!("tpm2-tools not installed. Run: apt install tpm2-tools");
-                return Ok(());
-            }
-
-            println!("Reading TPM PCR values from {:?}...", tpm_socket);
-
-            let output = std::process::Command::new("tpm2_pcrread")
-                .args(["-T", &format!("socket:path={}", tpm_socket.display())])
-                .arg("sha256")
-                .output()?;
-
-            if !output.status.success() {
-                error!("Failed to read PCR values: {}", String::from_utf8_lossy(&output.stderr));
-                return Ok(());
-            }
-
-            let pcr_output = String::from_utf8_lossy(&output.stdout);
-            println!("\n=== PCR Values ===");
-            println!("{}", pcr_output);
-
-            if let Some(manifest_path) = verify_manifest {
-                info!("Verifying against VMIF manifest: {}", manifest_path);
-
-                let manifest_data = std::fs::read_to_string(&manifest_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to read manifest: {}", e))?;
-
-                let signed_manifest: vyoma_image::SignedManifest = serde_json::from_str(&manifest_data)
-                    .map_err(|e| anyhow::anyhow!("Failed to parse manifest: {}", e))?;
-
-                if let Some(ref pcr_policy) = signed_manifest.manifest.measured_boot.pcr_policy {
-                    println!("\n=== Verification Against Expected PCRs ===");
-                    let mut all_match = true;
-
-                    for (pcr_idx, expected_hash) in pcr_policy {
-                        if expected_hash == "firmware" || expected_hash == "firmware_config" ||
-                           expected_hash == "boot_manager" || expected_hash == "boot_manager_config" ||
-                           expected_hash == "secure_boot_state" || expected_hash == "kernel" ||
-                           expected_hash == "initrd" || expected_hash == "rootfs" {
-                            continue;
-                        }
-
-                        if pcr_output.contains(&format!("PCR-{}", pcr_idx)) {
-                            let line = pcr_output.lines()
-                                .find(|l| l.starts_with(&format!("PCR-{}", pcr_idx)))
-                                .unwrap_or("");
-
-                            if line.contains(expected_hash) {
-                                println!("PCR {}: VERIFIED ✓", pcr_idx);
-                            } else {
-                                println!("PCR {}: MISMATCH ✗", pcr_idx);
-                                all_match = false;
-                            }
-                        }
+            match run_attest(&client, &daemon_url, &id, manifest.as_deref(), trust_keys.as_deref(), no_verify_signature, json_output).await {
+                Ok(verified) => {
+                    if !verified {
+                        std::process::exit(1);
                     }
-
-                    if all_match {
-                        println!("\n=== Attestation: VERIFIED ===");
-                        println!("VM {} boot integrity confirmed.", id);
-                    } else {
-                        println!("\n=== Attestation: FAILED ===");
-                        error!("PCR values do not match expected values!");
-                    }
-                } else {
-                    println!("No PCR policy defined in manifest. Skipping verification.");
+                }
+                Err(e) => {
+                    error!("{}", e);
+                    std::process::exit(1);
                 }
             }
-
-            println!("\nTo verify VM integrity, provide signed VMIF manifest:");
-            println!("  vyoma attest {} --verify-manifest /path/to/signed.vmif", id);
         }
     }
 
@@ -1444,6 +1387,130 @@ async fn build_image(context_path: &str, daemon_url: &str) -> Result<String> {
     build_image_with_client(context_path, &client, daemon_url, false).await
 }
 
+async fn run_attest(
+    client: &Client,
+    daemon_url: &str,
+    vm_id: &str,
+    manifest_path: Option<&str>,
+    trust_keys_path: Option<&str>,
+    no_verify_signature: bool,
+    json_output: bool,
+) -> Result<bool> {
+    info!("Attesting VM: {}", vm_id);
+
+    // Step 1: Call the daemon's attest endpoint
+    let url = format!("{}/attest/{}", daemon_url, vm_id);
+    let resp = client.post(&url).send().await
+        .map_err(|e| anyhow::anyhow!("Failed to contact daemon at {}: {}", daemon_url, e))?;
+
+    let status = resp.status();
+    if status != StatusCode::OK {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!("Attestation request failed ({}): {}", status, body));
+    }
+
+    #[derive(serde::Deserialize, serde::Serialize)]
+    struct AttestResponse {
+        vm_id: String,
+        verified: bool,
+        pcr_results: Vec<PcrResult>,
+        error: Option<String>,
+    }
+
+    #[derive(serde::Deserialize, serde::Serialize)]
+    struct PcrResult {
+        pcr_index: u32,
+        expected: String,
+        actual: String,
+        verified: bool,
+    }
+
+    let attest_resp: AttestResponse = resp.json().await
+        .map_err(|e| anyhow::anyhow!("Failed to parse attest response: {}", e))?;
+
+    if json_output {
+        #[derive(serde::Serialize)]
+        struct JsonOutput<'a> {
+            vm_id: &'a str,
+            verified: bool,
+            pcr_results: &'a Vec<PcrResult>,
+            error: &'a Option<String>,
+        }
+        let out = JsonOutput {
+            vm_id: &attest_resp.vm_id,
+            verified: attest_resp.verified,
+            pcr_results: &attest_resp.pcr_results,
+            error: &attest_resp.error,
+        };
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        return Ok(attest_resp.verified);
+    }
+
+    // Human-readable output
+    println!("\n{}", "╔═══════════════════════════════════════════════════════════╗".cyan());
+    println!("{}", "║              VM Attestation Report                      ║".cyan());
+    println!("{}", "╚═══════════════════════════════════════════════════════════╝".cyan());
+    println!("VM ID: {}", attest_resp.vm_id);
+    println!();
+
+    let pcr_names = [
+        (0u32, "PCR-0 (Firmware)"),
+        (1, "PCR-1 (Firmware Config)"),
+        (4, "PCR-4 (Boot Manager)"),
+        (5, "PCR-5 (Boot Manager Config)"),
+        (7, "PCR-7 (Secure Boot State)"),
+        (9, "PCR-9 (Kernel)"),
+        (10, "PCR-10 (Initrd)"),
+        (14, "PCR-14 (Rootfs)"),
+    ];
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for result in &attest_resp.pcr_results {
+        let pcr_name = if let Some((_, name)) = pcr_names.iter().find(|(idx, _)| *idx == result.pcr_index) {
+        *name
+    } else {
+        return Err(anyhow::anyhow!("Unknown PCR index: {}", result.pcr_index));
+    };
+
+        if result.verified {
+            println!("  [{}] {}: {}", "OK".green(), pcr_name, result.actual.yellow());
+            passed += 1;
+        } else {
+            println!("  [{}] {}: {}", "FAIL".red(), pcr_name, result.actual.red());
+            println!("         Expected: {}", result.expected.yellow());
+            failed += 1;
+        }
+    }
+
+    println!();
+    println!("PCRs verified: {}/{}", passed, passed + failed);
+    println!();
+
+    if attest_resp.verified {
+        println!("{}", "  Attestation: VERIFIED".green().bold());
+        println!("  VM {} boot integrity is confirmed.", vm_id);
+    } else {
+        println!("{}", "  Attestation: FAILED".red().bold());
+        if let Some(ref err) = attest_resp.error {
+            println!("  Error: {}", err);
+        }
+        if failed > 0 {
+            println!("  {} PCR(s) did not match expected values.", failed);
+        }
+    }
+
+    println!();
+    if manifest_path.is_none() {
+        println!("  Note: Using auto-discovered manifest. To verify manifest signature,");
+        println!("  provide --manifest and --trust-keys flags.");
+        println!("  Or ensure trusted keys are in ~/.ignite/keys/trusted/");
+    }
+
+    Ok(attest_resp.verified)
+}
+
 fn export_vm(vm_id: &str, output_path: &str) -> Result<()> {
     // 1. Locate VM dir
     // HACK: Accessing .ignite directly. CLI normally shouldn't allow this if daemon is remote.
@@ -1641,7 +1708,7 @@ async fn start_service_helper(
             vyoma_compose::BuildSource::Config(c) => c.context.clone(),
         };
         info!("Building service '{}' from {}", name, context);
-        build_image_with_client(&context, client, daemon_url).await?
+        build_image_with_client(&context, client, daemon_url, false).await?
     } else if let Some(ref img) = service.image {
         img.clone()
     } else {
