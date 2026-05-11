@@ -16,7 +16,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tracing::{error, info, warn};
 
-use crate::state::{AppState, VmInstance, wal::WalEntry};
+use crate::state::{AppState, VmInstance, VmStatus, wal::WalEntry};
 use types::{VmRunRequest, VmRunResponse, PreparedStorage, VmNetworkConfig};
 
 struct VmCreationContext {
@@ -168,15 +168,30 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         }
     };
 
-    policy::check_policy(
-        &state,
-        &vm_id,
-        &vm_dir,
-    ).await;
+    // Start attestation check asynchronously
+    let state_clone = Arc::clone(&state);
+    let vm_id_clone = vm_id.clone();
+    let vm_dir_clone = vm_dir.clone();
+    let image_name = prepared_image.manifest.as_ref()
+        .and_then(|m| m.labels.get("vyoma.image.name"))
+        .unwrap_or(&vm_id)
+        .clone();
+
+    tokio::spawn(async move {
+        if let Err(e) = policy::check_policy_and_perform_attestation(
+            state_clone,
+            vm_id_clone,
+            vm_dir_clone,
+            image_name,
+        ).await {
+            error!("Attestation process failed: {}", e);
+        }
+    });
 
     let instance = VmInstance {
         vmm,
         id: vm_id.clone(),
+        status: VmStatus::PendingAttestation,
         ch_socket_path: ch_config.socket_path.clone(),
         tap_name: if state.rootless {
             String::new()
@@ -223,9 +238,15 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         "name": request.labels.get("vyoma.service").unwrap_or(&vm_id)
     }).to_string());
 
+    let status_string = match instance.status {
+        VmStatus::PendingAttestation => "PendingAttestation".to_string(),
+        VmStatus::Running => "Running".to_string(),
+        VmStatus::Error { reason } => format!("Error: {}", reason),
+    };
+
     Ok(VmRunResponse {
         vm_id,
-        status: "Running".to_string(),
+        status: status_string,
         ip_address: network_config.ip_address,
     })
 }
