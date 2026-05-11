@@ -10,7 +10,7 @@
     "fileSummary": true,
     "directoryStructure": true,
     "files": true,
-    "removeComments": true,
+    "removeComments": false,
     "removeEmptyLines": true,
     "compress": false,
     "topFilesLength": 5,
