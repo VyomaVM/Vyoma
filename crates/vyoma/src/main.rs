@@ -155,6 +155,12 @@ enum Commands {
         id: String,
         /// Target Node IP (must expose gRPC on 7071)
         target: String,
+        /// Bandwidth limit in Mbps (optional)
+        #[arg(long)]
+        bandwidth: Option<u32>,
+        /// Show live progress bar
+        #[arg(long, default_value = "true")]
+        progress: bool,
     },
     /// Stream logs from a VM
     Logs {
@@ -620,18 +626,34 @@ async fn main() -> Result<()> {
             info!("Loading VM from {}", input);
             import_vm(&input, &daemon_url).await?;
         }
-        Commands::Teleport { id, target } => {
+        Commands::Teleport { id, target, bandwidth, progress } => {
             info!("Initiating Live Teleportation for VM {} to target {}", id, target);
             let payload = serde_json::json!({
                 "vm_id": id,
-                "target_node_ip": target
+                "target_node_ip": target,
+                "bandwidth_mbps": bandwidth
             });
             let resp = client
                 .post(format!("{}/teleport", daemon_url))
                 .json(&payload)
                 .send()
-                .await;
-            handle_simple_response(resp, &daemon_url).await?;
+                .await?;
+
+            if !resp.status().is_success() {
+                error!("Teleport failed: {}", resp.text().await.unwrap_or_default());
+                return Ok(());
+            }
+
+            let text = resp.text().await.unwrap_or_default();
+            println!("{}", text);
+            
+            if progress {
+                if let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(session_id) = data.get("session_id").and_then(|v| v.as_str()) {
+                        show_migration_progress(&client, &daemon_url, session_id).await;
+                    }
+                }
+            }
         }
         Commands::Logs { id, follow: _ } => {
             // 1. Resolve ID (if Name provided)
@@ -1639,4 +1661,58 @@ async fn start_service_helper(
         Err(e) => error!("Failed to request start for '{}': {}", name, e),
     }
     Ok(())
+}
+
+async fn show_migration_progress(client: &reqwest::Client, daemon_url: &str, session_id: &str) {
+    use std::io::{self, Write};
+    
+    let status_url = format!("{}/teleport/status/{}", daemon_url, session_id);
+    
+    println!("\nMigration progress:");
+    println!("{}", "=".repeat(50));
+    
+    loop {
+        let resp = client.get(&status_url).send().await;
+        
+        match resp {
+            Ok(r) if r.status().is_success() => {
+                if let Ok(data) = r.json::<serde_json::Value>().await {
+                    let status = data.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let vm_id = data.get("vm_id").and_then(|v| v.as_str()).unwrap_or("");
+                    
+                    println!("\rVM: {:20} Status: {:20}", vm_id, status);
+                    
+                    if let Some(progress) = data.get("progress") {
+                        let total = progress.get("total_pages").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let transferred = progress.get("transferred_pages").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let dirty = progress.get("dirty_pages").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let round = progress.get("round").and_then(|v| v.as_u64()).unwrap_or(0);
+                        
+                        if total > 0 {
+                            let pct = (transferred as f64 / total as f64) * 100.0;
+                            let bar_len = 30;
+                            let filled = ((pct / 100.0) * bar_len as f64) as usize;
+                            let bar: String = format!("{}{}", "█".repeat(filled), "░".repeat(bar_len - filled));
+                            
+                            io::stdout().write_all(format!("\r[{}] {:5.1}% (round {}, dirty: {} pages)\r", bar, pct, round, dirty).as_bytes()).ok();
+                            io::stdout().flush().ok();
+                        }
+                    }
+                    
+                    if status == "completed" || status == "source_cleaned" {
+                        println!("\n\nMigration completed successfully!");
+                        break;
+                    }
+                    
+                    if status == "failed" {
+                        println!("\n\nMigration failed!");
+                        break;
+                    }
+                }
+            }
+            _ => break,
+        }
+        
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
 }
