@@ -98,8 +98,6 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
 
     std::fs::create_dir_all(&vm_dir).context("Failed to create VM dir")?;
 
-    let _ = git_init(&vm_dir);
-
     let prepared_image = match image::prepare_image(&request.image).await {
         Ok(img) => img,
         Err(e) => {
@@ -266,19 +264,6 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         status: status_string,
         ip_address: network_config.ip_address,
     })
-}
-
-fn git_init(path: &std::path::Path) -> std::io::Result<()> {
-    let git_dir = path.join(".git");
-    if git_dir.exists() {
-        return Ok(());
-    }
-    std::fs::create_dir(&git_dir)?;
-    std::fs::write(git_dir.join("config"), "[core]\n\trepositoryformatversion = 0\n")?;
-    std::fs::write(git_dir.join("description"), "Vyoma VM\n")?;
-    std::fs::create_dir(git_dir.join("objects"))?;
-    std::fs::create_dir(git_dir.join("refs"))?;
-    Ok(())
 }
 
 fn setup_cgroups(

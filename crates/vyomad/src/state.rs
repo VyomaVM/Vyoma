@@ -11,7 +11,6 @@ use vyoma_core::vmm::VmmManager;
 use vyoma_core::vtpm::VtpmManager;
 use vyoma_core::policy::PolicyManager;
 
-use crate::cluster;
 use crate::swarm::raft_types::SwarmConfig;
 use crate::swarm::{SwarmRaft, NetworkIntegration};
 
@@ -23,9 +22,6 @@ pub struct AppState {
     pub vms: Arc<StdMutex<HashMap<String, Arc<TokioMutex<VmInstance>>>>>,
     pub cgroups: Arc<CgroupManager>,
     pub cni_manager: Arc<vyoma_core::cni::CniManager>,
-    #[allow(deprecated)]
-    #[deprecated(since = "0.2.0", note = "Use swarm_raft instead")]
-    pub cluster_manager: Arc<cluster::ClusterManager>,
     pub rootless: bool,
     pub events_tx: broadcast::Sender<String>,
     pub wal: Arc<wal::Wal>,
@@ -47,7 +43,6 @@ impl AppState {
                 std::path::PathBuf::from("/tmp/test-cni-plugins"),
                 std::path::PathBuf::from("/tmp/test-cni-config"),
             )),
-            cluster_manager: Arc::new(cluster::ClusterManager::new(std::path::PathBuf::from("/tmp/test"))),
             rootless: true,
             events_tx,
             wal: Arc::new(wal::Wal::new_test()),
@@ -65,7 +60,6 @@ impl AppState {
             vms: self.vms.clone(),
             cgroups: self.cgroups.clone(),
             cni_manager: self.cni_manager.clone(),
-            cluster_manager: self.cluster_manager.clone(),
             rootless: self.rootless,
             events_tx: self.events_tx.clone(),
             wal: self.wal.clone(),

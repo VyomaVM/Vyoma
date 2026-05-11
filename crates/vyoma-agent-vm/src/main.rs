@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::Parser;
 use vyoma_agent_vm::{collect_metrics, collect_process_list, read_file_content, execute_command, AgentRequest, AgentResponse};
 use std::net::SocketAddr;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::info;
 use tracing_subscriber::FmtSubscriber;
 
@@ -38,11 +38,39 @@ async fn run_tcp(port: u16) -> Result<()> {
     info!("vyoma-agent-vm listening on tcp:{}", port);
 
     loop {
-        let (stream, _) = listener.accept().await?;
-        let mut reader = BufReader::new(stream);
+        let (mut stream, _) = listener.accept().await?;
         
-        let mut line = String::new();
-        reader.read_line(&mut line).await?;
+        let mut len_buf = [0u8; 4];
+        if stream.read_exact(&mut len_buf).await.is_err() {
+            continue;
+        }
+        let len = u32::from_be_bytes(len_buf) as usize;
+        
+        if len > 1024 * 1024 {
+            let resp = AgentResponse::Error { message: "Message too large".to_string() };
+            let response_json = serde_json::to_string(&resp)?;
+            let response_len = response_json.len() as u32;
+            stream.write_all(&response_len.to_be_bytes()).await?;
+            stream.write_all(response_json.as_bytes()).await?;
+            continue;
+        }
+        
+        let mut data = vec![0u8; len];
+        if stream.read_exact(&mut data).await.is_err() {
+            continue;
+        }
+        
+        let line = match String::from_utf8(data) {
+            Ok(l) => l,
+            Err(e) => {
+                let resp = AgentResponse::Error { message: format!("Invalid UTF-8: {}", e) };
+                let response_json = serde_json::to_string(&resp)?;
+                let response_len = response_json.len() as u32;
+                stream.write_all(&response_len.to_be_bytes()).await?;
+                stream.write_all(response_json.as_bytes()).await?;
+                continue;
+            }
+        };
         
         if line.is_empty() {
             continue;
@@ -53,8 +81,9 @@ async fn run_tcp(port: u16) -> Result<()> {
             Err(e) => {
                 let resp = AgentResponse::Error { message: format!("Invalid request: {}", e) };
                 let response_json = serde_json::to_string(&resp)?;
-                let mut writer = reader.into_inner();
-                writer.write_all(response_json.as_bytes()).await?;
+                let response_len = response_json.len() as u32;
+                stream.write_all(&response_len.to_be_bytes()).await?;
+                stream.write_all(response_json.as_bytes()).await?;
                 continue;
             }
         };
@@ -62,10 +91,9 @@ async fn run_tcp(port: u16) -> Result<()> {
         let response = handle_request(request).await;
         
         let response_json = serde_json::to_string(&response)?;
-        
-        let mut writer = reader.into_inner();
-        writer.write_all(response_json.as_bytes()).await?;
-        writer.flush().await?;
+        let response_len = response_json.len() as u32;
+        stream.write_all(&response_len.to_be_bytes()).await?;
+        stream.write_all(response_json.as_bytes()).await?;
     }
 }
 

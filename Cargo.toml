@@ -34,9 +34,8 @@ tar = "0.4"
 flate2 = "1.0"
 cpio = "0.2"
 futures = "0.3"
-# We will likely need these for the Phase 2/3:
-# devicemapper = "..." 
-# rtnetlink = "..."
 sled = "0.34"
 uuid = { version = "1.0", features = ["v4"] }
 prometheus = "0.13"
+tokio-util = { version = "0.7", features = ["codec"] }
+bytes = "1.0"

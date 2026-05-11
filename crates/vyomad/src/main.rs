@@ -18,7 +18,6 @@ use vyoma_core::policy::PolicyManager;
 
 use clap::Parser;
 
-mod cluster;
 mod dns;
 mod ui;
 mod state;
@@ -185,7 +184,6 @@ async fn main() {
         vms: Arc::new(StdMutex::new(HashMap::new())),
         cgroups,
         cni_manager,
-        cluster_manager: Arc::new(cluster::ClusterManager::new(data_dir_path)),
         rootless: false,
         events_tx,
         wal,
