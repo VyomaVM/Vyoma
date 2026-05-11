@@ -1,0 +1,28 @@
+[package]
+name = "vyoma-fuzz"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+anyhow = "1.0"
+serde_json = "1.0"
+
+[dependencies.vyoma-image]
+path = "../crates/vyoma-image"
+
+[dependencies.vyoma-build]
+path = "../crates/vyoma-build"
+
+[dependencies.vyomad]
+path = "../crates/vyomad"
+
+[dependencies.vyoma-core]
+path = "../crates/vyoma-core"
+
+[profile.release]
+debug = 1

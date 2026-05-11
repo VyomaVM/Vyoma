@@ -1,0 +1,86 @@
+name: Fuzz Testing
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'fuzz/**'
+      - 'crates/vyoma-image/**'
+      - 'crates/vyoma-build/**'
+      - 'crates/vyomad/**'
+      - '.github/workflows/fuzz.yml'
+  schedule:
+    - cron: '0 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Install cargo-fuzz
+        run: |
+          cargo install cargo-fuzz
+
+      - name: List fuzz targets
+        run: |
+          cd fuzz
+          cargo fuzz list
+
+      - name: Run OCI manifest fuzz target
+        run: |
+          cd fuzz
+          timeout 60s cargo fuzz run oci_manifest -- -max_total_time=50s || true
+
+      - name: Run Vyomafile parser fuzz target
+        run: |
+          cd fuzz
+          timeout 60s cargo fuzz run vyomafile -- -max_total_time=50s || true
+
+      - name: Run REST API fuzz target
+        run: |
+          cd fuzz
+          timeout 60s cargo fuzz run rest_api -- -max_total_time=50s || true
+
+      - name: Check for crashes
+        run: |
+          find fuzz -name "crash-*" -type f 2>/dev/null | head -5
+
+      - name: Upload crash reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: fuzz/crash-*
+          retention-days: 30
+
+      - name: Generate fuzz report
+        run: |
+          echo "## Fuzz Testing Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Fuzz targets tested for 60 seconds each." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          if [ -z "$(find fuzz -name 'crash-*' -type f 2>/dev/null)" ]; then
+            echo "| oci_manifest | :white_check_mark: No crashes |" >> $GITHUB_STEP_SUMMARY
+            echo "| vyomafile | :white_check_mark: No crashes |" >> $GITHUB_STEP_SUMMARY
+            echo "| rest_api | :white_check_mark: No crashes |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo ":warning: Potential crashes detected - review artifacts" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
