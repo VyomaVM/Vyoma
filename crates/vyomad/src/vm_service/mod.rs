@@ -13,6 +13,8 @@ pub mod mocks;
 mod stage_tests;
 #[cfg(test)]
 mod measured_boot_tests;
+#[cfg(test)]
+mod error_recovery;
 
 use std::sync::Arc;
 use anyhow::{Context, Result};
