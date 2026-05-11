@@ -65,6 +65,7 @@ impl DmManager {
         let sectors = Self::device_size_sectors(base_dev)?;
 
         // 1. Create origin linear device via dmsetup (as LinearDev & SnapshotDev traits vary wildly between compiler versions)
+        // TODO(technical-debt): Migrate to devicemapper crate Rust API instead of CLI
         // We use safe system Command building to ensure strict compliance without trait mismatch.
         // Origin target wraps the read-only base
         let table_origin = format!("0 {} linear {} 0", sectors, base_dev.display());

@@ -162,6 +162,7 @@ impl StorageManager {
     }
 
     pub fn create_dm_snapshot(name: &str, base_dev: &str, cow_dev: &str, size_sectors: u64) -> Result<String> {
+        // TODO(technical-debt): Migrate to devicemapper crate Rust API instead of dmsetup CLI
         info!("Creating Device Mapper snapshot '{}'", name);
         
         let table = format!("0 {} snapshot {} {} N 8", size_sectors, base_dev, cow_dev);
@@ -191,6 +192,7 @@ impl StorageManager {
     }
 
     pub fn remove_dm_device(name: &str) -> Result<()> {
+        // TODO(technical-debt): Migrate to devicemapper crate Rust API instead of dmsetup CLI
         info!("Removing DM device '{}'", name);
         
         let status = Command::new("dmsetup")
