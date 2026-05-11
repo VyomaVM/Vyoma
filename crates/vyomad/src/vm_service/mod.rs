@@ -17,6 +17,7 @@ use anyhow::{Context, Result};
 use tracing::{error, info, warn};
 
 use crate::state::{AppState, VmInstance, VmStatus, wal::WalEntry};
+use crate::vm_service::policy::update_vm_status;
 use types::{VmRunRequest, VmRunResponse, PreparedStorage, VmNetworkConfig};
 
 struct VmCreationContext {
@@ -155,11 +156,11 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         &kernel_path,
     );
 
-    let (vmm, proxy_tasks, slirp_mgr, fs_managers) = match boot::start_vm(
+    let (vmm, proxy_tasks, slirp_mgr, fs_managers, mut vtpm_manager) = match boot::start_vm(
+        &state,
         &ch_config,
         &network_config,
         &request,
-        &state,
     ).await {
         Ok(result) => result,
         Err(e) => {
@@ -176,17 +177,36 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         .and_then(|m| m.labels.get("vyoma.image.name"))
         .unwrap_or(&vm_id)
         .clone();
+    let tpm_socket_path = vtpm_manager.as_ref().map(|vtpm| vtpm.socket_path().to_string());
 
-    tokio::spawn(async move {
-        if let Err(e) = policy::check_policy_and_perform_attestation(
-            state_clone,
-            vm_id_clone,
-            vm_dir_clone,
-            image_name,
-        ).await {
-            error!("Attestation process failed: {}", e);
+    // Check if attestation is required before spawning
+    let needs_attestation = {
+        let policy = state.policy_manager.lock().unwrap();
+        policy.must_verify_on_boot()
+    };
+
+    if needs_attestation {
+        info!("Measured boot attestation required for VM {}, TPM socket: {:?}", vm_id, tpm_socket_path);
+        tokio::spawn(async move {
+            if let Err(e) = policy::check_policy_and_perform_attestation(
+                state_clone,
+                vm_id_clone,
+                vm_dir_clone,
+                image_name,
+                tpm_socket_path,
+            ).await {
+                error!("Attestation process failed: {}", e);
+            }
+        });
+    } else {
+        // No attestation required, mark as running immediately
+        // But still stop the vTPM if one was started
+        if let Some(vtpm) = &mut vtpm_manager {
+            let _ = vtpm.stop();
         }
-    });
+        update_vm_status(&state, &vm_id, VmStatus::Running).await
+            .map_err(|e| anyhow::anyhow!("Failed to update VM status: {}", e))?;
+    }
 
     let instance = VmInstance {
         vmm,
@@ -205,6 +225,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         proxy_tasks,
         fs_managers,
         slirp: slirp_mgr,
+        vtpm_manager,
         cgroup_path: setup_cgroups(&state, &vm_id, request.vcpu, request.mem_size_mib)?,
         netns_path: network_config.netns_path.clone(),
         config_ports: request.ports.clone(),
@@ -219,17 +240,15 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
 
     instance.save_state().context("Failed to save state")?;
 
+    let status_string = match &instance.status {
+        VmStatus::PendingAttestation => "PendingAttestation".to_string(),
+        VmStatus::Running => "Running".to_string(),
+        VmStatus::Error { reason } => format!("Error: {}", reason),
+    };
+
     {
         let mut vms = state.vms.lock().unwrap();
         vms.insert(vm_id.clone(), Arc::new(tokio::sync::Mutex::new(instance)));
-    }
-    ctx.vm_created = true;
-
-    if let Err(e) = state.wal.append(&WalEntry::vm_create(vm_id.clone())) {
-        error!("Failed to write WAL entry: {}", e);
-    }
-    if let Err(e) = state.wal.append(&WalEntry::vm_start(vm_id.clone())) {
-        error!("Failed to write WAL entry: {}", e);
     }
 
     let _ = state.events_tx.send(serde_json::json!({
@@ -237,12 +256,6 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         "id": vm_id.clone(),
         "name": request.labels.get("vyoma.service").unwrap_or(&vm_id)
     }).to_string());
-
-    let status_string = match instance.status {
-        VmStatus::PendingAttestation => "PendingAttestation".to_string(),
-        VmStatus::Running => "Running".to_string(),
-        VmStatus::Error { reason } => format!("Error: {}", reason),
-    };
 
     Ok(VmRunResponse {
         vm_id,
