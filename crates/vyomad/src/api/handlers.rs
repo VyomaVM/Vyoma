@@ -24,6 +24,7 @@ use std::process::Command;
 use vyoma_core::api::{PortMapping, VolumeMount};
 use vyoma_core::cgroups::CgroupManager;
 use vyoma_core::fs::VirtioFsManager;
+use vyoma_core::policy::PolicyStatus;
 use vyoma_core::proxy::ProxyManager;
 use vyoma_core::vmm::VmmManager;
 use vyoma_build;
@@ -387,6 +388,7 @@ pub async fn restore_vm(
     let instance = VmInstance {
         vmm,
         id: vm_id.clone(),
+        status: VmStatus::Running, // Restored VMs are considered running
         ch_socket_path: socket_path.clone(),
         tap_name: tap_name.clone(),
         dm_name: dm_name.clone(),
@@ -409,6 +411,7 @@ pub async fn restore_vm(
         vcpu: 1,
         mem_size_mib: 512,
         networks: vec![],
+        vtpm_manager: None,
     };
 
     {
@@ -830,6 +833,7 @@ pub async fn initialize_state(state: &AppState) {
             let instance = VmInstance {
                 vmm,
                 id: vm_state.id.clone(),
+                status: VmStatus::Running, // Restored VMs are considered running
                 ch_socket_path: socket_path.clone(),
                 tap_name: vm_state.tap_name,
                 dm_name: vm_state.dm_name,
@@ -849,6 +853,7 @@ pub async fn initialize_state(state: &AppState) {
                 vcpu: vm_state.vcpu,
                 mem_size_mib: vm_state.mem_size_mib,
                 networks: vm_state.networks.clone(),
+                vtpm_manager: None,
             };
 
             state
@@ -865,6 +870,7 @@ pub async fn initialize_state(state: &AppState) {
             let mut instance = VmInstance {
                 vmm,
                 id: vm_state.id.clone(),
+                status: VmStatus::Error { reason: "VM was dead during recovery".to_string() },
                 ch_socket_path: socket_path,
                 tap_name: vm_state.tap_name,
                 dm_name: vm_state.dm_name,
@@ -884,6 +890,7 @@ pub async fn initialize_state(state: &AppState) {
                 vcpu: vm_state.vcpu,
                 mem_size_mib: vm_state.mem_size_mib,
                 networks: vm_state.networks,
+                vtpm_manager: None,
             };
             // We await cleanup
             instance.cleanup(&state.cni_manager).await;
@@ -1395,6 +1402,7 @@ pub async fn adopt_teleported_vm(
     let instance = Arc::new(TokioMutex::new(VmInstance {
         vmm,
         id: payload.vm_id.clone(),
+        status: VmStatus::Running, // Adopted VMs are considered running
         ch_socket_path: ch_socket,
         tap_name: String::new(),
         dm_name: String::new(),
@@ -1414,6 +1422,7 @@ pub async fn adopt_teleported_vm(
         base_image_path: String::new(),
         vcpu: 1,
         mem_size_mib: 512,
+        vtpm_manager: None,
     }));
 
     {
@@ -1775,13 +1784,15 @@ pub struct PolicyResponse {
 }
 
 pub async fn set_policy_handler(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(payload): Json<PolicyRequest>,
 ) -> Result<Json<PolicyResponse>, (StatusCode, String)> {
     info!("Setting policy: {} to {}", payload.policy, payload.enabled);
 
     match payload.policy.as_str() {
         "require-measured-boot" => {
+            let mut policy = state.policy_manager.lock().unwrap();
+            policy.set_require_measured_boot(payload.enabled);
             let message = if payload.enabled {
                 "Measured boot policy enabled. VMs will require TPM attestation."
             } else {
@@ -1801,13 +1812,17 @@ pub async fn set_policy_handler(
 }
 
 pub async fn get_policy_handler(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<Vec<PolicyResponse>>, (StatusCode, String)> {
-    Ok(Json(vec![
-        PolicyResponse {
-            policy: "require-measured-boot".to_string(),
-            enabled: false,
-            message: "Use PUT /policy with {policy: 'require-measured-boot', enabled: true/false}".to_string(),
-        }
-    ]))
+    let policy = state.policy_manager.lock().unwrap();
+    let config = policy.get_config();
+    let status = PolicyStatus::from_config(config);
+
+    let responses: Vec<PolicyResponse> = status.into_iter().map(|s| PolicyResponse {
+        policy: s.policy_name,
+        enabled: s.enabled,
+        message: if s.enforced { "enforced" } else { "optional" }.to_string(),
+    }).collect();
+
+    Ok(Json(responses))
 }
