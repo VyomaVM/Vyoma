@@ -8,6 +8,7 @@ use vyoma_core::api::{PortMapping, VolumeMount};
 use vyoma_core::cgroups::CgroupManager;
 use vyoma_core::fs::VirtioFsManager;
 use vyoma_core::vmm::VmmManager;
+use vyoma_core::vtpm::VtpmManager;
 use vyoma_core::policy::PolicyManager;
 
 use crate::cluster;
@@ -78,12 +79,17 @@ impl AppState {
     }
 }
 
-#[derive(Debug)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum VmStatus {
     PendingAttestation,
     Running,
     Error { reason: String },
+}
+
+impl Default for VmStatus {
+    fn default() -> Self {
+        VmStatus::PendingAttestation
+    }
 }
 
 pub struct VmInstance {
@@ -101,6 +107,7 @@ pub struct VmInstance {
     pub fs_managers: Vec<VirtioFsManager>,
     #[allow(dead_code)]
     pub slirp: Option<vyoma_core::slirp::SlirpManager>,
+    pub vtpm_manager: Option<VtpmManager>,
     pub cgroup_path: Option<String>,
     pub netns_path: Option<String>,
 
@@ -247,6 +254,13 @@ impl VmInstance {
         for fs_mgr in &mut self.fs_managers {
             if let Err(e) = fs_mgr.kill() {
                 error!("Failed to kill virtiofsd: {}", e);
+            }
+        }
+
+        // 9. Stop vTPM if present
+        if let Some(ref mut vtpm) = self.vtpm_manager {
+            if let Err(e) = vtpm.stop() {
+                error!("Failed to stop vTPM: {}", e);
             }
         }
 
