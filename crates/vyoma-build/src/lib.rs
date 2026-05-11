@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use tracing::{info, error};
 use vyoma_core::oci::OciImageConfig;
+use std::collections::HashMap;
 
 pub mod runner;
 pub mod parser;
@@ -17,6 +18,10 @@ pub struct BuildResult {
     pub rootfs_path: PathBuf,
     pub manifest_path: PathBuf,
     pub config: OciImageConfig,
+    /// PCR values captured during measured boot, if applicable.
+    pub pcr_policy: Option<HashMap<u32, String>>,
+    /// Whether the manifest was signed.
+    pub manifest_signed: bool,
 }
 
 /// Error types for build operations
