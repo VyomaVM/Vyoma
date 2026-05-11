@@ -201,22 +201,22 @@ impl Teleporter {
                 dirty_rate_pages_per_sec: dirty_rate.saturating_div(page_size),
                 round,
                 completed,
-                error,
+                error: error.clone(),
             };
 
             if let Some(ref callback) = progress_callback {
-                callback(progress);
+                callback(progress.clone());
             }
 
+            let err_msg = error.clone();
             if completed {
-                if let Some(ref callback) = progress_callback {
-                    callback(progress);
-                }
+                info!("Migration completed!");
                 return Ok(());
             }
 
-            if let Some(ref e) = progress.error {
-                return Err(e.clone());
+            if let Some(e) = err_msg {
+                error!("Migration failed: {}", e);
+                return Err(e);
             }
 
             match migration_status {
