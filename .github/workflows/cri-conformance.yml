@@ -339,3 +339,143 @@ jobs:
               echo "| ${dir} | :grey_question: NO RESULTS |" >> $GITHUB_STEP_SUMMARY
             fi
           done
+
+  critest-real-kvm:
+    name: CRI Tests with Real KVM
+    runs-on: chaos-runner
+    timeout-minutes: 90
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Download Go modules
+        run: cd vk8s && go mod download
+
+      - name: Build vk8s
+        run: cd vk8s && go build -o vk8s ./cmd/main.go
+
+      - name: Build vyomad
+        run: cargo build --release --package vyomad
+
+      - name: Install critest
+        run: |
+          CRITEST_VERSION="v1.29.0"
+          curl -sSL "https://github.com/kubernetes-sigs/cri-tools/releases/download/${CRITEST_VERSION}/crictl-${CRITEST_VERSION}-linux-amd64.tar.gz" | tar xz -C /usr/local/bin
+
+      - name: Create cri socket dir
+        run: sudo mkdir -p /var/run && sudo chmod 777 /var/run
+
+      - name: Start vyomad (real with KVM)
+        run: |
+          sudo ./target/release/vyomad \
+            --data-dir /tmp/vyoma-kvm-test \
+            --socket /var/run/vyoma.sock \
+            --grpc-port 7071 \
+            --http-port 8080 &
+          sleep 10
+          if [ -S "/var/run/vyoma.sock" ]; then
+            echo "vyomad started successfully with KVM"
+          else
+            echo "Failed to start vyomad"
+            exit 1
+          fi
+
+      - name: Start vk8s (CRI server)
+        run: |
+          export VYOMA_CRI_SOCKET=/var/run/vyoma-cri.sock
+          export VYOMAD_GRPC=localhost:7071
+          timeout 300s ./vk8s/vk8s &
+          sleep 5
+
+      - name: Wait for CRI socket
+        run: |
+          for i in {1..30}; do
+            if [ -S "${{ env.VYOMA_CRI_SOCKET }}" ]; then
+              echo "CRI socket ready"
+              break
+            fi
+            sleep 2
+          done
+          if [ ! -S "${{ env.VYOMA_CRI_SOCKET }}" ]; then
+            echo "CRI socket not ready"
+            exit 1
+          fi
+
+      - name: Run PodSandbox tests (Real KVM)
+        if: always()
+        run: |
+          critest --runtime-endpoint=unix://${{ env.VYOMA_CRI_SOCKET }} \
+                  --ginkgo.focus="PodSandbox" \
+                  --ginkgo.skip="Alpha" \
+                  --parallel=1 \
+                  --timeout=10m \
+                  --junit-output=${{ env.REPORT_DIR }}/podsandbox-kvm/junit.xml \
+                  2>&1 | tee ${{ env.REPORT_DIR }}/podsandbox-kvm/output.log || true
+
+      - name: Run Container tests (Real KVM)
+        if: always()
+        run: |
+          critest --runtime-endpoint=unix://${{ env.VYOMA_CRI_SOCKET }} \
+                  --ginkgo.focus="Container" \
+                  --ginkgo.skip="Alpha" \
+                  --parallel=1 \
+                  --timeout=15m \
+                  --junit-output=${{ env.REPORT_DIR }}/container-kvm/junit.xml \
+                  2>&1 | tee ${{ env.REPORT_DIR }}/container-kvm/output.log || true
+
+      - name: Run Image tests (Real KVM)
+        if: always()
+        run: |
+          critest --runtime-endpoint=unix://${{ env.VYOMA_CRI_SOCKET }} \
+                  --ginkgo.focus="Image" \
+                  --ginkgo.skip="Alpha" \
+                  --parallel=1 \
+                  --timeout=10m \
+                  --junit-output=${{ env.REPORT_DIR }}/image-kvm/junit.xml \
+                  2>&1 | tee ${{ env.REPORT_DIR }}/image-kvm/output.log || true
+
+      - name: Upload KVM results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cri-kvm-results
+          path: ${{ env.REPORT_DIR }}/
+          retention-days: 30
+
+      - name: Cleanup
+        if: always()
+        run: |
+          pkill -9 vyomad || true
+          pkill -9 vk8s || true
+          sudo rm -f /var/run/vyoma.sock /var/run/vyoma-cri.sock || true
+
+      - name: Generate KVM test summary
+        run: |
+          echo "## CRI Real KVM Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "These tests run with real VMs on KVM hardware." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Suite | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          for dir in podsandbox-kvm container-kvm image-kvm; do
+            if [ -f "${{ env.REPORT_DIR }}/${dir}/output.log" ]; then
+              if grep -q "SUCCESS\|passed" "${{ env.REPORT_DIR }}/${dir}/output.log"; then
+                echo "| ${dir} | :white_check_mark: PASSED |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| ${dir} | :x: FAILED |" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "| ${dir} | :grey_question: NO RESULTS |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
