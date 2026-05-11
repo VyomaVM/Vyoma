@@ -4515,6 +4515,7 @@ dependencies = [
  "tracing",
  "vyoma-core",
  "vyoma-image",
+ "vyoma-storage",
 ]
 
 [[package]]

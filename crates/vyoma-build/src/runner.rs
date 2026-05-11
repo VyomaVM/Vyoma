@@ -301,56 +301,205 @@ impl BuildRunner {
     }
 
     async fn handle_run(&self, rootfs_path: &Path, command: &str) -> Result<PathBuf, BuildError> {
-        info!("Executing RUN command in isolated VM: {}", command);
-
-        // For RUN commands, we need to:
-        // 1. Extract the current squashfs to a temporary directory
-        // 2. Launch a VM with the extracted directory as root (but readonly)
-        // 3. VM executes command and modifies files in a writable overlay
-        // 4. After VM exits, create new squashfs from modified directory
-
+        info!("Executing RUN command in real VM: {}", command);
+        
+        let build_id = format!("build-{}", chrono::Utc::now().timestamp_millis());
+        let build_dir = self.temp_dir.join(&build_id);
+        std::fs::create_dir_all(&build_dir)
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to create build dir: {}", e)))?;
+        
+        let result = self.execute_build_in_vm(rootfs_path, command, &build_dir).await;
+        
+        let _ = std::fs::remove_dir_all(&build_dir);
+        
+        result
+    }
+    
+    async fn execute_build_in_vm(
+        &self,
+        base_squashfs: &Path,
+        command: &str,
+        build_dir: &Path,
+    ) -> Result<PathBuf, BuildError> {
+        let ext4_path = build_dir.join("base.ext4");
+        let cow_path = build_dir.join("cow.img");
+        let dm_name = format!("vyoma-build-{}", std::process::id());
+        let new_layer_path = build_dir.join("layer.sqfs");
+        
+        info!("Converting squashfs to ext4: {:?}", base_squashfs);
+        self.squashfs_to_ext4(base_squashfs, &ext4_path).await?;
+        
+        info!("Creating COW file for writable layer");
+        vyoma_storage::cow::LoopManager::create_cow_file(&cow_path, 1024)
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to create COW file: {}", e)))?;
+        
+        let loop_mgr = vyoma_storage::cow::LoopManager::new()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to create loop manager: {}", e)))?;
+        let base_loop = loop_mgr.attach(&ext4_path)
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to attach base ext4: {}", e)))?;
+        let cow_loop = loop_mgr.attach(&cow_path)
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to attach COW: {}", e)))?;
+        
+        info!("Creating device mapper snapshot");
+        let dm_mgr = vyoma_storage::dm::DmManager::new()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to create DM manager: {}", e)))?;
+        let dm_dev = dm_mgr.create_snapshot(
+            &dm_name,
+            base_loop.path(),
+            cow_loop.path(),
+        ).map_err(|e| BuildError::ExecutionError(format!("Failed to create DM snapshot: {}", e)))?;
+        
+        let vm_result = self.run_command_in_ch(&dm_dev.path().to_path_buf(), command, build_dir).await;
+        
+        info!("Cleaning up device mapper");
+        let _ = dm_mgr.remove_snapshot(&dm_name);
+        
+        info!("Detaching loop devices");
+        let _ = loop_mgr.detach(&base_loop);
+        let _ = loop_mgr.detach(&cow_loop);
+        
+        let _ = std::fs::remove_file(&ext4_path);
+        let _ = std::fs::remove_file(&cow_path);
+        
+        match vm_result {
+            Ok(0) => {
+                info!("Creating new squashfs layer from DM device");
+                let dm_device_path = PathBuf::from(format!("/dev/mapper/{}", dm_name));
+                if dm_device_path.exists() {
+                    self.ext4_to_squashfs(&dm_device_path, &new_layer_path).await?;
+                    Ok(new_layer_path)
+                } else {
+                    Err(BuildError::ExecutionError(
+                        "DM device not found for layer creation".to_string()
+                    ))
+                }
+            }
+            Ok(code) => Err(BuildError::ExecutionError(
+                format!("Build command failed with exit code {}", code)
+            )),
+            Err(e) => Err(e),
+        }
+    }
+    
+    async fn squashfs_to_ext4(&self, squashfs: &Path, ext4: &Path) -> Result<(), BuildError> {
         let temp_dir = tempfile::tempdir()
             .map_err(|e| BuildError::ExecutionError(format!("Failed to create temp dir: {}", e)))?;
-        let extract_dir = temp_dir.path().join("extract");
-        let overlay_dir = temp_dir.path().join("overlay");
-
-        // Extract current squashfs
-        self.extract_squashfs(rootfs_path, &extract_dir).await?;
-
-        // Create overlay directory for writable changes
-        std::fs::create_dir_all(&overlay_dir)
-            .map_err(|e| BuildError::ExecutionError(format!("Failed to create overlay dir: {}", e)))?;
-
-        // For now, we'll simulate the RUN command execution
-        // In a full implementation, we'd need to:
-        // 1. Create a union filesystem (overlayfs) with extract_dir as lower, overlay_dir as upper
-        // 2. Launch VM with the union mount as root
-        // 3. VM executes command and modifies overlay_dir
-        // 4. After VM exits, merge changes back
-
-        warn!("RUN command execution simulation - command: {}", command);
-
-        // Simulate success/failure
-        let exit_code = if command.contains("false") || command.contains("exit 1") {
-            1
-        } else {
-            0
-        };
-
-        if exit_code == 0 {
-            // Create new squashfs from the (unchanged) extracted directory
-            // In real implementation, this would include overlay changes
-            let new_layer_name = format!("layer_{}.sqfs", chrono::Utc::now().timestamp());
-            let new_layer_path = self.temp_dir.join(&new_layer_name);
-
-            VmifConverter::create_squashfs(&extract_dir, &new_layer_path, SquashfsCompression::default())
-                .map_err(|e| BuildError::LayerError(format!("Failed to create new squashfs: {}", e)))?;
-
-            info!("Created new layer: {:?}", new_layer_path);
-            Ok(new_layer_path)
-        } else {
-            Err(BuildError::ExecutionError(format!("Build command failed with exit code {}", exit_code)))
+        
+        self.extract_squashfs(squashfs, temp_dir.path()).await?;
+        
+        let ext4_str = ext4.to_string_lossy();
+        let output = Command::new("mkfs.ext4")
+            .args(["-F", "-E", &ext4_str])
+            .output()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to run mkfs.ext4: {}", e)))?;
+        
+        if !output.status.success() {
+            return Err(BuildError::ExecutionError(
+                format!("mkfs.ext4 failed: {}", String::from_utf8_lossy(&output.stderr))
+            ));
         }
+        
+        let mount_dir = tempfile::tempdir()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to create mount dir: {}", e)))?;
+        
+        Command::new("mount")
+            .arg(ext4)
+            .arg(mount_dir.path())
+            .output()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to mount ext4: {}", e)))?;
+        
+        let cp_result = Command::new("cp")
+            .arg("-a")
+            .arg(temp_dir.path().join("*"))
+            .arg(mount_dir.path())
+            .output();
+        
+        let _ = Command::new("umount")
+            .arg(ext4)
+            .output();
+        
+        cp_result.map_err(|e| BuildError::ExecutionError(format!("Failed to copy files to ext4: {}", e)))?;
+        
+        Ok(())
+    }
+    
+    async fn ext4_to_squashfs(&self, ext4: &Path, squashfs: &Path) -> Result<(), BuildError> {
+        let mount_dir = tempfile::tempdir()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to create mount dir: {}", e)))?;
+        
+        Command::new("mount")
+            .arg(ext4)
+            .arg(mount_dir.path())
+            .output()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to mount ext4: {}", e)))?;
+        
+        let output = Command::new("mksquashfs")
+            .arg(mount_dir.path())
+            .arg(squashfs)
+            .arg("-comp")
+            .arg("zstd")
+            .arg("-quiet")
+            .output();
+        
+        let _ = Command::new("umount")
+            .arg(ext4)
+            .output();
+        
+        output.map_err(|e| BuildError::ExecutionError(format!("mksquashfs failed: {}", e)))?;
+        
+        Ok(())
+    }
+    
+    async fn run_command_in_ch(
+        &self,
+        rootdisk: &Path,
+        command: &str,
+        vm_dir: &Path,
+    ) -> Result<i32, BuildError> {
+        info!("Launching Cloud Hypervisor for build command: {}", command);
+        
+        let kernel_path = self.find_kernel_path()?;
+        let initramfs_path = self.create_build_initramfs(command).await?;
+        let socket_path = vm_dir.join("ch.sock");
+        
+        let ch_args = vec![
+            "--kernel".to_string(),
+            kernel_path.to_string_lossy().to_string(),
+            "--initramfs".to_string(),
+            initramfs_path.to_string_lossy().to_string(),
+            "--disk".to_string(),
+            format!("path={}", rootdisk.to_string_lossy()),
+            "--console".to_string(),
+            "off".to_string(),
+            "--serial".to_string(),
+            "tty".to_string(),
+            "--api-socket".to_string(),
+            socket_path.to_string_lossy().to_string(),
+            "--cpus".to_string(),
+            "1".to_string(),
+            "--memory".to_string(),
+            "size=512M".to_string(),
+        ];
+        
+        info!("Starting Cloud Hypervisor with rootdisk: {:?}", rootdisk);
+        
+        let mut child = Command::new("cloud-hypervisor")
+            .args(&ch_args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| BuildError::VmError(format!("Failed to start cloud-hypervisor: {}", e)))?;
+        
+        let timeout_duration = Duration::from_secs(300);
+        let exit_status = timeout(timeout_duration, async {
+            child.wait()
+        }).await
+        .map_err(|_| BuildError::VmError("VM execution timed out".to_string()))?
+        .map_err(|e| BuildError::VmError(format!("VM process error: {}", e)))?;
+        
+        let code = exit_status.code().unwrap_or(1);
+        info!("Build VM exited with code: {}", code);
+        Ok(code)
     }
 
     async fn execute_in_vm(&self, command: &str) -> Result<i32, BuildError> {
