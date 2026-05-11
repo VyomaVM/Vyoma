@@ -91,6 +91,7 @@ pub struct ChConfig {
     pub vsock_cid: u32,
     pub vsock_path: PathBuf,
     pub initramfs_path: Option<String>,
+    pub tpm_socket_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -183,6 +184,7 @@ mod tests {
             vsock_cid: 99,
             vsock_path: PathBuf::from("/tmp/vsock.sock"),
             initramfs_path: Some("/tmp/initramfs.cpio.gz".to_string()),
+            tpm_socket_path: None,
         };
         assert!(config.boot_args.contains("init=/sbin/vyoma-init"));
         assert!(config.initramfs_path.is_some());
