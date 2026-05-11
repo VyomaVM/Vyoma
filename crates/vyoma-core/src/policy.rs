@@ -10,6 +10,8 @@ pub struct MeasuredBootPolicy {
     pub pcr_selection: Vec<u32>,
     pub verification_timeout_secs: u64,
     pub block_on_failure: bool,
+    /// Path to the build signing key pair for signing manifests during build.
+    pub build_signing_key_path: Option<String>,
 }
 
 impl Default for MeasuredBootPolicy {
@@ -20,6 +22,7 @@ impl Default for MeasuredBootPolicy {
             pcr_selection: vec![7, 9, 10],
             verification_timeout_secs: 30,
             block_on_failure: true,
+            build_signing_key_path: None,
         }
     }
 }
@@ -37,6 +40,11 @@ impl PolicyConfig {
     pub fn with_measured_boot(mut self, enabled: bool, required: bool) -> Self {
         self.measured_boot.enabled = enabled;
         self.measured_boot.required = required;
+        self
+    }
+
+    pub fn with_build_signing_key(mut self, key_path: String) -> Self {
+        self.measured_boot.build_signing_key_path = Some(key_path);
         self
     }
 
@@ -85,6 +93,14 @@ impl PolicyStatus {
                     d.insert(
                         "verification_timeout".to_string(),
                         config.measured_boot.verification_timeout_secs.to_string(),
+                    );
+                    d.insert(
+                        "build_signing_key".to_string(),
+                        config
+                            .measured_boot
+                            .build_signing_key_path
+                            .clone()
+                            .unwrap_or_else(|| "none".to_string()),
                     );
                     d
                 },
