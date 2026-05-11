@@ -175,6 +175,10 @@ enum Commands {
         /// Path to build context (directory containing Vyomafile)
         #[arg(default_value = ".")]
         path: String,
+
+        /// Perform measured build: launch ephemeral VM to pre-compute PCR values
+        #[arg(long)]
+        measured: bool,
     },
     /// Check system dependencies and environment health
     Doctor,
@@ -749,9 +753,9 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Build { path } => {
-            info!("Building image from context: {}", path);
-            build_image_with_client(&path, &client, &daemon_url).await?;
+        Commands::Build { path, measured } => {
+            info!("Building image from context: {} (measured={})", path, measured);
+            build_image_with_client(&path, &client, &daemon_url, *measured).await?;
         }
         Commands::Doctor => {
             run_doctor().await?;
@@ -1386,7 +1390,7 @@ fn check_bridge() -> Result<bool> {
     Ok(output.status.success())
 }
 
-async fn build_image_with_client(context_path: &str, client: &Client, daemon_url: &str) -> Result<String> {
+async fn build_image_with_client(context_path: &str, client: &Client, daemon_url: &str, measured: bool) -> Result<String> {
     let context_path = Path::new(context_path);
     if !context_path.exists() {
         return Err(anyhow::anyhow!(
@@ -1398,7 +1402,7 @@ async fn build_image_with_client(context_path: &str, client: &Client, daemon_url
     // Create tarball to temp file
     let temp_dir = tempfile::tempdir()?;
     let tar_path = temp_dir.path().join("context.tar.gz");
-    
+
     // Create tar.gz using subprocess for reliability
     let status = std::process::Command::new("tar")
         .arg("-czf")
@@ -1407,7 +1411,7 @@ async fn build_image_with_client(context_path: &str, client: &Client, daemon_url
         .arg(context_path)
         .arg(".")
         .status()?;
-    
+
     if !status.success() {
         return Err(anyhow::anyhow!("Failed to create tarball"));
     }
@@ -1417,8 +1421,9 @@ async fn build_image_with_client(context_path: &str, client: &Client, daemon_url
     let stream = tokio_util::codec::FramedRead::new(file, tokio_util::codec::BytesCodec::new());
     let body = reqwest::Body::wrap_stream(stream);
 
+    let measured_query = if measured { "?measured=true" } else { "" };
     let resp = client
-        .post(format!("{}/build", daemon_url))
+        .post(format!("{}/build{}", daemon_url, measured_query))
         .body(body)
         .send()
         .await?;
@@ -1436,7 +1441,7 @@ async fn build_image_with_client(context_path: &str, client: &Client, daemon_url
 
 async fn build_image(context_path: &str, daemon_url: &str) -> Result<String> {
     let client = Client::new();
-    build_image_with_client(context_path, &client, daemon_url).await
+    build_image_with_client(context_path, &client, daemon_url, false).await
 }
 
 fn export_vm(vm_id: &str, output_path: &str) -> Result<()> {
