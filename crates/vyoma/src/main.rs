@@ -633,9 +633,31 @@ async fn main() -> Result<()> {
             let status_check = client.get(format!("{}/teleport/status/test", target_daemon)).send().await;
             
             let use_live_migration = status_check.map(|r| r.status().as_u16() != 404).unwrap_or(false);
-            
+
             if !use_live_migration {
-                warn!("Target node {} doesn't support live migration, falling back to snapshot mode", target);
+                warn!("Target node {} doesn't support live migration, falling back to snapshot/stream mode", target);
+                // Start receiver on the target node
+                let receiver_payload = serde_json::json!({
+                    "vm_id": id
+                });
+                let recv_resp = client
+                    .post(format!("{}/receive-teleport", target_daemon))
+                    .json(&receiver_payload)
+                    .send()
+                    .await;
+
+                if let Err(e) = recv_resp {
+                    error!("Failed to start receiver on target {}: {}", target, e);
+                    return Ok(());
+                }
+                let recv_resp = recv_resp.unwrap();
+                if !recv_resp.status().is_success() {
+                    error!("Target refused to start receiver: {}", recv_resp.text().await.unwrap_or_default());
+                    return Ok(());
+                }
+                info!("Receiver started on target: {}", recv_resp.text().await.unwrap_or_default());
+
+                // Send migration from source
                 let payload = serde_json::json!({
                     "vm_id": id,
                     "target_node_ip": target

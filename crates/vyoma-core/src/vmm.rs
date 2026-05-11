@@ -311,10 +311,11 @@ impl VmmManager {
         self.api_request("/api/v1/vm.restore", Method::PUT, Some(&config)).await
     }
 
-    pub async fn send_migration(&self, target_url: &str) -> Result<()> {
+    pub async fn send_migration(&self, target_url: &str, bandwidth_mbps: Option<u32>) -> Result<()> {
         let config = SendMigrationData {
             destination_url: target_url.to_string(),
             local: None,
+            bandwidth: bandwidth_mbps,
         };
         self.api_request("/api/v1/vm.send-migration", Method::PUT, Some(&config)).await
     }
