@@ -22,6 +22,15 @@ on:
         description: 'vyomad URL (for custom deployments)'
         required: false
         default: 'http://localhost:8080'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'crates/vyoma-image/**'
+      - 'crates/vyomad/**'
+      - 'tests/compat/**'
+      - '.github/workflows/compat-nightly.yml'
 
 concurrency:
   group: compat-matrix-${{ github.ref }}
@@ -36,7 +45,7 @@ jobs:
   compat-matrix:
     name: Compatibility Matrix (${{ inputs.image_count || '20' }} images)
     runs-on: ${{ github.repository == 'vyoma/vyoma' && 'vyoma-kvm-runner' || 'ubuntu-latest' }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ github.event_name == 'pull_request' && '30' || '60' }}
 
     services:
       vyomad:
@@ -92,9 +101,20 @@ jobs:
 
       - name: Prepare image list
         run: |
-          if [ "${{ inputs.image_count || '20' }}" = "20" ]; then
+          IMAGE_COUNT="${{ inputs.image_count }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            IMAGE_COUNT="10"
+          elif [ -z "$IMAGE_COUNT" ]; then
+            IMAGE_COUNT="20"
+          fi
+
+          echo "Running compatibility tests with $IMAGE_COUNT images"
+
+          if [ "$IMAGE_COUNT" = "10" ]; then
+            head -10 tests/compat/images.json > /tmp/images-test.json
+          elif [ "$IMAGE_COUNT" = "20" ]; then
             head -20 tests/compat/images.json > /tmp/images-test.json
-          elif [ "${{ inputs.image_count || '20' }}" = "100" ]; then
+          elif [ "$IMAGE_COUNT" = "100" ]; then
             cat tests/compat/top100.txt | head -100 > /tmp/images-test.txt
           else
             cat tests/compat/top100.txt > /tmp/images-test.txt
@@ -121,8 +141,20 @@ jobs:
             --verbose || true
 
           echo "report_file=$OUTPUT_FILE" >> $GITHUB_OUTPUT
-          echo "passed=$(grep -o '"passed":[0-9]*' $OUTPUT_FILE | cut -d: -f2)" >> $GITHUB_OUTPUT
-          echo "failed=$(grep -o '"failed":[0-9]*' $OUTPUT_FILE | cut -d: -f2)" >> $GITHUB_OUTPUT
+
+          PASSED=$(grep -o '"passed":[0-9]*' $OUTPUT_FILE | head -1 | cut -d: -f2)
+          FAILED=$(grep -o '"failed":[0-9]*' $OUTPUT_FILE | head -1 | cut -d: -f2)
+
+          echo "passed=${PASSED:-0}" >> $GITHUB_OUTPUT
+          echo "failed=${FAILED:-0}" >> $GITHUB_OUTPUT
+
+      - name: Capture vyomad logs on failure
+        if: failure()
+        run: |
+          echo "## Vyomad Service Logs (Last 100 lines)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          docker logs vyomad --tail 100 2>&1 || echo "Could not retrieve logs" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload report
         uses: actions/upload-artifact@v4
