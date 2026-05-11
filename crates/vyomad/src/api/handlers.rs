@@ -18,7 +18,7 @@ use tokio_util::io::StreamReader;
 use uuid;
 use tempfile;
 use openraft::raft::{AppendEntriesRequest, InstallSnapshotRequest, VoteRequest};
-use vyoma_teleport::{MigrationProgress, Teleporter, TeleportReceiver};
+use vyoma_teleport::{MigrationProgress, Teleporter, TeleportReceiver, VmInfo};
 use openraft::Raft;
 use std::process::Command;
 use vyoma_core::api::{PortMapping, VolumeMount};
@@ -31,7 +31,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use reqwest::{Client, Method};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
 use std::path::PathBuf;
@@ -1308,6 +1309,94 @@ pub struct TeleportResponse {
     pub message: String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct AdoptTeleportRequest {
+    pub vm_id: String,
+}
+
+pub async fn adopt_teleported_vm(
+    State(state): State<AppState>,
+    Json(payload): Json<AdoptTeleportRequest>,
+) -> Result<Json<TeleportResponse>, (StatusCode, String)> {
+    info!("Handling POST /adopt-teleported-vm for VM {}", payload.vm_id);
+
+    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+    let vm_dir = home.join(".ignite").join("vms").join(&payload.vm_id);
+
+    if !vm_dir.exists() {
+        return Err((StatusCode::NOT_FOUND, format!("VM directory not found for {}", payload.vm_id)));
+    }
+
+    let ch_socket = vm_dir.join("ch.sock").to_string_lossy().to_string();
+
+    // Query the VM info from the now-running Cloud Hypervisor
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5))
+        .unix_socket(ch_socket.as_str())
+        .build()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to build socket client: {}", e)))?;
+
+    let response = client
+        .request(Method::GET, "http://localhost/api/v1/vm.info")
+        .send()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to query vm.info: {}", e)))?;
+
+    let vm_info: VmInfo = response
+        .json()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to parse vm.info: {}", e)))?;
+
+    // Ensure VM is running
+    if vm_info.state != "Running" {
+        // Try to resume it
+        client
+            .request(Method::PUT, "http://localhost/api/v1/vm.resume")
+            .send()
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to resume VM: {}", e)))?;
+    }
+
+    // Register the adopted VM in the daemon state
+    let vmm = VmmManager::new(&ch_socket);
+    let instance = Arc::new(TokioMutex::new(VmInstance {
+        vmm,
+        id: payload.vm_id.clone(),
+        ch_socket_path: ch_socket,
+        tap_name: String::new(),
+        dm_name: String::new(),
+        loop_devices: Vec::new(),
+        cow_file_path: String::new(),
+        ip_address: String::new(),
+        proxy_tasks: Vec::new(),
+        fs_managers: Vec::new(),
+        slirp: None,
+        cgroup_path: None,
+        netns_path: None,
+        config_ports: Vec::new(),
+        config_volumes: Vec::new(),
+        hostname: None,
+        labels: HashMap::new(),
+        networks: Vec::new(),
+        base_image_path: String::new(),
+        vcpu: 1,
+        mem_size_mib: 512,
+    }));
+
+    {
+        let mut vms = state.vms.lock().unwrap();
+        vms.insert(payload.vm_id.clone(), instance);
+    }
+
+    info!("Adopted VM {} into local state", payload.vm_id);
+
+    Ok(Json(TeleportResponse {
+        session_id: payload.vm_id.clone(),
+        status: "adopted".to_string(),
+        message: format!("VM {} adopted successfully", payload.vm_id),
+    }))
+}
+
 pub async fn teleport_handler(
     State(state): State<AppState>,
     Json(payload): Json<TeleportRequest>,
@@ -1395,8 +1484,10 @@ pub async fn teleport_handler(
             }
         });
 
-let session_id_for_spawn = session_id.clone();
+        let ch_socket_for_spawn = ch_socket.clone();
+        let session_id_for_spawn = session_id.clone();
         let target_url_for_spawn = target_url.clone();
+        let adopt_url_for_spawn = format!("http://{}:3000/adopt-teleported-vm", target_url_for_spawn);
         let vm_id_for_cleanup = payload.vm_id.clone();
         let vms_for_cleanup = vms_for_cleanup.clone();
 
@@ -1408,21 +1499,52 @@ let session_id_for_spawn = session_id.clone();
             );
 
             let result = teleporter.teleport_vm_with_config(
-                &ch_socket,
+                &ch_socket_for_spawn,
                 bandwidth,
                 Some(progress_callback),
             ).await;
 
             if result.is_ok() {
-                let vm_id = vm_id_for_cleanup.clone();
-                let vms = Arc::clone(&vms_for_cleanup);
-                
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    
-                if let Some(_vm_arc) = vms.lock().unwrap().remove(&vm_id) {
-                    info!("Source VM {} removed from registry after migration", vm_id);
+                // Stop the source VM after successful migration
+                {
+                    let vm_arc_opt = {
+                        let vms = vms_for_cleanup.lock().unwrap();
+                        vms.get(&vm_id_for_cleanup).cloned()
+                    };
+
+                    if let Some(vm_arc) = vm_arc_opt {
+                        let mut vm = vm_arc.lock().await;
+                        if let Err(e) = vm.vmm.pause_instance().await {
+                            error!("Failed to pause source VM {}: {}", vm_id_for_cleanup, e);
+                        }
+                        info!("Source VM {} paused after successful live migration", vm_id_for_cleanup);
+                    }
                 }
-                
+
+                // Remove from registry
+                if let Some(_vm_arc) = vms_for_cleanup.lock().unwrap().remove(&vm_id_for_cleanup) {
+                    info!("Source VM {} removed from registry after migration", vm_id_for_cleanup);
+                }
+
+                // Notify target node to adopt the VM
+                let adopt_resp = reqwest::Client::new()
+                    .post(&adopt_url_for_spawn)
+                    .json(&AdoptTeleportRequest { vm_id: vm_id_for_cleanup.clone() })
+                    .send()
+                    .await;
+
+                match adopt_resp {
+                    Ok(r) if r.status().is_success() => {
+                        info!("Target node adopted VM {}", vm_id_for_cleanup);
+                    }
+                    Ok(r) => {
+                        warn!("Target adoption returned non-success: {}", r.status());
+                    }
+                    Err(e) => {
+                        warn!("Failed to notify target to adopt VM {}: {}", vm_id_for_cleanup, e);
+                    }
+                }
+
                 let sessions = get_migration_sessions();
                 if let Ok(mut sessions) = sessions.lock() {
                     if let Some(session) = sessions.get_mut(&session_id_for_spawn) {
@@ -1436,6 +1558,23 @@ let session_id_for_spawn = session_id.clone();
                     }
                 }
             } else {
+                // Resume source VM on migration failure
+                {
+                    let vm_arc_opt = {
+                        let vms = vms_for_cleanup.lock().unwrap();
+                        vms.get(&vm_id_for_cleanup).cloned()
+                    };
+
+                    if let Some(vm_arc) = vm_arc_opt {
+                        let mut vm = vm_arc.lock().await;
+                        if let Err(e) = vm.vmm.resume_instance().await {
+                            error!("Failed to resume source VM {}: {}", vm_id_for_cleanup, e);
+                        } else {
+                            info!("Source VM {} resumed after migration failure", vm_id_for_cleanup);
+                        }
+                    }
+                }
+
                 let sessions = get_migration_sessions();
                 if let Ok(mut sessions) = sessions.lock() {
                     if let Some(session) = sessions.get_mut(&session_id_for_spawn) {
