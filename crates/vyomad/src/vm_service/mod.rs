@@ -11,6 +11,8 @@ pub mod storage;
 pub mod mocks;
 #[cfg(test)]
 mod stage_tests;
+#[cfg(test)]
+mod measured_boot_tests;
 
 use std::sync::Arc;
 use anyhow::{Context, Result};
