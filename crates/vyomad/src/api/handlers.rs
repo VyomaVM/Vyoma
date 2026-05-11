@@ -648,10 +648,16 @@ pub async fn inspect_vm_handler(
 }
 
 pub async fn build_image(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     body: Body,
+    #[axum::extract::Query] params: axum::extract::Query<HashMap<String, String>>,
 ) -> Result<String, (StatusCode, String)> {
     info!("Received build request using VM-isolated build system");
+
+    let measured = params.get("measured").map(|v| v == "true").unwrap_or(false);
+    if measured {
+        info!("Measured build requested via query parameter");
+    }
 
     // 1. Stream body to a temp file (tar.gz)
     let temp_dir =
@@ -697,6 +703,18 @@ pub async fn build_image(
         ));
     }
 
+    let vyomafile = vyoma_build::Vyomafile::parse(&vyomafile_path)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to parse Vyomafile: {}", e)))?;
+
+    // Check if Vyomafile requests measured boot
+    let vyomafile_measured = vyomafile.has_measured_boot();
+    if vyomafile_measured {
+        info!("Measured build requested via VM_MEASURED_BOOT directive in Vyomafile");
+    }
+
+    // Measured build is enabled if either query parameter or Vyomafile directive specifies it
+    let measured = measured || vyomafile_measured;
+
     // 4. Generate build ID and prepare work directory
     let build_id = uuid::Uuid::new_v4().to_string();
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
@@ -704,8 +722,15 @@ pub async fn build_image(
     std::fs::create_dir_all(&work_dir)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // 5. Execute build using VM-isolated BuildRunner
-    let build_runner = vyoma_build::BuildRunner::new(work_dir);
+    // 5. Determine signing key path from policy config
+    let signing_key_path = {
+        let policy = state.policy_manager.lock().unwrap();
+        policy.get_config().measured_boot.build_signing_key_path.clone()
+    };
+
+    // 6. Execute build using VM-isolated BuildRunner
+    let build_runner = vyoma_build::BuildRunner::new(work_dir.clone())
+        .with_measured(measured, signing_key_path);
     let build_result = build_runner
         .build(&vyomafile_path, &context_dir, &build_id)
         .await
@@ -722,7 +747,7 @@ pub async fn build_image(
         build_result.rootfs_path.display()
     );
 
-    // 6. Return the build ID
+    // 7. Return the build ID
     Ok(build_id)
 }
 
