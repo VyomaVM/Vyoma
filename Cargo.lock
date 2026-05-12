@@ -3719,19 +3719,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-vsock"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b319ef9394889dab2e1b4f0085b45ba11d0c79dc9d1a9d1afc057d009d0f1c7"
-dependencies = [
- "bytes",
- "futures",
- "libc",
- "tokio",
- "vsock",
-]
-
-[[package]]
 name = "toml"
 version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4137,19 +4124,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "vyoma-agent"
-version = "2.1.2"
+name = "vyoma-agent-protocol"
+version = "0.1.0"
 dependencies = [
- "anyhow",
- "bytes",
- "futures",
  "serde",
  "serde_json",
- "tokio",
- "tokio-util",
- "tokio-vsock",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -4165,6 +4144,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vsock",
+ "vyoma-agent-protocol",
 ]
 
 [[package]]
@@ -4309,6 +4289,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "vyoma-agent-protocol",
  "vyoma-proto",
 ]
 

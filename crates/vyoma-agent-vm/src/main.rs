@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
-use vyoma_agent_vm::{collect_metrics, collect_process_list, read_file_content, execute_command, AgentRequest, AgentResponse};
+use vyoma_agent_vm::{collect_metrics, collect_process_list, read_file_content, execute_command};
+use vyoma_agent_protocol::{AgentRequest, AgentResponse};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

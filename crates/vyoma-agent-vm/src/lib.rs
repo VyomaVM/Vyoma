@@ -1,43 +1,8 @@
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use sysinfo::System;
 use tokio::fs;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum AgentRequest {
-    ProcessList,
-    GetMetrics,
-    FileRead { path: String },
-    ExecCommand { cmd: Vec<String>, env: std::collections::HashMap<String, String>, workdir: Option<String> },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum AgentResponse {
-    ProcessList(Vec<ProcessInfo>),
-    Metrics(VmMetrics),
-    FileContent(Vec<u8>),
-    ExecOutput { stdout: Vec<u8>, stderr: Vec<u8>, exit_code: i32 },
-    Error { message: String },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessInfo {
-    pub pid: u32,
-    pub name: String,
-    pub cpu_usage: f32,
-    pub memory_mb: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VmMetrics {
-    pub cpu_usage_percent: f32,
-    pub mem_used_kb: u64,
-    pub mem_total_kb: u64,
-    pub process_count: usize,
-}
+use vyoma_agent_protocol::{AgentRequest, AgentResponse, ProcessInfo, VmMetrics};
 
 pub async fn collect_metrics() -> Result<VmMetrics> {
     let mut sys = System::new_all();
@@ -64,9 +29,11 @@ pub fn collect_process_list() -> Vec<ProcessInfo> {
         .iter()
         .map(|(pid, process)| ProcessInfo {
             pid: pid.as_u32(),
+            ppid: None,
             name: process.name().to_string(),
-            cpu_usage: process.cpu_usage(),
-            memory_mb: process.memory() / 1024 / 1024,
+            state: None,
+            cpu_usage: Some(process.cpu_usage()),
+            memory_mb: Some(process.memory() / 1024 / 1024),
         })
         .collect()
 }

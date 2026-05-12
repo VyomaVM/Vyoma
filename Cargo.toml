@@ -9,9 +9,10 @@ members = [
     "crates/vyoma-proto",
     "crates/vyoma-build",
     "crates/vyoma-image",
-    "crates/vyoma-agent",
     "crates/vyoma-sdk",
-    "crates/vyoma-agent-vm", "crates/vyoma-vk8s",
+    "crates/vyoma-agent-vm",
+    "crates/vyoma-agent-protocol",
+    "crates/vyoma-vk8s",
     "tests/compat",
     "tests/integration",
 ]

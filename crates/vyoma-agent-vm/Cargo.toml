@@ -14,6 +14,7 @@ tracing-subscriber = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 vsock = "0.5"
 sysinfo = "0.30"
+vyoma-agent-protocol = { path = "../vyoma-agent-protocol" }
 
 [[bin]]
 name = "vyoma-agent-vm"

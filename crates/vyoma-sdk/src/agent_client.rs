@@ -1,60 +1,11 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::net::UnixStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum AgentRequest {
-    ProcessList,
-    ExecCommand {
-        cmd: Vec<String>,
-        env: HashMap<String, String>,
-        workdir: Option<String>,
-    },
-    GetMetrics,
-    FileRead {
-        path: String,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum AgentResponse {
-    ProcessList {
-        processes: Vec<ProcessInfo>,
-    },
-    ExecOutput {
-        stdout: Vec<u8>,
-        stderr: Vec<u8>,
-        exit_code: i32,
-    },
-    Metrics {
-        cpu_user_ms: u64,
-        cpu_system_ms: u64,
-        mem_used_kb: u64,
-        mem_total_kb: u64,
-        process_count: usize,
-    },
-    FileContent {
-        content: Vec<u8>,
-    },
-    Error {
-        message: String,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessInfo {
-    pub pid: u32,
-    pub ppid: u32,
-    pub name: String,
-    pub state: String,
-}
+use vyoma_agent_protocol::{AgentRequest, AgentResponse};
 
 pub struct AgentClient {
     socket_path: String,
@@ -72,12 +23,9 @@ impl AgentClient {
             .await
             .context(format!("Failed to connect to vsock at {}", self.socket_path))?;
 
-        // Cloud Hypervisor vhost-user vsock / Unix socket requires "CONNECT <port>\n"
         stream.write_all(b"CONNECT 9999\n").await?;
         
-        let mut response = [0u8; 32];
         let mut line = String::new();
-        // Read until newline
         loop {
             let mut buf = [0u8; 1];
             stream.read_exact(&mut buf).await?;
