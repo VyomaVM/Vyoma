@@ -6,6 +6,7 @@ use tracing::{info, error, warn};
 use tokio::net::UnixListener;
 use tokio::sync::broadcast;
 use std::sync::{Arc, Mutex as StdMutex};
+use tokio::sync::Mutex as TokioMutex;
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
 use tower_http::cors::{CorsLayer, AllowOrigin};
@@ -169,19 +170,19 @@ async fn main() {
     // Get API token from CLI arg or environment variable
     let api_token = args.api_token.clone().or_else(|| std::env::var("VYOMA_API_TOKEN").ok());
 
-    let state = AppState {
-        vms: Arc::new(StdMutex::new(HashMap::new())),
-        cgroups,
-        cni_manager,
-        events_tx,
-        wal,
-        data_dir: args.data_dir.clone(),
-        swarm_raft,
-        network_integration,
-        timemachine,
-        policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
-        api_token,
-    };
+     let state = AppState {
+         vms: Arc::new(TokioMutex::new(HashMap::new())),
+         cgroups,
+         cni_manager,
+         events_tx,
+         wal,
+         data_dir: args.data_dir.clone(),
+         swarm_raft,
+         network_integration,
+         timemachine,
+         policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
+         api_token,
+     };
 
     // Run WAL-based crash recovery and adopt surviving VMs
     let recovered_vms = match Recovery::recover_on_startup(&home, &state.wal, &state).await {
@@ -229,7 +230,7 @@ async fn main() {
                 attestation_task: None,
             };
             
-            let mut vms = state.vms.lock().unwrap();
+            let mut vms = state.vms.lock().await;
             vms.insert(rvm.vm_id, Arc::new(tokio::sync::Mutex::new(vm_instance)));
         }
     }

@@ -118,31 +118,26 @@ enum Commands {
         /// New image name (e.g., custom-img:latest)
         new_image_name: String,
     },
-    /// List active VMs
-    Ps,
-    /// Perform attestation on a VM
-    Attest {
-        /// VM ID
-        id: String,
-    },
-    /// Create a snapshot of a VM
-    Snapshot {
-        /// VM ID
-        id: String,
-    },
-    /// Show snapshot history of a VM
-    History {
-        /// VM ID
-        id: String,
-    },
-    /// Time travel a VM to a specific snapshot
-    TimeTravel {
-        /// VM ID
-        id: String,
-        /// Snapshot ID to travel to
-        #[arg(long)]
-        to: String,
-    },
+     /// List active VMs
+     Ps,
+      /// Show snapshot history of a VM
+      History {
+          /// VM ID
+          id: String,
+      },
+      /// Create a snapshot of a VM
+      Snapshot {
+          /// VM ID
+          id: String,
+      },
+     /// Time travel a VM to a specific snapshot
+     TimeTravel {
+         /// VM ID
+         id: String,
+         /// Snapshot ID to travel to
+         #[arg(long)]
+         to: String,
+     },
     /// Save a VM snapshot to a file (Export/Teleportation)
     Save {
         /// VM ID to save
@@ -585,8 +580,8 @@ async fn main() -> Result<()> {
                                         format!("{}={}", k, v)
                                     }
                                 })
-                                .collect::<Vec<_>>
-                                .join(", ");
+                                 .collect::<Vec<_>>()
+                                 .join(", ");
                             let hostname_str = vm.hostname.unwrap_or_else(|| "-".to_string());
                             let attest_str = vm.attestation_status.unwrap_or_else(|| "-".to_string());
 
@@ -604,7 +599,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Attest { id } => {
+        Commands::Attest { id, .. } => {
             info!("Requesting attestation for VM: {}", id);
             let resp = client
                 .post(format!("{}/attest/{}", daemon_url, id))
@@ -1786,6 +1781,7 @@ struct VmSummary {
     hostname: Option<String>,
     #[serde(default)]
     labels: HashMap<String, String>,
+    attestation_status: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
