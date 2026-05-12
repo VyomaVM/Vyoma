@@ -112,6 +112,16 @@ pub async fn check_policy_and_perform_attestation(
                 info!("Attestation verification succeeded for VM {} in {:.2?}", vm_id, elapsed);
                 update_vm_status(&state, &vm_id, VmStatus::Running).await
                     .map_err(|e| format!("Failed to update VM status: {}", e))?;
+
+                // Update attestation_status to verified
+                {
+                    let mut vms = state.vms.lock().unwrap();
+                    if let Some(vm_arc) = vms.get(vm_id) {
+                        let mut vm = vm_arc.lock().await;
+                        vm.attestation_status = Some("VERIFIED".to_string());
+                    }
+                }
+
                 Ok(())
             } else {
                 let elapsed = start.elapsed();
@@ -421,15 +431,24 @@ async fn load_and_verify_manifest(
 /// Handle attestation failure based on policy configuration.
 ///
 /// If `block_on_failure` is true, the VM is killed immediately.
-/// The VM status is set to Error with the failure reason.
+/// The VM status is set to AttestationFailed with the failure reason.
 async fn handle_attestation_failure(state: &Arc<AppState>, vm_id: &str, reason: &str) {
     error!("Attestation failure for VM {}: {}", vm_id, reason);
 
-    // Set VM status to Error
-    if let Err(e) = update_vm_status(state, vm_id, VmStatus::Error {
+    // Set VM status to AttestationFailed
+    if let Err(e) = update_vm_status(state, vm_id, VmStatus::AttestationFailed {
         reason: reason.to_string(),
     }).await {
         error!("Failed to update VM status after attestation failure: {}", e);
+    }
+
+    // Update attestation_status field
+    {
+        let mut vms = state.vms.lock().unwrap();
+        if let Some(vm_arc) = vms.get(vm_id) {
+            let mut vm = vm_arc.lock().await;
+            vm.attestation_status = Some("FAILED".to_string());
+        }
     }
 
     // Check if we should kill the VM
