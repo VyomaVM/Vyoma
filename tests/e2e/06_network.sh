@@ -8,22 +8,22 @@ check_root
 setup_env
 
 # Start Daemon
-sudo -E $IGNITED_BIN --socket-path /run/ignite/test.sock --http-port 3007 > $TEST_HOME/daemon.log 2>&1 &
+sudo -E $VYOMAD_BIN --socket-path /run/vyoma/test.sock --http-port 3007 > $TEST_HOME/daemon.log 2>&1 &
 DAEMON_PID=$!
 sleep 3
-IGN="$IGN_BIN --socket-path /run/ignite/test.sock --http-port 3007"
+VYOMA="$VYOMA_BIN --socket-path /run/vyoma/test.sock --http-port 3007"
 
 # 1. List (Default)
-$IGN network ls
+$VYOMA network ls
 assert_success "List Networks"
 
 # 2. Create
 echo "Creating Network..."
-$IGN network create test-net --subnet 10.99.0.0/16
+$VYOMA network create test-net --subnet 10.99.0.0/16
 assert_success "Create Network"
 
 # 3. Verify
-if $IGN network ls | grep -q "test-net"; then
+if $VYOMA network ls | grep -q "test-net"; then
     echo -e "${GREEN}Pass: Network Found${NC}"
 else
     echo -e "${RED}Fail: Network missing${NC}"
@@ -32,10 +32,10 @@ fi
 
 # 4. Remove
 echo "Removing Network..."
-$IGN network rm test-net
+$VYOMA network rm test-net
 assert_success "Remove Network"
 
-if $IGN network ls | grep -q "test-net"; then
+if $VYOMA network ls | grep -q "test-net"; then
     echo -e "${RED}Fail: Network still exists${NC}"
 else
     echo -e "${GREEN}Pass: Network Removed${NC}"

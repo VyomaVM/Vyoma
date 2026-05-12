@@ -9,11 +9,11 @@ setup_env
 
 # Start Daemon
 echo "Starting Daemon (3004)..."
-sudo -E $IGNITED_BIN --socket-path /run/ignite/test.sock --http-port 3004 > $TEST_HOME/daemon.log 2>&1 &
+sudo -E $VYOMAD_BIN --socket-path /run/vyoma/test.sock --http-port 3004 > $TEST_HOME/daemon.log 2>&1 &
 DAEMON_PID=$!
 sleep 3
 
-IGN="$IGN_BIN --socket-path /run/ignite/test.sock --http-port 3004"
+VYOMA="$VYOMA_BIN --socket-path /run/vyoma/test.sock --http-port 3004"
 
 # 1. Setup Compose File
 mkdir -p $TEST_HOME/compose_test
@@ -33,14 +33,14 @@ EOF
 
 # 2. Up
 echo "Running ign up..."
-$IGN up -d
+$VYOMA up -d
 assert_success "Compose Up"
 
 sleep 5
 
 # 3. Verify
 echo "Verifying Services..."
-PS=$($IGN ps)
+PS=$($VYOMA ps)
 echo "$PS"
 
 if echo "$PS" | grep -q "web" && echo "$PS" | grep -q "db"; then
@@ -53,10 +53,10 @@ fi
 # 3.5 Scale
 echo "Scaling web=2..."
 # Command: ign scale web=2
-$IGN scale web=2
+$VYOMA scale web=2
 assert_success "Scale Request"
 sleep 5
-PS_SCALE=$($IGN ps)
+PS_SCALE=$($VYOMA ps)
 # grep -c "web" should be 2?
 # The service name might be "compose_test_web_1", "compose_test_web_2".
 # Labels will prevent collision?
@@ -71,11 +71,11 @@ fi
 
 # 4. Down
 echo "Running ign down..."
-$IGN down
+$VYOMA down
 assert_success "Compose Down"
 
 sleep 2
-if $IGN ps | grep -q "web"; then
+if $VYOMA ps | grep -q "web"; then
     echo -e "${RED}Fail: Services still running${NC}"
     # exit 1
 else

@@ -9,11 +9,11 @@ setup_env
 
 # Start Daemon
 echo "Starting Daemon (Port 3002)..."
-sudo -E $IGNITED_BIN --socket-path /run/ignite/test.sock --http-port 3002 > $TEST_HOME/daemon.log 2>&1 &
+sudo -E $VYOMAD_BIN --socket-path /run/vyoma/test.sock --http-port 3002 > $TEST_HOME/daemon.log 2>&1 &
 DAEMON_PID=$!
 sleep 3
 
-IGN="$IGN_BIN --socket-path /run/ignite/test.sock --http-port 3002"
+VYOMA="$VYOMA_BIN --socket-path /run/vyoma/test.sock --http-port 3002"
 
 # Prepare Volume
 HOST_VOL=$(mktemp -d)
@@ -22,13 +22,13 @@ echo "test-data" > $HOST_VOL/host_file.txt
 # 1. Run with Volume & Port
 echo "Running VM with Volume & Port..."
 # -v host:vm -p host:vm
-$IGN run alpine:latest -v $HOST_VOL:/data -p 8081:80 --hostname vol-vm
+$VYOMA run alpine:latest -v $HOST_VOL:/data -p 8081:80 --hostname vol-vm
 assert_success "Run with Vol/Port"
 
 sleep 3
 
 # 2. Verify
-if $IGN ps | grep -q "vol-vm"; then
+if $VYOMA ps | grep -q "vol-vm"; then
     echo -e "${GREEN}Pass: VM Running${NC}"
 else
     echo -e "${RED}Fail: VM Failed to Start${NC}"
@@ -48,7 +48,7 @@ fi
 # 4. Verify Volume (Requires Exec/SSH - Skipping Deep Verification)
 # We assume if VM started, VirtioFS is attached.
 
-$IGN stop "$($IGN ps | grep vol-vm | awk '{print $1}')"
+$VYOMA stop "$($VYOMA ps | grep vol-vm | awk '{print $1}')"
 
 cleanup_env $DAEMON_PID
 rm -rf $HOST_VOL

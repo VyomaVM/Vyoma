@@ -2,7 +2,7 @@
 set -e
 
 VM_ID="${1:-test-vm}"
-TPM_SOCKET="${2:-/var/lib/ignite/vms/$VM_ID/tpm/swtpm.sov}"
+TPM_SOCKET="${2:-/var/lib/vyoma/vms/$VM_ID/tpm/swtpm.sov}"
 
 echo "=== Vyoma PCR Value Computation ==="
 echo "VM: $VM_ID"
@@ -37,7 +37,7 @@ echo "PCR 14 - Root Filesystem (dm-verity)"
 echo ""
 echo "=== Generating VMIF Expected Values ==="
 
-OUTPUT_FILE="/var/lib/ignite/vms/$VM_ID/pcr_values.json"
+OUTPUT_FILE="/var/lib/vyoma/vms/$VM_ID/pcr_values.json"
 
 tpm2_pcrread -T socket --tcti=swtpm:path="$TPM_SOCKET" sha256 | grep -E "^PCR-[0-9]+:" | \
     sed 's/PCR-\([0-9]*\): /\1: /' | jq -s 'map({key: (.split(": ")[0] | tonumber), value: .split(": ")[1]}) | from_entries' > "$OUTPUT_FILE"

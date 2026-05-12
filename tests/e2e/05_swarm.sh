@@ -10,34 +10,34 @@ check_root
 echo "Setting up Node 1..."
 export TEST_HOME=$(mktemp -d) # HOME 1
 HOME1=$TEST_HOME
-sudo -E HOME=$HOME1 $IGNITED_BIN --socket-path /run/ignite/node1.sock --http-port 3005 > $HOME1/daemon.log 2>&1 &
+sudo -E HOME=$HOME1 $VYOMAD_BIN --socket-path /run/vyoma/node1.sock --http-port 3005 > $HOME1/daemon.log 2>&1 &
 PID1=$!
 
 # Setup Node 2
 echo "Setting up Node 2..."
 HOME2=$(mktemp -d)
-sudo -E HOME=$HOME2 IGNITE_DAEMON_PORT=3006 $IGNITED_BIN --socket-path /run/ignite/node2.sock --http-port 3006 > $HOME2/daemon.log 2>&1 &
+sudo -E HOME=$HOME2 VYOMA_DAEMON_PORT=3006 $VYOMAD_BIN --socket-path /run/vyoma/node2.sock --http-port 3006 > $HOME2/daemon.log 2>&1 &
 PID2=$!
 
 sleep 3
 
-IGN1="$IGN_BIN --socket-path /run/ignite/node1.sock --http-port 3005"
-IGN2="$IGN_BIN --socket-path /run/ignite/node2.sock --http-port 3006"
+VYOMA1="$VYOMA_BIN --socket-path /run/vyoma/node1.sock --http-port 3005"
+VYOMA2="$VYOMA_BIN --socket-path /run/vyoma/node2.sock --http-port 3006"
 
 # 1. Init Swarm
 echo "Initializing Swarm on Node 1..."
-$IGN1 swarm init
+$VYOMA1 swarm init
 assert_success "Swarm Init"
 
 # 2. Join Swarm
 echo "Joining Node 2 to Node 1..."
 # Syntax: ign swarm join <IP>
-IGNITE_DAEMON_PORT=3005 $IGN2 swarm join 127.0.0.1
+IGNITE_DAEMON_PORT=3005 $VYOMA2 swarm join 127.0.0.1
 assert_success "Swarm Join"
 
 # 3. List Nodes
 echo "Listing Nodes..."
-NODES=$($IGN1 swarm ls)
+NODES=$($VYOMA1 swarm ls)
 echo "$NODES"
 if echo "$NODES" | grep -q "machine_id"; then
      echo -e "${GREEN}Pass: Nodes listed${NC}"
