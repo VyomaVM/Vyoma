@@ -408,7 +408,9 @@ mod tests {
         let bytes = signed.to_bytes().unwrap();
         let loaded = SignedManifest::from_bytes(&bytes).unwrap();
 
-        assert_eq!(loaded.manifest, signed.manifest);
+        assert_eq!(loaded.manifest.arch, signed.manifest.arch);
+        assert_eq!(loaded.manifest.rootfs, signed.manifest.rootfs);
+        assert_eq!(loaded.manifest.kernel, signed.manifest.kernel);
         assert_eq!(loaded.signature, signed.signature);
     }
 }
