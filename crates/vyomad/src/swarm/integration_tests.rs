@@ -214,10 +214,10 @@ mod tests {
         let spec = crate::swarm::ServiceSpec {
             image: "nginx:latest".to_string(),
             replicas: 3,
-            ports: vec![
-                crate::swarm::PortMapping { host: 80, vm: 80 },
-                crate::swarm::PortMapping { host: 443, vm: 443 },
-            ],
+             ports: vec![
+                 vyoma_core::api::PortMapping { host_port: 80, vm_port: 80 },
+                 vyoma_core::api::PortMapping { host_port: 443, vm_port: 443 },
+             ],
         };
 
         let create_cmd = SwarmCommand::CreateService {

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use tracing::info;
+use vyoma_core::api::PortMapping;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SwarmCommand {
@@ -33,14 +34,10 @@ pub enum SwarmCommand {
 pub struct ServiceSpec {
     pub image: String,
     pub replicas: u32,
-    pub ports: Vec<PortMapping>,
+    pub ports: Vec<vyoma_core::api::PortMapping>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PortMapping {
-    pub host: u16,
-    pub vm: u16,
-}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInfo {
@@ -466,7 +463,7 @@ mod tests {
         let spec = ServiceSpec {
             image: "nginx:latest".to_string(),
             replicas: 2,
-            ports: vec![PortMapping { host: 80, vm: 80 }],
+            ports: vec![vyoma_core::api::PortMapping { host_port: 80, vm_port: 80 }],
         };
         
         let cmd = SwarmCommand::CreateService {

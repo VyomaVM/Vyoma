@@ -34,11 +34,14 @@ impl VmService for GrpcVmService {
         let req = request.into_inner();
         info!("gRPC: Request to create VM: {} (image: {})", req.name, req.image);
 
-        // Convert protobuf types to internal types
-        let ports: Vec<PortMapping> = req.ports.into_iter().map(|p| PortMapping {
-            host_port: p.host as u16,
-            vm_port: p.vm as u16,
-        }).collect();
+        // Convert protobuf types to internal types with validation
+        let ports: Vec<PortMapping> = req.ports.into_iter().map(|p| {
+            let host_port = u16::try_from(p.host)
+                .map_err(|_| Status::invalid_argument(format!("host port {} out of range", p.host)))?;
+            let vm_port = u16::try_from(p.vm)
+                .map_err(|_| Status::invalid_argument(format!("vm port {} out of range", p.vm)))?;
+            Ok(PortMapping { host_port, vm_port })
+        }).collect::<Result<Vec<_>, Status>>()?;
 
         let volumes: Vec<VolumeMount> = req.volumes.into_iter().map(|v| VolumeMount {
             host_path: v.host_path,
