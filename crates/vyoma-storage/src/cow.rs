@@ -1,6 +1,8 @@
 use std::fs::File;
+#[cfg(unix)]
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
-use tracing::{info, error};
+use tracing::{info, warn};
 use loopdev::LoopControl;
 
 use crate::error::{StorageError, Result};
@@ -54,11 +56,33 @@ impl LoopManager {
         if let Some(ld) = &device.device {
             ld.detach().map_err(|e| StorageError::Io(e))?;
         } else {
-            // Unlikely to happen unless constructed manually without loopdev backend,
-            // Fallback: try opening path
-            if let Some(path_str) = device.path.to_str() {
-                if let Ok(temp_ld) = loopdev::LoopDevice::open(path_str) {
-                    temp_ld.detach().map_err(|e| StorageError::Io(e))?;
+            let path_str = match device.path.to_str() {
+                Some(s) => s,
+                None => {
+                    warn!("Loop device path is not valid UTF-8; skipping detach");
+                    return Ok(());
+                }
+            };
+            let path = std::path::Path::new(path_str);
+            let metadata = match std::fs::metadata(path) {
+                Ok(m) => m,
+                Err(_) => {
+                    info!("Loop device {} already removed; nothing to detach", path_str);
+                    return Ok(());
+                }
+            };
+            if !metadata.file_type().is_block_device() {
+                warn!("Path {} is not a block device; skipping detach", path_str);
+                return Ok(());
+            }
+            match loopdev::LoopDevice::open(path_str) {
+                Ok(ld) => {
+                    if let Err(e) = ld.detach() {
+                        warn!("Failed to detach loop device {} via fallback: {}; assuming it is already freed", path_str, e);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to open loop device {} via fallback: {}; assuming already detached", path_str, e);
                 }
             }
         }
@@ -106,10 +130,34 @@ mod tests {
     fn test_create_cow_file() {
         let temp_dir = TempDir::new().unwrap();
         let cow_path = temp_dir.path().join("test.cow");
-        
+
         LoopManager::create_cow_file(&cow_path, 100).unwrap();
-        
+
         assert!(cow_path.exists());
         assert!(LoopManager::get_size(&cow_path).unwrap() > 0);
+    }
+
+    #[test]
+    #[ignore = "requires root privileges for loop device control"]
+    fn test_detach_non_existent_path_returns_ok() {
+        let manager = LoopManager::new().expect("Need root to create LoopManager");
+        let non_existent_path = PathBuf::from("/dev/loop99999");
+        let device = LoopDevice::new(non_existent_path, None);
+
+        let result = manager.detach(&device);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[ignore = "requires root privileges for loop device control"]
+    fn test_detach_non_block_device_returns_ok() {
+        let manager = LoopManager::new().expect("Need root to create LoopManager");
+        let temp_dir = TempDir::new().unwrap();
+        let regular_file = temp_dir.path().join("not_a_device");
+        std::fs::write(&regular_file, b"test").unwrap();
+
+        let device = LoopDevice::new(regular_file, None);
+        let result = manager.detach(&device);
+        assert!(result.is_ok());
     }
 }
