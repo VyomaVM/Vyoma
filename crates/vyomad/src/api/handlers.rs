@@ -2,12 +2,9 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::sse::{Event, Sse},
-    routing::{get, post},
-    Json, Router,
+    Json,
     body::Body,
 };
-use tower_http::cors::CorsLayer;
-use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 // use tokio_stream::StreamExt;
 use futures::stream::Stream;
@@ -17,29 +14,22 @@ use futures::StreamExt;
 use tokio_util::io::StreamReader;
 use uuid;
 use tempfile;
-use openraft::raft::{AppendEntriesRequest, InstallSnapshotRequest, VoteRequest};
-use vyoma_teleport::{MigrationProgress, Teleporter, TeleportReceiver, VmInfo};
-use openraft::Raft;
-use std::process::Command;
+use vyoma_teleport::{VmInfo};
 use vyoma_core::api::{PortMapping, VolumeMount};
-use vyoma_core::cgroups::CgroupManager;
 use vyoma_core::fs::VirtioFsManager;
 use vyoma_core::policy::PolicyStatus;
 use vyoma_core::proxy::ProxyManager;
 use vyoma_core::vmm::VmmManager;
-use vyoma_build;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use reqwest::{Client, Method};
-use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
 use std::path::PathBuf;
 use tracing::{error, info, warn};
 
-use crate::dns;
 use crate::swarm;
 use crate::state::{AppState, VmInstance, VmState, VmStatus, wal::WalEntry};
 use crate::vm_service::state as vm_service_state;
@@ -421,6 +411,7 @@ pub async fn restore_vm(
         mem_size_mib: 512,
         networks: vec![],
         vtpm_manager: None,
+        attestation_status: None,
     };
 
     {
@@ -731,7 +722,7 @@ pub async fn build_image(
     };
 
     // 6. Execute build using VM-isolated BuildRunner
-    let build_runner = vyoma_build::BuildRunner::new(work_dir.clone())
+    let mut build_runner = vyoma_build::BuildRunner::new(work_dir.clone())
         .with_measured(measured, signing_key_path);
     let build_result = build_runner
         .build(&vyomafile_path, &context_dir, &build_id)
@@ -1206,53 +1197,6 @@ pub struct RegisterResponse {
     pub peers: Vec<SwarmNodeInfo>,
 }
 
-#[deprecated(since = "0.2.0", note = "Use /swarm/join instead - registration is now Raft-based")]
-pub async fn swarm_register_handler(
-    State(state): State<AppState>,
-    Json(node): Json<LegacyNodeInfo>,
-) -> Result<Json<RegisterResponse>, (StatusCode, String)> {
-    info!("Deprecated /swarm/register called - redirecting to Raft-based flow");
-    
-    let node_id = node.id.parse::<u64>()
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid node ID format".to_string()))?;
-    
-    let mut swarm_raft = state.swarm_raft.lock().unwrap();
-    
-    if !swarm_raft.is_initialized() {
-        let addr = format!("{}:7946", get_outbound_ip());
-        swarm_raft.bootstrap(addr, format!("init_key_{}", node_id), node.wireguard_public_key.clone(), node.wireguard_port)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    }
-    
-    swarm_raft.add_node(
-        node_id,
-        node.ip,
-        node.id.clone(),
-        node.wireguard_public_key,
-        node.wireguard_port,
-    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    
-    let peers: Vec<SwarmNodeInfo> = swarm_raft.get_nodes().iter().map(|n| {
-        SwarmNodeInfo {
-            id: n.id,
-            addr: n.addr.clone(),
-            public_key: n.public_key.clone(),
-            wireguard_key: n.wireguard_key.clone(),
-            wireguard_port: n.wireguard_port,
-            subnet_id: n.subnet_id,
-            is_leader: n.is_leader,
-        }
-    }).collect();
-    
-    let subnet_id = ((node_id % 254) + 1) as u8;
-    
-    Ok(Json(RegisterResponse {
-        node_id,
-        subnet_id,
-        peers,
-    }))
-}
-
 pub async fn events_handler(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
@@ -1704,44 +1648,6 @@ pub async fn teleport_status_handler(
         }))
     } else {
         Err((StatusCode::NOT_FOUND, "Session not found".to_string()))
-    }
-}
-
-// --- Raft Core API Handlers ---
-
-pub async fn raft_append_handler(
-    State(state): State<AppState>,
-    Json(req): Json<AppendEntriesRequest<crate::swarm::raft_types::SwarmConfig>>,
-) -> Result<Json<openraft::raft::AppendEntriesResponse<crate::swarm::raft_types::NodeId>>, (StatusCode, String)> {
-    if let Some(raft) = &state.raft {
-        let resp = raft.append_entries(req).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        Ok(Json(resp))
-    } else {
-        Err((StatusCode::INTERNAL_SERVER_ERROR, "Raft not running".into()))
-    }
-}
-
-pub async fn raft_snapshot_handler(
-    State(state): State<AppState>,
-    Json(req): Json<InstallSnapshotRequest<crate::swarm::raft_types::SwarmConfig>>,
-) -> Result<Json<openraft::raft::InstallSnapshotResponse<crate::swarm::raft_types::NodeId>>, (StatusCode, String)> {
-    if let Some(raft) = &state.raft {
-        let resp = raft.install_snapshot(req).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        Ok(Json(resp))
-    } else {
-        Err((StatusCode::INTERNAL_SERVER_ERROR, "Raft not running".into()))
-    }
-}
-
-pub async fn raft_vote_handler(
-    State(state): State<AppState>,
-    Json(req): Json<VoteRequest<crate::swarm::raft_types::NodeId>>,
-) -> Result<Json<openraft::raft::VoteResponse<crate::swarm::raft_types::NodeId>>, (StatusCode, String)> {
-    if let Some(raft) = &state.raft {
-        let resp = raft.vote(req).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        Ok(Json(resp))
-    } else {
-        Err((StatusCode::INTERNAL_SERVER_ERROR, "Raft not running".into()))
     }
 }
 
