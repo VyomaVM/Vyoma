@@ -77,7 +77,7 @@ async fn handle_conn(buf: &[u8], state: &AppState) -> anyhow::Result<Vec<u8>> {
              
              // 1. Get Candidates (Sync)
              let candidates = {
-                 let vms = state.vms.lock().unwrap();
+                 let vms = state.vms.lock().await;
                  if let Some(vm_arc) = vms.get(&search_name) {
                      vec![vm_arc.clone()]
                  } else {
