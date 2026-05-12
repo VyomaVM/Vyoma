@@ -5,6 +5,7 @@
 README.md
 COMMANDS.md
 CHANGELOG.md
+vyoma-technical-spec.md
 LICENSE
 cleanup_resources.sh
 mock_cni.sh
