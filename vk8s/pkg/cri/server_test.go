@@ -8,7 +8,7 @@ import (
 )
 
 func TestPodSandboxCreation(t *testing.T) {
-	server := &IgniteCriServer{
+	server := &VyomaCriServer{
 		pods: make(map[string]*PodSandbox),
 	}
 
@@ -55,7 +55,7 @@ func TestPodSandboxState(t *testing.T) {
 }
 
 func TestListPodSandbox(t *testing.T) {
-	server := &IgniteCriServer{
+	server := &VyomaCriServer{
 		pods: map[string]*PodSandbox{
 			"pod-1": {ID: "pod-1", Name: "pod-1", State: pb.PodSandboxState_SANDBOX_READY},
 			"pod-2": {ID: "pod-2", Name: "pod-2", State: pb.PodSandboxState_SANDBOX_NOTREADY},
@@ -76,7 +76,7 @@ func TestListPodSandbox(t *testing.T) {
 }
 
 func TestPodSandboxStatus(t *testing.T) {
-	server := &IgniteCriServer{
+	server := &VyomaCriServer{
 		pods: map[string]*PodSandbox{
 			"pod-1": {ID: "pod-1", Name: "test-pod", State: pb.PodSandboxState_SANDBOX_READY},
 		},
@@ -97,7 +97,7 @@ func TestPodSandboxStatus(t *testing.T) {
 }
 
 func TestRemovePodSandbox(t *testing.T) {
-	server := &IgniteCriServer{
+	server := &VyomaCriServer{
 		pods: map[string]*PodSandbox{
 			"pod-1": {ID: "pod-1", Name: "test-pod", State: pb.PodSandboxState_SANDBOX_READY, VMID: "vm-1"},
 		},
@@ -118,7 +118,7 @@ func TestRemovePodSandbox(t *testing.T) {
 }
 
 func TestContainerCreation(t *testing.T) {
-	server := &IgniteCriServer{
+	server := &VyomaCriServer{
 		pods: map[string]*PodSandbox{
 			"pod-1": {ID: "pod-1", Name: "test-pod", State: pb.PodSandboxState_SANDBOX_READY, VMID: "vm-1"},
 		},
@@ -144,7 +144,7 @@ func TestContainerCreation(t *testing.T) {
 }
 
 func TestContainerStatus(t *testing.T) {
-	server := &IgniteCriServer{}
+	server := &VyomaCriServer{}
 
 	req := &pb.ContainerStatusRequest{
 		ContainerId: "container-1",
