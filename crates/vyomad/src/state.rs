@@ -28,6 +28,7 @@ pub struct AppState {
     pub network_integration: Arc<StdMutex<Option<NetworkIntegration>>>,
     pub timemachine: Arc<tokio::sync::RwLock<crate::timemachine::TimeMachine>>,
     pub policy_manager: Arc<StdMutex<PolicyManager>>,
+    pub api_token: Option<String>,
 }
 
 impl AppState {
@@ -47,6 +48,7 @@ impl AppState {
             network_integration: Arc::new(StdMutex::new(None)),
             timemachine: Arc::new(tokio::sync::RwLock::new(crate::timemachine::TimeMachine::new_test())),
             policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
+            api_token: None,
         }
     }
 
@@ -62,6 +64,7 @@ impl AppState {
             network_integration: self.network_integration.clone(),
             timemachine: self.timemachine.clone(),
             policy_manager: self.policy_manager.clone(),
+            api_token: None,
         }
     }
 }

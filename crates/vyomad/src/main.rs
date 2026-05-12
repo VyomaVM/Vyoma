@@ -22,6 +22,7 @@ mod dns;
 mod ui;
 mod state;
 mod api;
+mod auth;
 mod swarm;
 mod metrics;
 mod timemachine;
@@ -49,6 +50,15 @@ struct Args {
     /// HTTP port for dashboard (default: 3000, use 0 to disable)
     #[arg(short = 'p', long, default_value_t = 3000)]
     http_port: u16,
+    /// HTTP bind IP address (defaults to 127.0.0.1 for security)
+    /// Use 0.0.0.0 for remote access (requires --api-token for authentication)
+    #[arg(long, default_value = "127.0.0.1")]
+    http_bind_ip: String,
+    /// API authentication token (optional)
+    /// When set, all API endpoints require Authorization: Bearer <token>
+    /// Can also be set via VYOMA_API_TOKEN environment variable
+    #[arg(long)]
+    api_token: Option<String>,
     /// Data directory containing kernel and firecracker binaries
     #[arg(short, long, default_value = "/var/lib/vyoma")]
     data_dir: String,
@@ -159,6 +169,9 @@ async fn main() {
     
     let swarm_raft = Arc::new(std::sync::Mutex::new(swarm_raft));
     
+    // Get API token from CLI arg or environment variable
+    let api_token = args.api_token.clone().or_else(|| std::env::var("VYOMA_API_TOKEN").ok());
+
     let state = AppState {
         vms: Arc::new(StdMutex::new(HashMap::new())),
         cgroups,
@@ -170,6 +183,7 @@ async fn main() {
         network_integration,
         timemachine,
         policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
+        api_token,
     };
 
     api::handlers::initialize_state(&state).await;
@@ -181,8 +195,8 @@ async fn main() {
 
     let shutdown_state = state.clone();
 
-    let app = Router::new()
-        .route("/health", get(handlers::health_check))
+    // Create API routes with auth middleware
+    let api_routes = Router::new()
         .route("/run", post(handlers::run_vm))
         .route("/pull", post(handlers::pull_image_handler))
         .route("/stop/:id", post(handlers::stop_vm))
@@ -217,6 +231,15 @@ async fn main() {
         .route("/adopt-teleported-vm", post(handlers::adopt_teleported_vm))
         .route("/policy", get(handlers::get_policy_handler).post(handlers::set_policy_handler))
         .route("/attest/:id", post(handlers::attest_vm_handler))
+        .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth::auth_middleware));
+
+    // Health check and UI are public (no auth required)
+    let public_routes = Router::new()
+        .route("/health", get(handlers::health_check));
+
+    // Combine: public routes + API routes (with auth) + UI fallback (public)
+    let app = public_routes
+        .merge(api_routes)
         .fallback(ui::ui_handler)
         .layer(CorsLayer::permissive())
         .with_state(state.clone());
@@ -275,9 +298,18 @@ async fn main() {
     // Start HTTP server for dashboard if port is not 0
     if args.http_port > 0 {
         let http_app = app.clone();
+        let api_token = args.api_token.clone();
         tokio::spawn(async move {
-            let addr = format!("0.0.0.0:{}", args.http_port);
-            info!("Dashboard available at http://localhost:{}", args.http_port);
+            let addr = format!("{}:{}", args.http_bind_ip, args.http_port);
+            // Warn if binding to non-localhost address
+            if !args.http_bind_ip.starts_with("127.") && args.http_bind_ip != "::1" && args.http_bind_ip != "localhost" {
+                if api_token.is_none() {
+                    warn!("HTTP server bound on non-localhost address {} WITHOUT authentication! Use --api-token for security", addr);
+                } else {
+                    warn!("HTTP server bound on non-localhost address {} with authentication enabled", addr);
+                }
+            }
+            info!("Dashboard available at http://{}", addr);
             let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
             loop {
                 match listener.accept().await {
