@@ -21,7 +21,6 @@ pub struct AppState {
     pub vms: Arc<StdMutex<HashMap<String, Arc<TokioMutex<VmInstance>>>>>,
     pub cgroups: Arc<CgroupManager>,
     pub cni_manager: Arc<vyoma_core::cni::CniManager>,
-    pub rootless: bool,
     pub events_tx: broadcast::Sender<String>,
     pub wal: Arc<wal::Wal>,
     pub data_dir: String,
@@ -41,7 +40,6 @@ impl AppState {
                 std::path::PathBuf::from("/tmp/test-cni-plugins"),
                 std::path::PathBuf::from("/tmp/test-cni-config"),
             )),
-            rootless: true,
             events_tx,
             wal: Arc::new(wal::Wal::new_test()),
             data_dir: "/tmp/test".to_string(),
@@ -57,7 +55,6 @@ impl AppState {
             vms: self.vms.clone(),
             cgroups: self.cgroups.clone(),
             cni_manager: self.cni_manager.clone(),
-            rootless: self.rootless,
             events_tx: self.events_tx.clone(),
             wal: self.wal.clone(),
             data_dir: self.data_dir.clone(),
@@ -96,8 +93,6 @@ pub struct VmInstance {
     pub proxy_tasks: Vec<JoinHandle<()>>,
 
     pub fs_managers: Vec<VirtioFsManager>,
-    #[allow(dead_code)]
-    pub slirp: Option<vyoma_core::slirp::SlirpManager>,
     pub vtpm_manager: Option<VtpmManager>,
     pub cgroup_path: Option<String>,
     pub netns_path: Option<String>,

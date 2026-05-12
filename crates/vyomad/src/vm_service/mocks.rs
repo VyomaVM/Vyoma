@@ -195,7 +195,6 @@ pub trait BootProvider: Send + Sync {
     ) -> anyhow::Result<(
         MockVmmManager,
         Vec<tokio::task::JoinHandle<()>>,
-        Option<vyoma_core::slirp::SlirpManager>,
         Vec<vyoma_core::fs::VirtioFsManager>,
     )>;
 }
@@ -219,12 +218,11 @@ impl BootProvider for MockBootProvider {
     ) -> anyhow::Result<(
         MockVmmManager,
         Vec<tokio::task::JoinHandle<()>>,
-        Option<vyoma_core::slirp::SlirpManager>,
         Vec<vyoma_core::fs::VirtioFsManager>,
     )> {
         let mut vmm = MockVmmManager::new(&ch_config.socket_path);
         vmm.mark_started();
-        Ok((vmm, vec![], None, vec![]))
+        Ok((vmm, vec![], vec![]))
     }
 }
 

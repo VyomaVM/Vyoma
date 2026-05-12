@@ -27,27 +27,7 @@ pub async fn setup_network(
     vm_id: &str,
     networks: &[String],
 ) -> Result<VmNetworkConfig> {
-    if state.rootless {
-        setup_rootless_network()
-    } else {
-        setup_privileged_network(state, vm_id, networks).await
-    }
-}
-
-fn setup_rootless_network() -> Result<VmNetworkConfig> {
-    Ok(VmNetworkConfig {
-        ip_address: "10.0.2.15".to_string(),
-        primary_tap: "tap0".to_string(),
-        gateway: String::new(),
-        network_infos: vec![NetworkInfo {
-            ip: "10.0.2.15".to_string(),
-            tap_name: "tap0".to_string(),
-            gateway: None,
-            interface_name: "eth0".to_string(),
-            network_name: "slirp".to_string(),
-        }],
-        netns_path: None,
-    })
+    setup_privileged_network(state, vm_id, networks).await
 }
 
 async fn setup_privileged_network(

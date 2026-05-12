@@ -337,7 +337,7 @@ pub async fn restore_vm(
     let socket_path = vm_dir.join("ch.sock").to_string_lossy().to_string();
     let mut vmm = VmmManager::new(&socket_path);
 
-    if let Err(e) = vmm.start_daemon(&format!("{}/bin/cloud-hypervisor", state.data_dir), None, state.rootless) {
+    if let Err(e) = vmm.start_daemon(&format!("{}/bin/cloud-hypervisor", state.data_dir), None, false) {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to start Cloud Hypervisor: {}", e),
@@ -391,7 +391,6 @@ pub async fn restore_vm(
         ch_socket_path: socket_path.clone(),
         tap_name: tap_name.clone(),
         dm_name: dm_name.clone(),
-        slirp: None,
         loop_devices: vec![base_loop, cow_loop],
         cow_file_path: cow_file.to_string_lossy().to_string(),
         ip_address: vm_ip.clone(),
@@ -825,7 +824,6 @@ pub async fn initialize_state(state: &AppState) {
                 ip_address: vm_state.ip_address,
                 proxy_tasks,
                 fs_managers,
-                slirp: None,
                 cgroup_path: vm_state.cgroup_path,
                 netns_path: vm_state.netns_path,
                 config_ports: vm_state.ports,
@@ -863,7 +861,6 @@ pub async fn initialize_state(state: &AppState) {
                 ip_address: vm_state.ip_address,
                 proxy_tasks: vec![],
                 fs_managers: vec![],
-                slirp: None,
                 cgroup_path: vm_state.cgroup_path,
                 netns_path: vm_state.netns_path,
                 config_ports: vec![],
@@ -1330,7 +1327,6 @@ pub async fn adopt_teleported_vm(
         ip_address: String::new(),
         proxy_tasks: Vec::new(),
         fs_managers: Vec::new(),
-        slirp: None,
         cgroup_path: None,
         netns_path: None,
         config_ports: Vec::new(),
@@ -1595,7 +1591,7 @@ pub async fn receive_teleport_handler(
     let mut vmm = VmmManager::new(&ch_socket);
 
     // Start Cloud Hypervisor
-    if let Err(e) = vmm.start_daemon(&format!("{}/bin/cloud-hypervisor", state.data_dir), None, state.rootless) {
+    if let Err(e) = vmm.start_daemon(&format!("{}/bin/cloud-hypervisor", state.data_dir), None, false) {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to start Cloud Hypervisor: {}", e),

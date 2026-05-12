@@ -158,7 +158,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         &kernel_path,
     );
 
-    let (vmm, proxy_tasks, slirp_mgr, fs_managers, mut vtpm_manager) = match boot::start_vm(
+    let (vmm, proxy_tasks, fs_managers, mut vtpm_manager) = match boot::start_vm(
         &state,
         &ch_config,
         &network_config,
@@ -216,18 +216,13 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         status: VmStatus::PendingAttestation,
         attestation_status: None,
         ch_socket_path: ch_config.socket_path.clone(),
-        tap_name: if state.rootless {
-            String::new()
-        } else {
-            network_config.primary_tap.clone()
-        },
+        tap_name: network_config.primary_tap.clone(),
         dm_name: storage.dm_name.clone(),
         loop_devices: storage.loop_devices.clone(),
         cow_file_path: storage.cow_file_path.clone(),
         ip_address: network_config.ip_address.clone(),
         proxy_tasks,
         fs_managers,
-        slirp: slirp_mgr,
         vtpm_manager,
         cgroup_path: setup_cgroups(&state, &vm_id, request.vcpu, request.mem_size_mib)?,
         netns_path: network_config.netns_path.clone(),

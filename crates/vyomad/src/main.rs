@@ -163,7 +163,6 @@ async fn main() {
         vms: Arc::new(StdMutex::new(HashMap::new())),
         cgroups,
         cni_manager,
-        rootless: false,
         events_tx,
         wal,
         data_dir: args.data_dir.clone(),

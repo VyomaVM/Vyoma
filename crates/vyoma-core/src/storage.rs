@@ -41,10 +41,6 @@ impl StorageManager {
     }
 
     pub fn populate_image(image_path: &Path, source_dir: &Path) -> Result<()> {
-        if !crate::rootless::RootlessManager::is_root() {
-            return Self::populate_image_rootless(image_path, source_dir);
-        }
-        
         let mount_point = tempfile::tempdir()?;
         let mount_path = mount_point.path();
         
@@ -85,55 +81,7 @@ impl StorageManager {
             warn!("Failed to unmount {:?}. You may need to do it manually.", mount_path);
         }
 
-        Ok(())
-    }
-
-    pub fn populate_image_rootless(image_path: &Path, source_dir: &Path) -> Result<()> {
-         info!("Populating {:?} using debugfs (rootless)", image_path);
-        
-        let mut script = String::new();
-        let mut stack = vec![source_dir.to_path_buf()];
-        
-        while let Some(current_path) = stack.pop() {
-            for entry in std::fs::read_dir(&current_path)? {
-                 let entry = entry?;
-                 let path = entry.path();
-                 let rel_path = path.strip_prefix(source_dir)?.to_string_lossy().into_owned();
-                 let vm_path = format!("/{}", rel_path);
-                 
-                 let file_type = entry.file_type()?;
-                 if file_type.is_dir() {
-                     script.push_str(&format!("mkdir \"{}\"\n", vm_path));
-                     stack.push(path);
-                 } else if file_type.is_file() {
-                     script.push_str(&format!("write \"{}\" \"{}\"\n", path.to_string_lossy(), vm_path));
-                 } else if file_type.is_symlink() {
-                      let target = std::fs::read_link(&path)?;
-                      script.push_str(&format!("symlink \"{}\" \"{}\"\n", vm_path, target.to_string_lossy()));
-                 }
-             }
-        }
-        
-        use std::io::Write;
-        let mut temp_script = tempfile::Builder::new().suffix(".debugfs").tempfile()?;
-        write!(temp_script, "{}", script)?;
-        
-        let script_path = temp_script.path().to_owned();
-        
-        let status = Command::new("debugfs")
-            .arg("-w")
-            .arg("-f")
-            .arg(&script_path)
-            .arg(image_path)
-            .stdout(std::process::Stdio::null())
-            .status()
-            .map_err(|e| anyhow!("Failed to execute debugfs: {}", e))?;
-
-        if !status.success() {
-             return Err(anyhow!("debugfs failed with status: {}", status));
-        }
-        
-        Ok(())
+Ok(())
     }
 
     pub fn setup_loop_device(path: &Path) -> Result<String> {

@@ -34,31 +34,7 @@ pub async fn prepare_storage(
     vm_id: &str,
 ) -> Result<PreparedStorage> {
     info!("Preparing VMIF storage for VM {} with squashfs base", vm_id);
-
-    if state.rootless {
-        prepare_rootless_storage(rootfs_sqfs_path, vm_dir, vm_id)
-    } else {
-        prepare_privileged_storage(state, rootfs_sqfs_path, vm_dir, vm_id).await
-    }
-}
-
-fn prepare_rootless_storage(
-    rootfs_sqfs_path: &Path,
-    vm_dir: &Path,
-    _vm_id: &str,
-) -> Result<PreparedStorage> {
-    let vm_disk = vm_dir.join("disk.ext4");
-    info!("Rootless: Copying squashfs base image to {:?}", vm_disk);
-    
-    std::fs::copy(rootfs_sqfs_path, &vm_disk)
-        .context("Rootless copy failed for squashfs")?;
-
-    Ok(PreparedStorage {
-        dm_device_path: vm_disk.to_string_lossy().to_string(),
-        loop_devices: Vec::new(),
-        cow_file_path: vm_disk.to_string_lossy().to_string(),
-        dm_name: "rootless".to_string(),
-    })
+    prepare_privileged_storage(state, rootfs_sqfs_path, vm_dir, vm_id).await
 }
 
 async fn prepare_privileged_storage(
@@ -128,18 +104,16 @@ pub async fn cleanup_storage(storage: &PreparedStorage) -> Result<()> {
         }
     }
 
-    if storage.dm_name != "rootless" {
-        info!("Removing DM device: {}", storage.dm_name);
-        let dm_mgr = match DmManager::new() {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Failed to create DmManager for cleanup: {}", e);
-                return Ok(());
-            }
-        };
-        if let Err(e) = dm_mgr.remove_snapshot(&storage.dm_name) {
-            error!("Failed to remove DM {}: {}", storage.dm_name, e);
+    info!("Removing DM device: {}", storage.dm_name);
+    let dm_mgr = match DmManager::new() {
+        Ok(m) => m,
+        Err(e) => {
+            error!("Failed to create DmManager for cleanup: {}", e);
+            return Ok(());
         }
+    };
+    if let Err(e) = dm_mgr.remove_snapshot(&storage.dm_name) {
+        error!("Failed to remove DM {}: {}", storage.dm_name, e);
     }
 
     if std::path::Path::new(&storage.cow_file_path).exists() {
