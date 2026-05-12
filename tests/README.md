@@ -1,6 +1,6 @@
-# Ignite E2E Tests
+# Vyoma E2E Tests
 
-These tests validate the full functionality of the Ignite ecosystem.
+These tests validate the full functionality of the Vyoma ecosystem.
 
 ## Prerequisities
 *   Root privileges (sudo).
@@ -21,7 +21,7 @@ sudo ./tests/e2e/01_lifecycle.sh
 ## Coverage
 *   01 Lifecycle: Image Pull, Run, Ps, Logs, Stop, Pause, Resume, Restart.
 *   02 Volumes & Ports: Mounts (-v) and Bindings (-p).
-*   03 Builder: Ignitefile build process.
+*   03 Builder: Vyomafile build process.
 *   04 Compose: Up, Down, Scale.
 *   05 Swarm: Init, Join, Ls (Multi-node).
 *   06 Network: Create, Ls, Rm (CNI).

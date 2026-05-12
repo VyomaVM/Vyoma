@@ -2,7 +2,7 @@
 set -e
 source tests/e2e/common.sh
 
-echo "=== Test 03: Builder (Ignitefile) ==="
+echo "=== Test 03: Builder (Vyomafile) ==="
 
 check_root
 setup_env

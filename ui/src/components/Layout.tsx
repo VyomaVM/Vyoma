@@ -50,7 +50,7 @@ export function Layout({ children, activeTab, onTabChange }: LayoutProps) {
               <path d="M32 4C32 4 18 20 18 36c0 7.7 6.3 14 14 14s14-6.3 14-14C46 20 32 4 32 4zm0 40c-4.4 0-8-3.6-8-8 0-6 8-16 8-16s8 10 8 16c0 4.4-3.6 8-8 8z" fill="url(#flame)"/>
             </svg>
           </div>
-          <h1 className="font-bold text-lg tracking-tight text-white">Ignite</h1>
+          <h1 className="font-bold text-lg tracking-tight text-white">Vyoma</h1>
         </div>
 
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
