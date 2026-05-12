@@ -25,26 +25,26 @@
 
 | Crate | Binary | Status | Notes |
 |-------|--------|--------|-------|
-| `crates/ign` | `/usr/bin/ign` | ✅ Working | CLI, .vyoma20 commands |
+| `crates/vyoma` | `/usr/bin/vyoma` | ✅ Working | CLI, ~20 commands |
 | `crates/vyomad` | `/usr/bin/vyomad` | ✅ Working | Daemon, runs as root |
 | `crates/vyoma-core` | library | ✅ Working | OCI, storage, network, vmm |
-| `crates/vyoma-compose` | library | ✅ Working | compose YAML parsing, `ign up/down` |
+| `crates/vyoma-compose` | library | ✅ Working | compose YAML parsing, `vyoma up/down` |
 | `crates/ui` | — | ✅ Working | TypeScript/React dashboard at `:3000` |
 
 ### 1.2 Confirmed Working (Do Not Break)
 
 - `vyoma run <image> --vcpu N --memory MB -p H:V -v H:V --name N`
-- `ign ps`, `ign stop`, `ign rm`, `ign start`, `ign restart`
-- `ign logs -f`, `ign exec <id> <cmd>`
-- `vyoma pull`, `ign build -t <tag> .` (FROM, RUN, COPY only)
-- `ign snapshot`, `ign restore`, `ign export`, `ign import`
-- `ign network create/ls/rm`
-- `ign up -d`, `ign down`, `ign scale <svc>=N`
-- `ign swarm init`, `ign swarm join <ip>`, `ign swarm ls`
-- `ign doctor`
+- `vyoma ps`, `vyoma stop`, `vyoma rm`, `vyoma start`, `vyoma restart`
+- `vyoma logs -f`, `vyoma exec <id> <cmd>`
+- `vyoma pull`, `vyoma build -t <tag> .` (FROM, RUN, COPY only)
+- `vyoma snapshot`, `vyoma restore`, `vyoma export`, `vyoma import`
+- `vyoma network create/ls/rm`
+- `vyoma up -d`, `vyoma down`, `vyoma scale <svc>=N`
+- `vyoma swarm init`, `vyoma swarm join <ip>`, `vyoma swarm ls`
+- `vyoma doctor`
 - OCI pull from Docker Hub (custom reqwest client, handles Index vs V2 Manifest)
 - Device Mapper snapshots for instant clone (dm-snapshot via `dmsetup` CLI calls)
-- TAP + Linux bridge (`ign0`) networking with NAT
+- TAP + Linux bridge (`vyoma0`) networking with NAT
 - CNI integration (bridge/ptp plugins)
 - Internal DNS on gateway IP (172.16.0.1:53)
 - Virtiofs volume mounts (external `virtiofsd` binary required)
@@ -62,7 +62,7 @@
 4. **No WAL / crash recovery** — ADR-008 acknowledged daemon restart loses running VM control handles. ADR consequence: "Future task: State persistence/recovery" — never implemented properly. JSON state files partially address this but have no crash-safe write path.
 
 #### IMPORTANT — blocks cluster production use
-5. **Compose schema `version: "1.0"` is incompatible with Docker Compose v3** — Users cannot `ign up` from existing `docker-compose.yml` without manual edits. `networks:` top-level key is not supported. All services share one default bridge.
+5. **Compose schema `version: "1.0"` is incompatible with Docker Compose v3** — Users cannot `vyoma up` from existing `docker-compose.yml` without manual edits. `networks:` top-level key is not supported. All services share one default bridge.
 6. **Swarm VXLAN traffic is unencrypted plaintext** — No WireGuard or any encryption on the overlay. Multi-tenant or cloud deployment is insecure.
 7. **Swarm uses seed-node model** — Single point of failure. No documented recovery if seed goes down.
 8. **Git-based time travel is a hack** — Using `git commit` on snapshot files works but: (a) git binary is an external dep, (b) it has no delta storage, (c) checkout semantics are wrong for VM state, (d) not atomic.
@@ -71,8 +71,8 @@
 9. **CLI system calls (ADR-002)** — `std::process::Command` wrapping `dmsetup`, `losetup`, `iptables`, `ip link` works but is fragile. Error handling is string parsing of stderr.
 10. **No gRPC interface** — REST-only API blocks Kubernetes CRI implementation.
 11. **No VMIF image format** — Images are raw OCI converted at runtime every pull. No signing, no caching spec, no defined format for the Hub.
-12. **`ign commit`, `ign save`, `ign load` missing** — Referenced in docs but not implemented.
-13. **`ign rm` behavior unclear** — Must clean up: DM snapshot, loop device, COW file, tap device, state JSON.
+12. **`vyoma commit`, `vyoma save`, `vyoma load` missing** — Referenced in docs but not implemented.
+13. **`vyoma rm` behavior unclear** — Must clean up: DM snapshot, loop device, COW file, tap device, state JSON.
 14. **Environment variable injection** — `environment:` key in compose YAML is WIP (noted in README).
 
 ---
@@ -87,7 +87,7 @@ Add these crates progressively through the phases. Each gets its own `crates/<na
 # Cargo.toml (workspace root) — Target state
 [workspace]
 members = [
-    "crates/ign",             # CLI binary
+    "crates/vyoma",             # CLI binary
     "crates/vyomad",         # Daemon binary
     "crates/vyoma-core",     # VM lifecycle, OCI, storage, network, vmm
     "crates/vyoma-compose",  # Compose YAML schema + orchestrator
@@ -253,7 +253,7 @@ micro-vm-ecosystem/
 
 #### 3.1.1 What to Build
 
-When `vyoma pull <image>` or `ign build` runs, extract the OCI image config JSON and persist it alongside the ext4 rootfs. When `vyoma run` starts a VM, inject the config values as a small init wrapper.
+When `vyoma pull <image>` or `vyoma build` runs, extract the OCI image config JSON and persist it alongside the ext4 rootfs. When `vyoma run` starts a VM, inject the config values as a small init wrapper.
 
 #### 3.1.2 Implementation
 
@@ -366,7 +366,7 @@ let boot_args = format!(
 );
 ```
 
-**Step 5**: For the Vyomafile `CMD`, `ENTRYPOINT`, `ENV` directives in `ign build`:
+**Step 5**: For the Vyomafile `CMD`, `ENTRYPOINT`, `ENV` directives in `vyoma build`:
 
 ```rust
 // crates/vyoma-core/src/oci.rs - Vyomafile parser extension
@@ -389,7 +389,7 @@ pub enum VyomafileInstruction {
 }
 ```
 
-After `ign build` completes, serialize the accumulated `CMD`/`ENTRYPOINT`/`ENV` into `vyoma-config.json` in the image cache.
+After `vyoma build` completes, serialize the accumulated `CMD`/`ENTRYPOINT`/`ENV` into `vyoma-config.json` in the image cache.
 
 ### 3.2 Bundle virtiofsd — Make `-v` Work on Clean Install
 
@@ -441,7 +441,7 @@ fn start_virtiofsd(host_path: &Path, socket: &Path) -> Result<Child> {
 #### 3.2.3 ign doctor Check
 
 ```rust
-// crates/ign/src/commands/system.rs
+// crates/vyoma/src/commands/system.rs
 
 fn check_virtiofsd(results: &mut Vec<DoctorCheck>) {
     let found = ["/usr/lib/vyoma/virtiofsd", "/usr/bin/virtiofsd"]
@@ -861,7 +861,7 @@ async fn provision_compose_networks(
 }
 ```
 
-### 3.6 Fix `ign rm` Resource Cleanup
+### 3.6 Fix `vyoma rm` Resource Cleanup
 
 **Crate**: `crates/vyomad/src/api/vms.rs` and `vm_manager.rs`  
 **Priority**: P1 — current behavior leaves dangling resources
@@ -924,12 +924,12 @@ pub async fn destroy_vm(&self, vm_id: &str) -> Result<()> {
 }
 ```
 
-### 3.7 Implement `ign commit`, `ign save`, `ign load`
+### 3.7 Implement `vyoma commit`, `vyoma save`, `vyoma load`
 
-**Crate**: `crates/ign/src/commands/image.rs`, `crates/vyomad/src/api/images.rs`  
+**Crate**: `crates/vyoma/src/commands/image.rs`, `crates/vyomad/src/api/images.rs`  
 **Priority**: P2
 
-#### 3.7.1 `ign commit <vm-id> <new-image-tag>`
+#### 3.7.1 `vyoma commit <vm-id> <new-image-tag>`
 
 Pauses the VM, flushes the COW delta to the base image layer to create a new read-only image, then resumes.
 
@@ -970,12 +970,12 @@ pub async fn commit_vm(vm_id: &str, tag: &str, vm_manager: &VmManager) -> Result
 }
 ```
 
-#### 3.7.2 `ign save <image> -o <file.tar.gz>` and `ign load -i <file.tar.gz>`
+#### 3.7.2 `vyoma save <image> -o <file.tar.gz>` and `vyoma load -i <file.tar.gz>`
 
-Bundle the ext4 image file + vyoma-config.json into a compressed tar. This is a simpler version of the existing `ign export` / `ign import` which operates on VM snapshots.
+Bundle the ext4 image file + vyoma-config.json into a compressed tar. This is a simpler version of the existing `vyoma export` / `vyoma import` which operates on VM snapshots.
 
 ```rust
-// crates/ign/src/commands/image.rs
+// crates/vyoma/src/commands/image.rs
 
 pub async fn cmd_save(image: &str, output: &Path, client: &Client) -> Result<()> {
     let resp = client.get_image_export(image).await?;
@@ -1400,7 +1400,7 @@ pub struct WireGuardNode {
 }
 
 impl WireGuardNode {
-    /// Called on `ign swarm init` or `ign swarm join` — generates keypair,
+    /// Called on `vyoma swarm init` or `vyoma swarm join` — generates keypair,
     /// creates a WireGuard interface, and listens for peer configurations.
     pub fn new(listen_port: u16) -> Result<Self> {
         let secret_key = X25519SecretKey::new();
@@ -1441,12 +1441,12 @@ impl WireGuardNode {
 
 #### 5.1.2 Swarm Init/Join Key Exchange
 
-When `ign swarm init` is called:
+When `vyoma swarm init` is called:
 1. Generate WireGuard keypair, store in `/var/lib/vyoma/wg.key`
 2. Start listening on UDP port 51820
 3. Advertise public key + endpoint in the swarm gossip state
 
-When `ign swarm join <seed-ip>` is called:
+When `vyoma swarm join <seed-ip>` is called:
 1. Generate WireGuard keypair
 2. POST to seed node's `/api/v1/swarm/join` with `{ public_key, endpoint, subnet_lease_request }`
 3. Seed responds with its public key + all existing peer public keys
@@ -1494,14 +1494,14 @@ pub async fn create_raft_node(
     Ok(raft)
 }
 
-/// Called on `ign swarm init` — bootstrap a single-node cluster
+/// Called on `vyoma swarm init` — bootstrap a single-node cluster
 pub async fn bootstrap_cluster(raft: &VyomaRaft, node_id: u64, addr: String) -> Result<()> {
     let members = BTreeMap::from([(node_id, BasicNode { addr })]);
     raft.initialize(members).await?;
     Ok(())
 }
 
-/// Called on `ign swarm join` — add this node to existing cluster
+/// Called on `vyoma swarm join` — add this node to existing cluster
 pub async fn join_cluster(
     raft: &VyomaRaft,
     leader_addr: &str,
@@ -1825,10 +1825,10 @@ Extend the existing TypeScript dashboard. Add these views:
 
 The snapshot tree is already built in Phase 2. This phase wires it to the CLI commands.
 
-#### 6.1.1 `ign history <vm-id>`
+#### 6.1.1 `vyoma history <vm-id>`
 
 ```rust
-// crates/ign/src/commands/snapshot.rs
+// crates/vyoma/src/commands/snapshot.rs
 
 pub async fn cmd_history(vm_id: &str, client: &Client) -> Result<()> {
     let history = client.get_snapshot_history(vm_id).await?;
@@ -1849,7 +1849,7 @@ pub async fn cmd_history(vm_id: &str, client: &Client) -> Result<()> {
 }
 ```
 
-#### 6.1.2 `ign time-travel <vm-id> --to snap:N`
+#### 6.1.2 `vyoma time-travel <vm-id> --to snap:N`
 
 ```rust
 pub async fn cmd_time_travel(vm_id: &str, target: &str, client: &Client) -> Result<()> {
@@ -2056,7 +2056,7 @@ func (s *VyomaCriServer) CreateContainer(
 ) (*pb.CreateContainerResponse, error) {
     // The VM is already running (from RunPodSandbox).
     // "Containers" within a pod are processes inside the VM.
-    // We use `ign exec` semantics to run the container command.
+    // We use `vyoma exec` semantics to run the container command.
     
     vm_id := req.PodSandboxId
     cmd := append(req.Config.Command, req.Config.Args...)
@@ -2313,7 +2313,7 @@ The `.deb` produced by CI must contain:
 
 ```
 /usr/bin/vyomad              # Daemon binary
-/usr/bin/ign                  # CLI binary
+/usr/bin/vyoma                # CLI binary
 /usr/lib/vyoma/firecracker   # Bundled Firecracker VMM
 /usr/lib/vyoma/virtiofsd     # Bundled virtiofs daemon (Phase 1)
 /usr/lib/vyoma/kernels/      # Pre-built minimal kernels (Phase 3)
