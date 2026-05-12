@@ -241,6 +241,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
     let status_string = match &instance.status {
         VmStatus::PendingAttestation => "PendingAttestation".to_string(),
         VmStatus::Running => "Running".to_string(),
+        VmStatus::AttestationFailed { reason } => format!("AttestationFailed: {}", reason),
         VmStatus::Error { reason } => format!("Error: {}", reason),
     };
 

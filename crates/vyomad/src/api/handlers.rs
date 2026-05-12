@@ -598,6 +598,7 @@ pub async fn inspect_vm_handler(
         let (status_str, error_reason) = match &vm.status {
             VmStatus::PendingAttestation => ("pending_attestation", None),
             VmStatus::Running => ("running", None),
+            VmStatus::AttestationFailed { reason } => ("attestation_failed", Some(reason.clone())),
             VmStatus::Error { reason } => ("error", Some(reason.clone())),
         };
 

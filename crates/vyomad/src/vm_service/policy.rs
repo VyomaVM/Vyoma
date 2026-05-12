@@ -115,12 +115,23 @@ pub async fn check_policy_and_perform_attestation(
 
                 // Update attestation_status to verified
                 {
-                    let mut vms = state.vms.lock().unwrap();
-                    if let Some(vm_arc) = vms.get(vm_id) {
+                    let vm_arc = {
+                        let mut vms = state.vms.lock().unwrap();
+                        vms.get(&vm_id).cloned()
+                    };
+                    if let Some(vm_arc) = vm_arc {
                         let mut vm = vm_arc.lock().await;
                         vm.attestation_status = Some("VERIFIED".to_string());
                     }
                 }
+
+                // Emit SSE event for attestation success
+                let _ = state.events_tx.send(serde_json::json!({
+                    "type": "vm_attestation",
+                    "vm_id": vm_id,
+                    "verified": true,
+                    "error": null
+                }).to_string());
 
                 Ok(())
             } else {
@@ -444,12 +455,23 @@ async fn handle_attestation_failure(state: &Arc<AppState>, vm_id: &str, reason: 
 
     // Update attestation_status field
     {
-        let mut vms = state.vms.lock().unwrap();
-        if let Some(vm_arc) = vms.get(vm_id) {
+        let vm_arc = {
+            let mut vms = state.vms.lock().unwrap();
+            vms.get(vm_id).cloned()
+        };
+        if let Some(vm_arc) = vm_arc {
             let mut vm = vm_arc.lock().await;
             vm.attestation_status = Some("FAILED".to_string());
         }
     }
+
+    // Emit SSE event for attestation failure
+    let _ = state.events_tx.send(serde_json::json!({
+        "type": "vm_attestation",
+        "vm_id": vm_id,
+        "verified": false,
+        "error": reason
+    }).to_string());
 
     // Check if we should kill the VM
     let should_block = {
