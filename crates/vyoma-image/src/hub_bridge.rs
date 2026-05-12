@@ -1,9 +1,10 @@
 use crate::converter::{VmifConverter, SquashfsCompression};
-use crate::vmif::{OciImageConfig, VmifManifest, VmifImage};
-use sha2::Digest;
+use crate::vmif::{VmifManifest, VmifImage};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::info;
+
+use vyoma_core::oci::{OciImageConfig, OciManager};
 
 #[derive(Error, Debug)]
 pub enum HubBridgeError {
@@ -38,20 +39,20 @@ impl HubBridge {
         kernel_ref: Option<&str>,
     ) -> Result<VmifImage, HubBridgeError> {
         info!("Converting Docker Hub image {} to VMIF", image_ref);
-        
-        let mut oci = OciManagerHub::new();
+
+        let mut oci = OciManager::new();
         let manifest_json = self.pull_oci_manifest(&mut oci, image_ref).await?;
-        
-        let layers = self.parse_layers(&manifest_json)?;
+
+        let layers = self.parse_layers(&mut oci, &manifest_json)?;
         let config = self.extract_oci_config(&mut oci, image_ref, &manifest_json).await?;
-        
+
         let staging_dir = self.create_staging_dir(image_ref)?;
-        
+
         self.unpack_layers(&mut oci, image_ref, &layers, &staging_dir).await?;
-        
+
         let image_dir = self.get_image_dir(image_ref);
         std::fs::create_dir_all(&image_dir)?;
-        
+
         let converter = VmifConverter::new();
         let vmif_image = converter.convert_directory_to_vmif(
             &staging_dir,
@@ -63,11 +64,11 @@ impl HubBridge {
             None,
             SquashfsCompression::default(),
         ).map_err(|e| HubBridgeError::ConversionError(e.to_string()))?;
-        
+
         std::fs::remove_dir_all(&staging_dir).ok();
-        
+
         info!("Successfully converted {} to VMIF", image_ref);
-        
+
         Ok(vmif_image)
     }
 
@@ -81,7 +82,7 @@ impl HubBridge {
 
     async fn pull_oci_manifest(
         &self,
-        oci: &mut OciManagerHub,
+        oci: &mut OciManager,
         image_ref: &str,
     ) -> Result<String, HubBridgeError> {
         info!("Pulling OCI manifest for {}", image_ref);
@@ -90,52 +91,25 @@ impl HubBridge {
             .map_err(|e| HubBridgeError::PullError(e.to_string()))
     }
 
-    fn parse_layers(&self, manifest_json: &str) -> Result<Vec<String>, HubBridgeError> {
-        #[derive(serde::Deserialize)]
-        struct ManifestV2 {
-            layers: Vec<LayerDesc>,
-        }
-        #[derive(serde::Deserialize)]
-        struct LayerDesc {
-            digest: String,
-        }
-        
-        let v2: ManifestV2 = serde_json::from_str(manifest_json)
-            .map_err(|e| HubBridgeError::PullError(format!("Failed to parse manifest: {}", e)))?;
-        
-        Ok(v2.layers.into_iter().map(|l| l.digest).collect())
+    fn parse_layers(&self, oci: &mut OciManager, manifest_json: &str) -> Result<Vec<String>, HubBridgeError> {
+        oci.parse_layers(manifest_json)
+            .map_err(|e| HubBridgeError::PullError(e.to_string()))
     }
 
     async fn extract_oci_config(
         &self,
-        oci: &mut OciManagerHub,
+        oci: &mut OciManager,
         image_ref: &str,
         manifest_json: &str,
     ) -> Result<OciImageConfig, HubBridgeError> {
-        #[derive(serde::Deserialize)]
-        struct ManifestV2 {
-            config: ConfigDesc,
-        }
-        #[derive(serde::Deserialize)]
-        struct ConfigDesc {
-            digest: String,
-        }
-        
-        let v2: ManifestV2 = serde_json::from_str(manifest_json)
-            .map_err(|e| HubBridgeError::PullError(format!("Failed to parse manifest: {}", e)))?;
-        
-        let config_blob = oci.pull_config_blob(image_ref, &v2.config.digest)
+        let config_digest = oci.parse_config_digest(manifest_json)
+            .map_err(|e| HubBridgeError::PullError(e.to_string()))?;
+
+        let config = oci.pull_config_blob(image_ref, &config_digest)
             .await
             .map_err(|e| HubBridgeError::PullError(e.to_string()))?;
-        
-        Ok(OciImageConfig {
-            entrypoint: config_blob.config.entrypoint,
-            cmd: config_blob.config.cmd,
-            env: config_blob.config.env,
-            working_dir: config_blob.config.working_dir,
-            exposed_ports: config_blob.config.exposed_ports,
-            user: config_blob.config.user,
-        })
+
+        Ok(config)
     }
 
     fn create_staging_dir(&self, image_ref: &str) -> Result<PathBuf, HubBridgeError> {
@@ -147,7 +121,7 @@ impl HubBridge {
 
     async fn unpack_layers(
         &self,
-        oci: &mut OciManagerHub,
+        oci: &mut OciManager,
         image_ref: &str,
         layers: &[String],
         staging_dir: &Path,
@@ -204,96 +178,6 @@ impl HubBridge {
     }
 }
 
-struct OciManagerHub {
-    client: reqwest::Client,
-}
-
-impl OciManagerHub {
-    fn new() -> Self {
-        Self {
-            client: reqwest::Client::new(),
-        }
-    }
-
-    async fn pull_manifest(&mut self, image: &str) -> anyhow::Result<String> {
-        let (registry, repository, tag) = self.parse_image_ref(image);
-        let proto = if registry.contains("localhost") { "http" } else { "https" };
-        let manifest_url = format!("{}://{}/v2/{}/manifests/{}", proto, registry, repository, tag);
-        
-        info!("Fetching manifest from: {}", manifest_url);
-        
-        let mut req = self.client.get(&manifest_url)
-            .header("Accept", "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json");
-        
-        let resp = req.send().await?;
-        
-        if !resp.status().is_success() {
-            return Err(anyhow::anyhow!("Failed to fetch manifest: {}", resp.status()));
-        }
-        
-        let body = resp.text().await?;
-        Ok(body)
-    }
-
-    async fn pull_layer(&mut self, image: &str, digest: &str) -> anyhow::Result<Vec<u8>> {
-        let (registry, repository, _) = self.parse_image_ref(image);
-        let proto = if registry.contains("localhost") { "http" } else { "https" };
-        let layer_url = format!("{}://{}/v2/{}/blobs/{}", proto, registry, repository, digest);
-        
-        info!("Fetching layer blob: {}", digest);
-        
-        let resp = self.client.get(&layer_url).send().await?;
-        
-        if !resp.status().is_success() {
-            return Err(anyhow::anyhow!("Failed to fetch layer {}: {}", digest, resp.status()));
-        }
-        
-        let bytes = resp.bytes().await?;
-        Ok(bytes.to_vec())
-    }
-
-    async fn pull_config_blob(&mut self, image: &str, digest: &str) -> anyhow::Result<OciConfigBlob> {
-        let bytes = self.pull_layer(image, digest).await?;
-        let full_config: OciConfigBlob = serde_json::from_slice(&bytes)?;
-        Ok(full_config)
-    }
-
-    fn parse_image_ref(&self, image: &str) -> (String, String, String) {
-        let (rest, tag) = if let Some((r, t)) = image.rsplit_once(':') {
-            (r, t)
-        } else {
-            (image, "latest")
-        };
-
-        let (registry, repository) = if let Some((reg, repo)) = rest.split_once('/') {
-            if reg.contains('.') || (reg.contains(':') && !reg.contains("docker.io")) || reg == "localhost" {
-                (reg, repo)
-            } else {
-                ("registry-1.docker.io", rest)
-            }
-        } else {
-            ("registry-1.docker.io", rest)
-        };
-
-        let final_repo = if registry == "registry-1.docker.io" && !repository.contains('/') {
-            format!("library/{}", repository)
-        } else {
-            repository.to_string()
-        };
-
-        let final_reg = if registry == "docker.io" { "registry-1.docker.io" } else { registry };
-
-        (final_reg.to_string(), final_repo, tag.to_string())
-    }
-}
-
-#[derive(serde::Deserialize, Debug)]
-struct OciConfigBlob {
-    architecture: String,
-    os: String,
-    config: OciImageConfig,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,7 +194,7 @@ mod tests {
     fn test_staging_dir_creation() {
         let temp_dir = TempDir::new().unwrap();
         let bridge = HubBridge::new(temp_dir.path().to_path_buf());
-        
+
         let staging = bridge.create_staging_dir("ubuntu:latest").unwrap();
         assert!(staging.exists());
         assert!(staging.to_string_lossy().contains("ubuntu_latest"));
@@ -320,7 +204,7 @@ mod tests {
     fn test_get_image_dir() {
         let temp_dir = TempDir::new().unwrap();
         let bridge = HubBridge::new(temp_dir.path().to_path_buf());
-        
+
         let image_dir = bridge.get_image_dir("ubuntu:latest");
         assert!(image_dir.to_string_lossy().contains("ubuntu_latest"));
     }
@@ -329,7 +213,7 @@ mod tests {
     fn test_image_dir_sanitization() {
         let temp_dir = TempDir::new().unwrap();
         let bridge = HubBridge::new(temp_dir.path().to_path_buf());
-        
+
         let image_dir = bridge.get_image_dir("my.registry.com:5000/ubuntu:latest");
         assert!(image_dir.to_string_lossy().contains("my.registry.com_5000_ubuntu_latest"));
     }
@@ -338,7 +222,7 @@ mod tests {
     fn test_cache_image_roundtrip() {
         let temp_dir = TempDir::new().unwrap();
         let bridge = HubBridge::new(temp_dir.path().to_path_buf());
-        
+
         let manifest = VmifManifest::new(
             "amd64".to_string(),
             Some("kernel:v1".to_string()),
@@ -347,9 +231,9 @@ mod tests {
             OciImageConfig::default(),
             1024,
         );
-        
+
         bridge.cache_image("test:latest", &manifest).unwrap();
-        
+
         let loaded = bridge.get_cached_image("test:latest");
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
@@ -357,23 +241,4 @@ mod tests {
         assert_eq!(loaded.rootfs, "sha256:test123");
     }
 
-    #[test]
-    fn test_oci_manager_parse_image_ref() {
-        let oci = OciManagerHub::new();
-        
-        let (reg, repo, tag) = oci.parse_image_ref("ubuntu:latest");
-        assert_eq!(reg, "registry-1.docker.io");
-        assert_eq!(repo, "library/ubuntu");
-        assert_eq!(tag, "latest");
-        
-        let (reg, repo, tag) = oci.parse_image_ref("my.registry.com:5000/ubuntu:v1");
-        assert_eq!(reg, "my.registry.com:5000");
-        assert_eq!(repo, "ubuntu");
-        assert_eq!(tag, "v1");
-        
-        let (reg, repo, tag) = oci.parse_image_ref("localhost:5000/test:latest");
-        assert_eq!(reg, "localhost:5000");
-        assert_eq!(repo, "test");
-        assert_eq!(tag, "latest");
     }
-}
