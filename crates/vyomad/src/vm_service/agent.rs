@@ -36,6 +36,19 @@ pub async fn prepare_agent(
     })
 }
 
+/// Escapes a string for safe use in shell scripts.
+///
+/// This function ensures that strings can be safely used in:
+/// - `export KEY=value` statements
+/// - Command arguments after `exec`
+///
+/// - If the string contains only "safe" characters (alphanumeric, _, -, ., /, :),
+///   it is returned unquoted.
+/// - Otherwise, it is wrapped in single quotes with embedded single quotes
+///   escaped as '\'' (standard POSIX shell escaping).
+///
+/// The safe character set is conservative and excludes shell metacharacters
+/// like `$`, `` ` ``, `;`, `|`, `&`, etc.
 fn shell_escape(s: &str) -> String {
     if s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/' || c == ':') {
         s.to_string()
@@ -44,10 +57,32 @@ fn shell_escape(s: &str) -> String {
     }
 }
 
+/// Generates the init script that runs as PID 1 inside the VM.
+///
+/// # Security Considerations
+///
+/// This script is part of the initramfs and is measured into PCR 10 during
+/// measured boot. If a signed manifest is required by policy, the entire OCI
+/// config (including these values) is signed, so tampering is detected.
+///
+/// If unsigned images are allowed, the attacker already has arbitrary code
+/// execution inside the VM, so there is no additional security boundary being
+/// breached.
+///
+/// The script uses defensive shell options:
+/// - `set -e`: Exit on any error
+/// - `set -u`: Treat unset variables as errors
+/// - `trap ERR`: Power off on any error to prevent continuing with broken state
 fn generate_init_script(config: &vyoma_core::oci::OciImageConfig) -> String {
     let mut script = String::new();
 
     script.push_str("#!/bin/sh\n");
+    // Defensive shell options: fail fast on errors and unset variables
+    script.push_str("set -e\n");
+    script.push_str("set -u\n");
+    // Power off on any error to prevent continuing with broken state
+    script.push_str("trap 'echo Init error at line $LINENO; poweroff -f' ERR\n");
+    script.push_str("\n");
     script.push_str("mount -t proc proc /proc 2>/dev/null || true\n");
     script.push_str("mount -t sysfs sys /sys 2>/dev/null || true\n");
     script.push_str("mount -t devtmpfs dev /dev 2>/dev/null || true\n");
@@ -121,6 +156,87 @@ mod tests {
         assert_eq!(shell_escape("with-dash"), "with-dash");
         assert_eq!(shell_escape("with_underscore"), "with_underscore");
         assert_eq!(shell_escape("with'quote"), "'with'\\''quote'");
+    }
+
+    #[test]
+    fn test_shell_escape_fuzz() {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        for _ in 0..10000 {
+            let len = rng.gen_range(0..50);
+            let mut s = String::new();
+            for _ in 0..len {
+                s.push(rng.gen_range(0u8..=127) as char);
+            }
+            let escaped = shell_escape(&s);
+            let line = format!("export X={}", escaped);
+
+            // Check for dangerous characters outside of quoted context
+            let mut in_single = false;
+            for (i, c) in line.char_indices() {
+                if c == '\'' && (i == 0 || line.as_bytes()[i-1] != b'\\') {
+                    in_single = !in_single;
+                    continue;
+                }
+                if !in_single {
+                    if matches!(c, '`' | '$' | ';' | '|' | '&' | '(' | ')' | '{' | '}' | '#' | '!' | '~' | '\n' | '\r') {
+                        panic!("Unsafe character '{}' found outside single quotes in: {}", c, line);
+                    }
+                }
+            }
+
+            // Verify round-trip: unescape should yield original string
+            let unescaped = unescape(&escaped);
+            assert_eq!(unescaped, s, "Round-trip failed for {:?} -> {:?}", s, escaped);
+        }
+    }
+
+    fn unescape(escaped: &str) -> String {
+        if escaped.starts_with('\'') && escaped.ends_with('\'') {
+            let inner = &escaped[1..escaped.len()-1];
+            inner.replace("'\\''", "'")
+        } else {
+            escaped.to_string()
+        }
+    }
+
+    #[test]
+    fn test_generate_init_script_has_defensive_options() {
+        let config = vyoma_core::oci::OciImageConfig::default();
+        let script = generate_init_script(&config);
+        assert!(script.contains("set -e"), "Script should contain 'set -e'");
+        assert!(script.contains("set -u"), "Script should contain 'set -u'");
+        assert!(script.contains("trap"), "Script should contain 'trap ERR'");
+    }
+
+    #[test]
+    fn test_shell_escape_injection_attempts() {
+        // Test various injection attempts are properly escaped
+        let injection_attempts = vec![
+            "$(whoami)",
+            "`whoami`",
+            "${whoami}",
+            "; rm -rf /",
+            "| cat /etc/passwd",
+            "& sleep 10",
+            "$(echo pwned)",
+            "`echo pwned`",
+            "newline\ncommand",
+            "newline\rcommand",
+            "dollar$HOME",
+            "backtick`id`",
+        ];
+
+        for attempt in injection_attempts {
+            let escaped = shell_escape(attempt);
+            // Escaped string should either be quoted or not contain dangerous chars
+            if !escaped.starts_with('\'') {
+                // Unquoted - check no dangerous chars
+                assert!(!escaped.contains('$'), "Unquoted string contains $: {} -> {}", attempt, escaped);
+                assert!(!escaped.contains('`'), "Unquoted string contains backtick: {} -> {}", attempt, escaped);
+                assert!(!escaped.contains(';'), "Unquoted string contains ;: {} -> {}", attempt, escaped);
+            }
+        }
     }
 
     #[tokio::test]

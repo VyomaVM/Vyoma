@@ -64,3 +64,4 @@ vyoma-net = { path = "../vyoma-net" }
 
 [dev-dependencies]
 mockall = "0.14"
+rand = "0.8"
