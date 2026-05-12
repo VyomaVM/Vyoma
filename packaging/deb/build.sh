@@ -1,14 +1,14 @@
 #!/bin/bash
-# Ignite Debian Package Build Script
+# Vyoma Debian Package Build Script
 
 set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
-PACKAGE_DIR="$BUILD_DIR/ignite_2.1.1_amd64"
+PACKAGE_DIR="$BUILD_DIR/vyoma_2.1.1_amd64"
 VERSION="2.1.2"
 
-echo "Building Ignite Debian package..."
+echo "Building Vyoma Debian package..."
 echo "Project root: $PROJECT_ROOT"
 
 # Clean previous build
@@ -64,7 +64,7 @@ fi
 # Create package structure
 echo "Creating package structure..."
 mkdir -p "$PACKAGE_DIR/usr/bin"
-mkdir -p "$PACKAGE_DIR/usr/lib/ignite"
+mkdir -p "$PACKAGE_DIR/usr/lib/vyoma"
 mkdir -p "$PACKAGE_DIR/usr/share/applications"
 mkdir -p "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps"
 mkdir -p "$PACKAGE_DIR/usr/share/doc/ignite"
@@ -72,25 +72,25 @@ mkdir -p "$PACKAGE_DIR/DEBIAN"
 
 # Copy binaries
 cp "$PROJECT_ROOT/target/release/ign" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
-cp "$PROJECT_ROOT/target/release/ignited" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
+cp "$PROJECT_ROOT/target/release/vyomad" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 
 # Copy ignite binaries
 cp "$PROJECT_ROOT/target/release/ignite-agent" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 
 # Copy UI dist
 if [ -d "$PROJECT_ROOT/ui/dist" ]; then
-    cp -r "$PROJECT_ROOT/ui/dist" "$PACKAGE_DIR/usr/lib/ignite/ui"
+    cp -r "$PROJECT_ROOT/ui/dist" "$PACKAGE_DIR/usr/lib/vyoma/ui"
 fi
 
 # Copy firecracker (if exists)
 if [ -d "$PROJECT_ROOT/bin" ]; then
-    cp -r "$PROJECT_ROOT/bin" "$PACKAGE_DIR/usr/lib/ignite/"
+    cp -r "$PROJECT_ROOT/bin" "$PACKAGE_DIR/usr/lib/vyoma/"
 fi
 
 # Copy virtiofsd if available
 if [ -f "virtiofsd_bin" ]; then
-    cp virtiofsd_bin "$PACKAGE_DIR/usr/lib/ignite/virtiofsd"
-    chmod +x "$PACKAGE_DIR/usr/lib/ignite/virtiofsd"
+    cp virtiofsd_bin "$PACKAGE_DIR/usr/lib/vyoma/virtiofsd"
+    chmod +x "$PACKAGE_DIR/usr/lib/vyoma/virtiofsd"
     echo "virtiofsd bundled successfully"
 else
     echo "Warning: virtiofsd not bundled - volume mounts may not work"
@@ -100,11 +100,11 @@ fi
 cp "$PROJECT_ROOT/ui/public/favicon.svg" "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps/ignite.svg" 2>/dev/null || true
 
 # Create desktop file
-cat > "$PACKAGE_DIR/usr/share/applications/ignite.desktop" << 'EOF'
+cat > "$PACKAGE_DIR/usr/share/applications/vyoma.desktop" << 'EOF'
 [Desktop Entry]
-Name=Ignite
+Name=Vyoma
 Comment=MicroVM Management Dashboard
-Exec=/usr/bin/ignited
+Exec=/usr/bin/vyomad
 Icon=ignite
 Terminal=false
 Type=Application
@@ -114,7 +114,7 @@ EOF
 
 # Copy systemd service
 mkdir -p "$PACKAGE_DIR/lib/systemd/system"
-cp "$PROJECT_ROOT/packaging/systemd/ignited.service" "$PACKAGE_DIR/lib/systemd/system/"
+cp "$PROJECT_ROOT/packaging/systemd/vyomad.service" "$PACKAGE_DIR/lib/systemd/system/"
 
 # Create postinst script
 cat <<'POSTINST' > "$PACKAGE_DIR/DEBIAN/postinst"
@@ -126,12 +126,12 @@ gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 
 # Create ignite user (for socket ownership)
 if ! id ignite >/dev/null 2>&1; then
-    useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Ignite MicroVM Daemon" ignite 2>/dev/null || true
+    useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Vyoma MicroVM Daemon" ignite 2>/dev/null || true
 fi
 
 # Add ignite daemon user to kvm group (for /dev/kvm access)
 if getent group kvm > /dev/null 2>&1; then
-    usermod -aG kvm ignite 2>/dev/null || true
+    usermod vyoma 2>/dev/null || true
 fi
 
 # Fix /dev/kvm permissions
@@ -139,8 +139,8 @@ chmod 0660 /dev/kvm 2>/dev/null || true
 chown root:kvm /dev/kvm 2>/dev/null || true
 
 # Create data directory
-mkdir -p /var/lib/ignite
-chown ignite:ignite /var/lib/ignite 2>/dev/null || true
+mkdir -p /var/lib/vyoma
+chown ignite:ignite /var/lib/vyoma 2>/dev/null || true
 
 # Create runtime directory
 mkdir -p /run/ignite
@@ -149,7 +149,7 @@ chmod 0755 /run/ignite 2>/dev/null || true
 
 # Add installing user to ignite and kvm groups
 if [ -n "$SUDO_USER" ]; then
-    usermod -aG ignite "$SUDO_USER" 2>/dev/null || true
+    usermod vyoma "$SUDO_USER" 2>/dev/null || true
     usermod -aG kvm "$SUDO_USER" 2>/dev/null || true
     echo "Added $SUDO_USER to ignite and kvm groups. Log out and back in to use CLI."
 fi
@@ -157,12 +157,12 @@ fi
 # Enable and start systemd service automatically
 if command -v systemctl &> /dev/null; then
     systemctl daemon-reload 2>/dev/null || true
-    systemctl enable ignited.service 2>/dev/null || true
-    systemctl start ignited.service 2>/dev/null || true
-    echo "Ignite daemon auto-started"
+    systemctl enable vyomad.service 2>/dev/null || true
+    systemctl start vyomad.service 2>/dev/null || true
+    echo "Vyoma daemon auto-started"
 fi
 
-echo "Ignite v2.1.1 installed successfully!"
+echo "Vyoma v2.1.1 installed successfully!"
 echo "Open http://localhost:3000 for the dashboard"
 echo "Run 'ign run nginx:latest' to start your first VM"
 POSTINST
@@ -175,7 +175,7 @@ set -e
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 if [ "$1" = "purge" ]; then
     userdel ignite 2>/dev/null || true
-    rm -rf /var/lib/ignite /run/ignite 2>/dev/null || true
+    rm -rf /var/lib/vyoma /run/ignite 2>/dev/null || true
 fi
 POSTRM
 chmod +x "$PACKAGE_DIR/DEBIAN/postrm"
@@ -190,16 +190,16 @@ Architecture: amd64
 Depends: libc6 (>= 2.34), libstdc++6 (>= 6)
 Maintainer: Subeshrock <subesh.rock.3@gmail.com>
 Description: Lightweight MicroVM runtime
- Ignite is a lightweight MicroVM runtime for running containers
+ Vyoma is a lightweight MicroVM runtime for running containers
  as lightweight virtual machines. Combines Firecracker speed with Docker UX.
  Includes CLI, Daemon, Web UI, and virtiofsd for volume mounts.
 EOF
 
 # Build package
 echo "Building .deb package..."
-dpkg-deb --build "$PACKAGE_DIR" "$BUILD_DIR/ignite_${VERSION}_amd64.deb"
+dpkg-deb --build "$PACKAGE_DIR" "$BUILD_DIR/vyoma_${VERSION}_amd64.deb"
 
 # Cleanup virtiofsd temp files
 rm -f virtiofsd.zip virtiofsd virtiofsd_bin 2>/dev/null || true
 
-echo "Done! Package created at: $BUILD_DIR/ignite_${VERSION}_amd64.deb"
+echo "Done! Package created at: $BUILD_DIR/vyoma_${VERSION}_amd64.deb"

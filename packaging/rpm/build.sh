@@ -1,14 +1,14 @@
 #!/bin/bash
-# Ignite RPM Package Build Script
+# Vyoma RPM Package Build Script
 
 set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
-PACKAGE_DIR="$BUILD_DIR/ignite_2.1.1_x86_64"
+PACKAGE_DIR="$BUILD_DIR/vyoma_2.1.1_x86_64"
 VERSION="2.1.2"
 
-echo "Building Ignite RPM package..."
+echo "Building Vyoma RPM package..."
 echo "Project root: $PROJECT_ROOT"
 
 # Check for rpmbuild
@@ -72,7 +72,7 @@ fi
 # Create package structure
 echo "Creating package structure..."
 mkdir -p "$PACKAGE_DIR/usr/bin"
-mkdir -p "$PACKAGE_DIR/usr/lib/ignite"
+mkdir -p "$PACKAGE_DIR/usr/lib/vyoma"
 mkdir -p "$PACKAGE_DIR/usr/share/applications"
 mkdir -p "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps"
 mkdir -p "$PACKAGE_DIR/usr/share/doc/ignite"
@@ -80,23 +80,23 @@ mkdir -p "$PACKAGE_DIR/SOURCES"
 
 # Copy binaries
 cp "$PROJECT_ROOT/target/release/ign" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
-cp "$PROJECT_ROOT/target/release/ignited" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
+cp "$PROJECT_ROOT/target/release/vyomad" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 cp "$PROJECT_ROOT/target/release/ignite-agent" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 
 # Copy UI dist
 if [ -d "$PROJECT_ROOT/ui/dist" ]; then
-    cp -r "$PROJECT_ROOT/ui/dist" "$PACKAGE_DIR/usr/lib/ignite/ui"
+    cp -r "$PROJECT_ROOT/ui/dist" "$PACKAGE_DIR/usr/lib/vyoma/ui"
 fi
 
 # Copy firecracker (if exists)
 if [ -d "$PROJECT_ROOT/bin" ]; then
-    cp -r "$PROJECT_ROOT/bin" "$PACKAGE_DIR/usr/lib/ignite/"
+    cp -r "$PROJECT_ROOT/bin" "$PACKAGE_DIR/usr/lib/vyoma/"
 fi
 
 # Copy virtiofsd if available
 if [ -f "virtiofsd_bin" ]; then
-    cp virtiofsd_bin "$PACKAGE_DIR/usr/lib/ignite/virtiofsd"
-    chmod +x "$PACKAGE_DIR/usr/lib/ignite/virtiofsd"
+    cp virtiofsd_bin "$PACKAGE_DIR/usr/lib/vyoma/virtiofsd"
+    chmod +x "$PACKAGE_DIR/usr/lib/vyoma/virtiofsd"
     echo "virtiofsd bundled successfully"
 else
     echo "Warning: virtiofsd not bundled - volume mounts may not work"
@@ -108,11 +108,11 @@ if [ -f "$PROJECT_ROOT/ui/public/favicon.svg" ]; then
 fi
 
 # Create desktop file
-cat > "$PACKAGE_DIR/usr/share/applications/ignite.desktop" << 'EOF'
+cat > "$PACKAGE_DIR/usr/share/applications/vyoma.desktop" << 'EOF'
 [Desktop Entry]
-Name=Ignite
+Name=Vyoma
 Comment=MicroVM Management Dashboard
-Exec=/usr/bin/ignited
+Exec=/usr/bin/vyomad
 Icon=ignite
 Terminal=false
 Type=Application
@@ -122,7 +122,7 @@ EOF
 
 # Copy systemd service
 mkdir -p "$PACKAGE_DIR/lib/systemd/system"
-cp "$PROJECT_ROOT/packaging/systemd/ignited.service" "$PACKAGE_DIR/lib/systemd/system/"
+cp "$PROJECT_ROOT/packaging/systemd/vyomad.service" "$PACKAGE_DIR/lib/systemd/system/"
 
 # Create RPM SPEC file
 cat > "$BUILD_DIR/ignite.spec" << SPECFILE
@@ -140,7 +140,7 @@ Requires(post): systemd
 Requires(post): systemd-sysv
 
 %description
-Ignite is a lightweight MicroVM runtime for running containers
+Vyoma is a lightweight MicroVM runtime for running containers
 as lightweight virtual machines. Combines Firecracker speed with Docker UX.
 Includes CLI, Daemon, Web UI, and virtiofsd for volume mounts.
 
@@ -153,7 +153,7 @@ Includes CLI, Daemon, Web UI, and virtiofsd for volume mounts.
 %install
 rm -rf %{buildroot}
 mkdir -p %{buildroot}/usr/bin
-mkdir -p %{buildroot}/usr/lib/ignite
+mkdir -p %{buildroot}/usr/lib/vyoma
 mkdir -p %{buildroot}/usr/share/applications
 mkdir -p %{buildroot}/usr/share/icons/hicolor/64x64/apps
 mkdir -p %{buildroot}/usr/share/doc/ignite
@@ -164,17 +164,17 @@ cp -r usr/bin/* %{buildroot}/usr/bin/
 
 # Copy UI
 if [ -d usr/lib/ignite/ui ]; then
-    cp -r usr/lib/ignite/ui %{buildroot}/usr/lib/ignite/
+    cp -r usr/lib/ignite/ui %{buildroot}/usr/lib/vyoma/
 fi
 
 # Copy firecracker binaries
 if [ -d usr/lib/ignite/bin ]; then
-    cp -r usr/lib/ignite/bin %{buildroot}/usr/lib/ignite/
+    cp -r usr/lib/ignite/bin %{buildroot}/usr/lib/vyoma/
 fi
 
 # Copy virtiofsd
 if [ -f usr/lib/ignite/virtiofsd ]; then
-    cp usr/lib/ignite/virtiofsd %{buildroot}/usr/lib/ignite/
+    cp usr/lib/ignite/virtiofsd %{buildroot}/usr/lib/vyoma/
 fi
 
 # Copy icon
@@ -183,39 +183,39 @@ if [ -f usr/share/icons/hicolor/64x64/apps/ignite.svg ]; then
 fi
 
 # Copy desktop file
-cp usr/share/applications/ignite.desktop %{buildroot}/usr/share/applications/
+cp usr/share/applications/vyoma.desktop %{buildroot}/usr/share/applications/
 
 # Copy systemd service
-cp lib/systemd/system/ignited.service %{buildroot}/lib/systemd/system/
+cp lib/systemd/system/vyomad.service %{buildroot}/lib/systemd/system/
 
 %files
 %defattr(-,root,root,-)
 /usr/bin/ign
-/usr/bin/ignited
+/usr/bin/vyomad
 /usr/bin/ignite-agent
-%dir /usr/lib/ignite
+%dir /usr/lib/vyoma
 %if exists(usr/lib/ignite/ui)
-/usr/lib/ignite/ui
+/usr/lib/vyoma/ui
 %endif
 %if exists(usr/lib/ignite/bin)
-/usr/lib/ignite/bin
+/usr/lib/vyoma/bin
 %endif
 %if exists(usr/lib/ignite/virtiofsd)
-/usr/lib/ignite/virtiofsd
+/usr/lib/vyoma/virtiofsd
 %endif
-/usr/share/applications/ignite.desktop
+/usr/share/applications/vyoma.desktop
 /usr/share/icons/hicolor/64x64/apps/ignite.svg
-/lib/systemd/system/ignited.service
+/lib/systemd/system/vyomad.service
 
 %post
 # Create ignite user (for socket ownership)
 if ! getent passwd ignite > /dev/null 2>&1; then
-    useradd -r -s /sbin/nologin -c "Ignite MicroVM Daemon" -d /var/lib/ignite ignite 2>/dev/null || true
+    useradd -r -s /sbin/nologin -c "Vyoma MicroVM Daemon" -d /var/lib/vyoma ignite 2>/dev/null || true
 fi
 
 # Add ignite daemon user to kvm group (for /dev/kvm access)
 if getent group kvm > /dev/null 2>&1; then
-    usermod -aG kvm ignite 2>/dev/null || true
+    usermod vyoma 2>/dev/null || true
 fi
 
 # Fix /dev/kvm permissions
@@ -223,8 +223,8 @@ chmod 0660 /dev/kvm 2>/dev/null || true
 chown root:kvm /dev/kvm 2>/dev/null || true
 
 # Create data directory
-mkdir -p /var/lib/ignite
-chown ignite:ignite /var/lib/ignite 2>/dev/null || true
+mkdir -p /var/lib/vyoma
+chown ignite:ignite /var/lib/vyoma 2>/dev/null || true
 
 # Create runtime directory
 mkdir -p /run/ignite
@@ -233,16 +233,16 @@ chmod 0755 /run/ignite 2>/dev/null || true
 
 # Add installing user to ignite and kvm groups
 if [ -n "$USER" ]; then
-    usermod -aG ignite $USER 2>/dev/null || true
+    usermod vyoma $USER 2>/dev/null || true
     usermod -aG kvm $USER 2>/dev/null || true
 fi
 
 # Enable and start systemd service
 systemctl daemon-reload 2>/dev/null || true
-systemctl enable ignited.service 2>/dev/null || true
-systemctl start ignited.service 2>/dev/null || true
+systemctl enable vyomad.service 2>/dev/null || true
+systemctl start vyomad.service 2>/dev/null || true
 
-echo "Ignite v${VERSION} installed successfully!"
+echo "Vyoma v${VERSION} installed successfully!"
 echo "Open http://localhost:3000 for the dashboard"
 echo "Run 'ign run nginx:latest' to start your first VM"
 
@@ -250,7 +250,7 @@ echo "Run 'ign run nginx:latest' to start your first VM"
 # Reload systemd on removal
 if [ \$1 -eq 0 ]; then
     userdel ignite 2>/dev/null || true
-    rm -rf /var/lib/ignite /run/ignite 2>/dev/null || true
+    rm -rf /var/lib/vyoma /run/ignite 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
 fi
 

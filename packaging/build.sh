@@ -1,5 +1,5 @@
 #!/bin/bash
-# Ignite Unified Package Build Script
+# Vyoma Unified Package Build Script
 # Builds both DEB and RPM packages
 
 set -e
