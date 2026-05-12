@@ -165,8 +165,10 @@ impl NetworkIntegration {
             
             if let Some(ref wg) = *guard {
                 if wg.is_running() {
-                    let _ = add_route_to_peer_endpoint(peer_ip, wg_iface);
-                    let _ = add_route_to_subnet(&subnet, peer_ip, wg_iface);
+                    if let Some(handle) = wg.get_rt_handle() {
+                        let _ = add_route_to_peer_endpoint(handle, peer_ip, wg_iface);
+                        let _ = add_route_to_subnet(handle, &subnet, peer_ip, wg_iface);
+                    }
                     info!("Added route to {} via WireGuard", subnet);
                     return;
                 }
@@ -203,11 +205,25 @@ impl NetworkIntegration {
 
     fn remove_subnet_route(&self, subnet_id: u8) {
         let subnet = format!("10.42.{}.0/24", subnet_id);
-        
-        if let Err(e) = remove_route_to_subnet(&subnet) {
-            warn!("Failed to remove subnet route {}: {:?}", subnet, e);
-        } else {
-            info!("Removed route for subnet {}", subnet);
+
+        let handle = {
+            let guard = match self.wireguard_node.lock() {
+                Ok(g) => g,
+                Err(_) => return,
+            };
+            if let Some(ref wg) = *guard {
+                wg.get_rt_handle().map(|h| h.clone())
+            } else {
+                None
+            }
+        };
+
+        if let Some(handle) = handle {
+            if let Err(e) = remove_route_to_subnet(&handle, &subnet) {
+                warn!("Failed to remove subnet route {}: {:?}", subnet, e);
+            } else {
+                info!("Removed route for subnet {}", subnet);
+            }
         }
     }
 
