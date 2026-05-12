@@ -66,16 +66,18 @@ fn generate_init_script(config: &vyoma_core::oci::OciImageConfig) -> String {
     }
 
     let full_cmd = config.full_command();
+
+    // Start the agent in the background before executing the workload.
+    // The agent is forked (&) so it continues running after exec replaces
+    // this shell. The orphaned agent process gets reparented to the VM's init.
+    script.push_str("/sbin/vyoma-agent-vm &\n");
+
     if !full_cmd.is_empty() {
         let cmd_args: Vec<String> = full_cmd.iter().map(|s| shell_escape(s)).collect();
         script.push_str(&format!("exec {}\n", cmd_args.join(" ")));
     } else {
         script.push_str("exec /bin/sh\n");
     }
-
-    script.push_str("/sbin/vyoma-agent-vm &\n");
-    script.push_str("sleep 1\n");
-    script.push_str("exec /sbin/init\n");
 
     script
 }
@@ -110,7 +112,7 @@ mod tests {
         assert!(script.contains("export NGINX_HOST=localhost"));
         assert!(script.contains("export NGINX_PORT=80"));
         assert!(script.contains("cd /usr/share/nginx/html"));
-        assert!(script.contains("exec /bin/nginx -g daemon off;"));
+        assert!(script.contains("exec /bin/nginx -g 'daemon off;'"));
     }
 
     #[test]
