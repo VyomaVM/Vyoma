@@ -4,7 +4,7 @@
 In-VM binary that runs inside each MicroVM to communicate with the host daemon via vsock (or TCP fallback). Provides process list, metrics, file read, and command execution.
 
 ## Implementation
-- Created `crates/ignite-agent-vm/` crate
+- Created `crates/vyoma-agent-vm/` crate
 - Implements AgentRequest/AgentResponse types
 - TCP server (vsock requires actual VM environment)
 - CLI with clap for mode/port configuration
@@ -13,7 +13,7 @@ In-VM binary that runs inside each MicroVM to communicate with the host daemon v
 
 ### Unit Tests (10 tests)
 ```
-$ cargo test -p ignite-agent-vm
+$ cargo test -p vyoma-agent-vm
     Running unittests src/lib.rs
 
 running 8 tests

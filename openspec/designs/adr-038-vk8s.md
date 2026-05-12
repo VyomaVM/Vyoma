@@ -3,12 +3,12 @@
 **Status**: Accepted | Phase 4.3 (v1.8)
 
 ## Summary
-Implement Kubernetes CRI (Container Runtime Interface) plugin to run Ignite MicroVMs as Pods in Kubernetes.
+Implement Kubernetes CRI (Container Runtime Interface) plugin to run Vyoma MicroVMs as Pods in Kubernetes.
 
 ## Context
 As part of Phase 4, we need to enable Kubernetes integration. This allows:
 - Running MicroVMs as Kubernetes Pods
-- Using Ignite with Kubernetes scheduling
+- Using Vyoma with Kubernetes scheduling
 - Container isolation with VM-level security
 
 ## Decision
@@ -17,7 +17,7 @@ Implement vk8s as per the technical spec:
 ### Architecture
 - Go-based CRI server implementation
 - Uses gRPC to communicate with kubelet
-- Communicates with ignited via gRPC client
+- Communicates with vyomad via gRPC client
 
 ### Key Functions
 - `RunPodSandbox` - Create VM for Pod
@@ -33,14 +33,14 @@ Implement vk8s as per the technical spec:
 
 ### Key Components
 ```go
-type IgniteCriServer struct {
-    client *ignite.Client  // gRPC client to ignited
+type VyomaCriServer struct {
+    client *vyoma.Client  // gRPC client to vyomad
 }
 
 // RunPodSandbox creates a VM for a Kubernetes Pod
-func (s *IgniteCriServer) RunPodSandbox(ctx context.Context, req *pb.RunPodSandboxRequest) (*pb.RunPodSandboxResponse, error) {
+func (s *VyomaCriServer) RunPodSandbox(ctx context.Context, req *pb.RunPodSandboxRequest) (*pb.RunPodSandboxResponse, error) {
     // Create VM configuration from pod spec
-    vmConfig := &ignite.CreateVmRequest{
+    vmConfig := &vyoma.CreateVmRequest{
         Name:       config.Metadata.Name,
         Namespace:  config.Metadata.Namespace,
         Vcpus:      uint32(config.Linux.Resources.CpuQuota / 100000),
@@ -54,8 +54,8 @@ func (s *IgniteCriServer) RunPodSandbox(ctx context.Context, req *pb.RunPodSandb
 ```
 
 ### Kubernetes Integration
-- Socket: `unix:///var/run/ignite-cri.sock`
-- RuntimeClass: `ignite-microvm`
+- Socket: `unix:///var/run/vyoma-cri.sock`
+- RuntimeClass: `vyoma-microvm`
 
 ## Consequences
 - Kubernetes-native MicroVM management

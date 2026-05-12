@@ -1,13 +1,13 @@
-# QA Evidence - Phase 4.6: Ignite SDK
+# QA Evidence - Phase 4.6: Vyoma SDK
 
 ## Feature Description
-SDK crate providing client libraries for applications to interact with MicroVMs via ignite-agent.
+SDK crate providing client libraries for applications to interact with MicroVMs via vyoma-agent.
 
 ## Test Results
 
 ### Unit Tests (11 tests)
 ```
-$ cargo test -p ignite-sdk
+$ cargo test -p vyoma-sdk
     Running unittests src/lib.rs
 
 running 11 tests

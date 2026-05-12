@@ -1,11 +1,11 @@
-# ADR-044: Ignite Connection Architecture
+# ADR-044: Vyoma Connection Architecture
 
 ## Status
 Accepted
 
 ## Context
-Clarify how different clients connect to the ignited daemon:
-- CLI (`ign`)
+Clarify how different clients connect to the vyomad daemon:
+- CLI (`vyoma`)
 - Browser Dashboard (UI)
 - VS Code Extension
 - Other tools
@@ -16,16 +16,16 @@ Clarify how different clients connect to the ignited daemon:
 
 | Client | Protocol | Endpoint | Security |
 |--------|----------|----------|----------|
-| CLI (`ign`) | Unix Socket | `/var/run/ignite/ignite.sock` | File permissions + group |
+| CLI (`vyoma`) | Unix Socket | `/var/run/vyoma/vyoma.sock` | File permissions + group |
 | Browser Dashboard | HTTP | `http://localhost:3000` | localhost only |
-| VS Code Extension | Unix Socket | `/var/run/ignite/ignite.sock` | File permissions + group |
+| VS Code Extension | Unix Socket | `/var/run/vyoma/vyoma.sock` | File permissions + group |
 | SDK / API Clients | HTTP | `http://localhost:3000` | localhost only |
 
 ### Unix Socket Path Resolution
 CLI and VS Code Extension should try fallback paths in order:
-1. `/var/run/ignite/ignite.sock` (default, requires root/ignite group)
-2. `$XDG_RUNTIME_DIR/ignite.sock` (user-specific)
-3. `/tmp/ignite.sock` (development fallback)
+1. `/var/run/vyoma/vyoma.sock` (default, requires root/vyoma group)
+2. `$XDG_RUNTIME_DIR/vyoma.sock` (user-specific)
+3. `/tmp/vyoma.sock` (development fallback)
 
 ### HTTP Server
 The daemon runs an HTTP server on port 3000 for:

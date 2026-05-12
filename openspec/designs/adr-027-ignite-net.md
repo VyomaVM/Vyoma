@@ -1,4 +1,4 @@
-# ADR-027: ignite-net Crate - Network Layer Refactor
+# ADR-027: vyoma-net Crate - Network Layer Refactor
 
 ## Status
 Accepted | Phase 2 (v1.3)
@@ -11,11 +11,11 @@ Currently (v1.2), the network layer uses subprocess calls to `ip link`, `brctl`,
 - External dependency on specific CLI tools
 
 ## Decision
-Create a new `ignite-net` crate with Rust-native bindings to `rtnetlink` crate.
+Create a new `vyoma-net` crate with Rust-native bindings to `rtnetlink` crate.
 
 ### Crate Structure
 ```
-crates/ignite-net/
+crates/vyoma-net/
 ├── Cargo.toml
 └── src/
     ├── lib.rs          # Re-exports
@@ -35,7 +35,7 @@ anyhow = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
-### API Design
+### API Desvyoma
 
 #### Bridge Manager (bridge.rs)
 ```rust
@@ -99,7 +99,7 @@ impl TapManager {
 - More complex async code
 
 ## Migration Strategy
-1. Create `ignite-net` crate alongside existing code
+1. Create `vyoma-net` crate alongside existing code
 2. Add to workspace Cargo.toml
 3. Migrate one function at a time
 4. Remove subprocess calls once migration complete

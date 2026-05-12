@@ -4,7 +4,7 @@
 Accepted | Phase 1.5 (v1.2)
 
 ## Context
-Currently (v1.1), the ignite-compose parser only supports `version: "1.0"` which is a custom format. Users cannot `ign up` from existing `docker-compose.yml` files that use the standard Docker Compose v3 format. This prevents adoption as users must manually convert their compose files.
+Currently (v1.1), the vyoma-compose parser only supports `version: "1.0"` which is a custom format. Users cannot `vyoma up` from existing `docker-compose.yml` files that use the standard Docker Compose v3 format. This prevents adoption as users must manually convert their compose files.
 
 Additionally, the `networks:` top-level key is not supported - all services share one default bridge network.
 
@@ -48,8 +48,8 @@ volumes:
 
 ### Implementation
 
-1. **Parser Update**: Modify `IgniteCompose` struct to include optional `networks` and `volumes` fields
-2. **Network Creation**: On `ign up`, iterate networks and create Linux bridge per network
+1. **Parser Update**: Modify `VyomaCompose` struct to include optional `networks` and `volumes` fields
+2. **Network Creation**: On `vyoma up`, iterate networks and create Linux bridge per network
 3. **Service Network Assignment**: Update VM network config to attach to specified networks
 
 ## Consequences
@@ -61,9 +61,9 @@ volumes:
 
 **Negative:**
 - Parser complexity increases
-- Network creation adds latency to `ign up`
+- Network creation adds latency to `vyoma up`
 
 ## Implementation Notes
 - Use serde flatten for backward compatibility
-- Network names in compose map to bridge names: `ignite-<network-name>`
-- Default network (when no networks specified) remains "ignite-net"
+- Network names in compose map to bridge names: `vyoma-<network-name>`
+- Default network (when no networks specified) remains "vyoma-net"

@@ -9,13 +9,13 @@
 - [x] Verify module integration
 
 ## Checks Performed
-1. **Implementation**: Created `crates/ignited/src/timemachine.rs` with:
+1. **Implementation**: Created `crates/vyomad/src/timemachine.rs` with:
    - `SnapshotEntry` struct with id, vm_id, created_at, cow_delta_size, label, parent_id
    - `TimeMachine` struct with snapshot management
    - Snapshot chain with parent references
    - History and deletion support
 
-2. **Auto-Snapshot**: Created `crates/ignited/src/auto_snapshot.rs` with:
+2. **Auto-Snapshot**: Created `crates/vyomad/src/auto_snapshot.rs` with:
    - `AutoSnapshotConfig` for configuration
    - `AutoSnapshotTask` for background snapshotting
    - `AutoSnapshotManager` for task coordination

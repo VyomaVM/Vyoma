@@ -9,14 +9,14 @@
 - [x] Verify module integration
 
 ## Checks Performed
-1. **Implementation**: Created `crates/ignite-image/src/signing.rs` with:
+1. **Implementation**: Created `crates/vyoma-image/src/signing.rs` with:
    - `SigningKeyPair` - Ed25519 key generation and signing
    - `SignedManifest` - Signed VMIF manifest structure
    - `TrustPolicy` - Trust policy for verification
 
 2. **Key Functions**:
    - `generate()` - Generate new Ed25519 keypair
-   - `sign_manifest()` - Sign VMIF manifest
+   - `sign_manifest()` - Svyoma VMIF manifest
    - `verify_manifest()` - Verify signature
    - `TrustPolicy::verify()` - Verify against trusted keys
 
@@ -29,7 +29,7 @@
    - `test_trust_policy_reject_unknown_key` - Verify unknown key rejection
    - `test_signed_manifest_serialization` - Verify serialization
 
-4. **Total Tests**: 20 tests (ignite-image crate) - All passing
+4. **Total Tests**: 20 tests (vyoma-image crate) - All passing
 
 ## Technical Details
 - Ed25519 digital signatures

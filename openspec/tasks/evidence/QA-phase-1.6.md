@@ -19,7 +19,7 @@
    - Step 7: Remove Cgroup
    - Step 8: **NEW** Kill VirtioFs Managers
 2. **VirtioFs cleanup**: `fs_mgr.kill()` called for each manager in `fs_managers` vector
-3. **Build check**: `cargo check -p ignited` passed
+3. **Build check**: `cargo check -p vyomad` passed
 
 ## Status: PASSED
 **Next Steps/Handoff**: Phase 1 complete! Ready for v1.2 release candidate.

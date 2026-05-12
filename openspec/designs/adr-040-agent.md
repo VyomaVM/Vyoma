@@ -1,9 +1,9 @@
-# ADR-040: ignite-agent - In-VM Binary
+# ADR-040: vyoma-agent - In-VM Binary
 
 **Status**: Accepted | Phase 4.5 (v1.9)
 
 ## Summary
-Implement ignite-agent - an in-VM binary that runs inside each MicroVM to communicate with the host daemon via vsock.
+Implement vyoma-agent - an in-VM binary that runs inside each MicroVM to communicate with the host daemon via vsock.
 
 ## Context
 As part of Phase 4, we need an in-VM agent to enable host-VM communication. This allows:
@@ -13,7 +13,7 @@ As part of Phase 4, we need an in-VM agent to enable host-VM communication. This
 - Command execution
 
 ## Decision
-Implement ignite-agent as per the technical spec:
+Implement vyoma-agent as per the technical spec:
 
 ### Architecture
 - Static musl binary (~400KB) injected into each VMIF image
@@ -28,7 +28,7 @@ Implement ignite-agent as per the technical spec:
 ## Implementation
 
 ### Location
-- `crates/ignite-agent/` - Rust binary
+- `crates/vyoma-agent/` - Rust binary
 
 ### Key Components
 ```rust

@@ -1,15 +1,15 @@
-# Evidence QA Report: Phase 4.5 - ignite-agent
+# Evidence QA Report: Phase 4.5 - vyoma-agent
 **Agent:** `EvidenceQA`
 **Date:** 2026-03-31
 **Branch:** `feat/phase4-agent`
 
 ## Validation Objectives
-- [x] Verify ignite-agent implementation
+- [x] Verify vyoma-agent implementation
 - [x] Check unit tests exist and pass
 - [x] Verify module structure
 
 ## Checks Performed
-1. **Implementation**: Created `crates/ignite-agent/` with:
+1. **Implementation**: Created `crates/vyoma-agent/` with:
    - Agent binary with request/response handling
    - ProcessInfo, VmMetrics structures
    - Command execution support

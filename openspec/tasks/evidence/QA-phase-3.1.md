@@ -4,13 +4,13 @@
 **Branch:** `feat/phase3-wireguard`
 
 ## Validation Objectives
-- [x] Verify WireGuard module added to ignite-net crate
+- [x] Verify WireGuard module added to vyoma-net crate
 - [x] Check WireGuardConfig, PeerConfig implementations
 - [x] Verify add_peer, remove_peer, list_peers functions
 - [x] Run unit tests
 
 ## Checks Performed
-1. **Module**: Created wireguard.rs in crates/ignite-net/src/
+1. **Module**: Created wireguard.rs in crates/vyoma-net/src/
 2. **API**: WireGuardNode with:
    - new(), from_key() constructors
    - public_key_base64() 
@@ -21,8 +21,8 @@
    - test_peer_config_builder
    - test_wireguard_node_creation
    - test_peer_list_management
-4. **Compilation**: cargo check -p ignite-net passed
-5. **Test Run**: cargo test -p ignite-net passed (6 tests)
+4. **Compilation**: cargo check -p vyoma-net passed
+5. **Test Run**: cargo test -p vyoma-net passed (6 tests)
 
 ## ADR Reference
 - ADR-030: WireGuard Integration

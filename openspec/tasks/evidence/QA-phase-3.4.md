@@ -4,12 +4,12 @@
 **Branch:** `feat/phase3-grpc`
 
 ## Validation Objectives
-- [x] Verify gRPC implementation in ignite-proto crate
+- [x] Verify gRPC implementation in vyoma-proto crate
 - [x] Check unit tests exist and pass
 - [x] Verify proto definitions match spec
 
 ## Checks Performed
-1. **Implementation**: Created `crates/ignite-proto/` with:
+1. **Implementation**: Created `crates/vyoma-proto/` with:
    - `proto/vm.proto`: Protocol buffer definitions for VmService
    - `src/vm_service.rs`: Service request/response types
    - `src/server.rs`: gRPC server implementation
@@ -32,7 +32,7 @@
 
 4. **Module Integration**: Added to workspace in Cargo.toml
 
-5. **Compilation**: All tests pass with `cargo test --package ignite-proto`
+5. **Compilation**: All tests pass with `cargo test --package vyoma-proto`
 
 ## Technical Details
 The gRPC implementation provides:

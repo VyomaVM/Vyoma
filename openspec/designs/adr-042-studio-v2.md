@@ -1,4 +1,4 @@
-# ADR-042: Ignite Studio v2 - Enhanced Dashboard
+# ADR-042: Vyoma Studio v2 - Enhanced Dashboard
 
 ## Status
 Accepted
@@ -29,7 +29,7 @@ Add four new views to the existing React dashboard:
 - One-click Deploy button
 
 ### 4. Hub Browser
-- Search box for Ignite Hub / Docker Hub images
+- Search box for Vyoma Hub / Docker Hub images
 - Shows conversion status badge
 - Pull button to import image
 

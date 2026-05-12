@@ -41,7 +41,7 @@ pub struct SnapshotNode {
 
 ### Storage Structure
 ```
-~/.ignite/snapshots/
+~/.vyoma/snapshots/
 ├── snapshots.db  (sled database)
 └── <vm-id>/
     ├── <snap-id>.mem   (memory state)
@@ -49,7 +49,7 @@ pub struct SnapshotNode {
     └── <snap-id>.cow   (COW delta)
 ```
 
-### API Design
+### API Desvyoma
 
 ```rust
 pub struct SnapshotTree {
@@ -97,6 +97,6 @@ impl SnapshotTree {
 - Migration path from git-based snapshots
 
 ## Migration Strategy
-1. Add SnapshotTree to ignite-storage crate
+1. Add SnapshotTree to vyoma-storage crate
 2. When taking first snapshot after upgrade, convert existing git commits
 3. Keep git as optional export (for compatibility)

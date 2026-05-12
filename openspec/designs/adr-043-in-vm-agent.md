@@ -1,4 +1,4 @@
-# ADR-043: In-VM Agent (ignite-agent-vm)
+# ADR-043: In-VM Agent (vyoma-agent-vm)
 
 ## Status
 Accepted
@@ -7,7 +7,7 @@ Accepted
 Phase 6.5 of the technical spec calls for an in-VM binary that runs inside each MicroVM to communicate with the host daemon. This provides guest introspection capabilities.
 
 ## Decision
-Implement `ignite-agent-vm` - a binary that runs inside each MicroVM:
+Implement `vyoma-agent-vm` - a binary that runs inside each MicroVM:
 
 1. **Communication**: TCP server (vsock for actual VM environments)
 2. **Port**: 9999 default
@@ -20,7 +20,7 @@ Implement `ignite-agent-vm` - a binary that runs inside each MicroVM:
 ### Architecture
 ```
 ┌─────────────┐     vsock/TCP      ┌─────────────┐
-│  MicroVM   │ ◄─────────────────► │   ignited   │
+│  MicroVM   │ ◄─────────────────► │   vyomad   │
 │ (agent-vm) │    port 9999        │  (host)     │
 └─────────────┘                     └─────────────┘
 ```
@@ -28,10 +28,10 @@ Implement `ignite-agent-vm` - a binary that runs inside each MicroVM:
 ### Usage
 ```bash
 # Run in TCP mode (development)
-ignite-agent-vm --mode tcp --port 9999
+vyoma-agent-vm --mode tcp --port 9999
 
 # Run in vsock mode (production VM)
-ignite-agent-vm --mode vsock
+vyoma-agent-vm --mode vsock
 ```
 
 ## Consequences

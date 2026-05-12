@@ -12,7 +12,7 @@ When VMs are destroyed or the daemon crashes, proper cleanup of all resources is
 - Dangling network namespaces
 
 ## Decision
-The `VmInstance::cleanup()` method in `crates/ignited/src/state.rs` will follow a strict 8-step cleanup process:
+The `VmInstance::cleanup()` method in `crates/vyomad/src/state.rs` will follow a strict 8-step cleanup process:
 
 ### Cleanup Steps (in order)
 
@@ -46,7 +46,7 @@ for fs_mgr in &mut self.fs_managers {
 - Requires VirtioFsManager::kill() to be robust
 
 ## Verification
-Run `ign rm` on a VM with volume mounts and verify:
+Run `vyoma rm` on a VM with volume mounts and verify:
 1. No stray firecracker process (`pgrep firecracker`)
 2. No virtiofsd processes (`pgrep virtiofsd`)
 3. No DM devices (`dmsetup ls`)

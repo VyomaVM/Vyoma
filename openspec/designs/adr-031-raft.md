@@ -11,7 +11,7 @@ Replace seed-based approach with Raft consensus using `openraft` crate.
 
 ### Dependencies
 ```toml
-# crates/ignited/Cargo.toml
+# crates/vyomad/Cargo.toml
 openraft = { version = "0.10", features = ["serde"] }
 ```
 
@@ -29,18 +29,18 @@ pub enum SwarmCommand {
     DeleteService { name: String },
 }
 
-pub struct IgniteRaft {
+pub struct VyomaRaft {
     node_id: u64,
-    raft: openraft::Raft<IgniteRaft>,
+    raft: openraft::Raft<VyomaRaft>,
 }
 
-impl IgniteRaft {
+impl VyomaRaft {
     pub async fn new(node_id: u64, config: RaftConfig) -> Result<Self>;
     
-    /// Bootstrap a single-node cluster (ign swarm init)
+    /// Bootstrap a single-node cluster (vyoma swarm init)
     pub async fn bootstrap(&self, addr: String) -> Result<()>;
     
-    /// Join existing cluster (ign swarm join)
+    /// Join existing cluster (vyoma swarm join)
     pub async fn join(&self, leader_addr: String) -> Result<()>;
     
     /// Submit command to cluster

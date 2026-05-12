@@ -10,7 +10,7 @@ Currently (v1.1), daemon restart loses running VM control handles. While JSON st
 We will implement a crash-safe write-ahead log using the sled embedded database, combined with a recovery mechanism to re-adopt VMs on daemon restart.
 
 ### Data Layout
-- **Database**: `~/.ignite/state/ignite.db` (sled)
+- **Database**: `~/.vyoma/state/vyoma.db` (sled)
 - **Tree "wal"**: Append-only write-ahead log
   - Key: `{timestamp_nanos}:{uuid}` (for ordering)
   - Value: JSON-encoded WAL entry
@@ -36,7 +36,7 @@ enum WalEntry {
 ### Recovery Algorithm
 On startup:
 1. Open sled database
-2. Scan `~/.ignite/vms/` directories for `state.json` files
+2. Scan `~/.vyoma/vms/` directories for `state.json` files
 3. For each VM directory:
    - Check if VM process is still running (by PID file or socket)
    - If running but not in WAL → mark as recovered
@@ -65,7 +65,7 @@ On startup:
 ## Diagram
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Ignite Daemon                          │
+│                      Vyoma Daemon                          │
 ├─────────────────────────────────────────────────────────────┤
 │  Startup                                                    │
 │    │                                                        │

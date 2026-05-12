@@ -4,12 +4,12 @@
 **Branch:** `feat/phase3-vmif`
 
 ## Validation Objectives
-- [x] Verify VMIF implementation in ignite-image crate
+- [x] Verify VMIF implementation in vyoma-image crate
 - [x] Check unit tests exist and pass
 - [x] Verify module structure matches spec
 
 ## Checks Performed
-1. **Implementation**: Created `crates/ignite-image/` with:
+1. **Implementation**: Created `crates/vyoma-image/` with:
    - `vmif.rs`: VMIF manifest and image structures
    - `hub_bridge.rs`: Docker Hub → VMIF conversion
 
@@ -42,11 +42,11 @@
 
 5. **Module Integration**: Added to workspace in Cargo.toml
 
-6. **Compilation**: All tests pass with `cargo test --package ignite-image`
+6. **Compilation**: All tests pass with `cargo test --package vyoma-image`
 
 ## Technical Details
 The VMIF implementation provides:
-- Stable on-disk format for Ignite images
+- Stable on-disk format for Vyoma images
 - OCI-compatible artifact structure
 - Docker Hub bridge for image conversion
 - Caching support for converted images

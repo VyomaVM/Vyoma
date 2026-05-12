@@ -6,16 +6,16 @@ Accepted | Patch v1.3.1
 ## Context
 Users on WSL2 (Ubuntu 24.04) reported two issues:
 
-1. **DNS Binding Failure**: `Cannot assign requested address (os error 99)` - Race condition where DNS server tries to bind before bridge IP is ready
-2. **KVM Access Denied**: `/dev/kvm` permission denied for unprivileged `ignite` user
+1. **DNS Binding Failure**: `Cannot assvyoma requested address (os error 99)` - Race condition where DNS server tries to bind before bridge IP is ready
+2. **KVM Access Denied**: `/dev/kvm` permission denied for unprivileged `vyoma` user
 
 ## Decision
 
 ### Fix 1: KVM Group Membership
 Add KVM group configuration to postinstall script (per technical spec line 529):
 ```bash
-# Add ignite to kvm group for /dev/kvm access
-usermod -aG kvm ignite 2>/dev/null || true
+# Add vyoma to kvm group for /dev/kvm access
+usermod -aG kvm vyoma 2>/dev/null || true
 
 # Fix /dev/kvm permissions
 chmod 0660 /dev/kvm 2>/dev/null || true
@@ -29,7 +29,7 @@ Add retry logic with bridge readiness check before DNS binding:
 
 ## Consequences
 **Positive:**
-- KVM access works for ignite user
+- KVM access works for vyoma user
 - DNS binds reliably on WSL2
 
 **Negative:**

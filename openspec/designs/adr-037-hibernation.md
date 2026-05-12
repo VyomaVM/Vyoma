@@ -33,7 +33,7 @@ Implement hibernation as per the technical spec:
 ## Implementation
 
 ### Location
-- `crates/ignited/src/hibernation.rs`
+- `crates/vyomad/src/hibernation.rs`
 
 ### Key Structures
 ```rust

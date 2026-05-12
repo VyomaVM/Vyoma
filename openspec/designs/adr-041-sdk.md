@@ -1,13 +1,13 @@
-# ADR-041: Ignite SDK for Client Applications
+# ADR-041: Vyoma SDK for Client Applications
 
 ## Status
 Accepted
 
 ## Context
-The ignite-agent provides a gRPC interface for remote VM management. We need a client SDK that makes it easy for developers to build applications that interact with MicroVMs using Ignite.
+The vyoma-agent provides a gRPC interface for remote VM management. We need a client SDK that makes it easy for developers to build applications that interact with MicroVMs using Vyoma.
 
 ## Decision
-We will create an `ignite-sdk` crate that provides:
+We will create an `vyoma-sdk` crate that provides:
 
 1. **gRPC Client** - Type-safe wrapper around the gRPC service
 2. **VM Operations** - Start, stop, pause, resume, delete VMs
@@ -18,7 +18,7 @@ We will create an `ignite-sdk` crate that provides:
 ### Architecture
 ```
 ┌─────────────┐     gRPC      ┌─────────────┐
-│  SDK Client │ ───────────── │ ignite-agent │
+│  SDK Client │ ───────────── │ vyoma-agent │
 └─────────────┘               └─────────────┘
        │                            │
        ▼                            ▼
@@ -27,10 +27,10 @@ We will create an `ignite-sdk` crate that provides:
 └─────────────┘               └─────────────┘
 ```
 
-### API Design
+### API Desvyoma
 ```rust
 // Connection
-let client = IgniteClient::connect("localhost:9000").await?;
+let client = VyomaClient::connect("localhost:9000").await?;
 
 // VM lifecycle
 let vms = client.list_vms().await?;
@@ -50,5 +50,5 @@ while let Some(log) = stream.next().await {
 
 ## Consequences
 - Positive: Simple, idiomatic Rust API for VM management
-- Positive: Reuses existing gRPC definitions from ignite-proto
+- Positive: Reuses existing gRPC definitions from vyoma-proto
 - Need: Publish SDK to crates.io for external users

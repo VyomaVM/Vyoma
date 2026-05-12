@@ -7,19 +7,19 @@ Accepted | Phase 3.1 (v1.4)
 Currently, all Swarm/VXLAN traffic is plaintext. For multi-tenant deployments, we need encrypted communication between nodes. WireGuard provides modern, efficient encryption with minimal overhead.
 
 ## Decision
-Integrate WireGuard using `boringtun` (pure Rust implementation) in the ignite-net crate.
+Integrate WireGuard using `boringtun` (pure Rust implementation) in the vyoma-net crate.
 
 ### Dependencies
 ```toml
-# crates/ignite-net/Cargo.toml
+# crates/vyoma-net/Cargo.toml
 boringtun = "0.6"
 base64 = "0.22"
 ```
 
-### API Design
+### API Desvyoma
 
 ```rust
-// crates/ignite-net/src/wireguard.rs
+// crates/vyoma-net/src/wireguard.rs
 
 pub struct WireGuardNode {
     secret_key: X25519SecretKey,
@@ -50,8 +50,8 @@ impl WireGuardNode {
 ```
 
 ### Integration with Swarm
-- `ign swarm init`: Generate keypair, store in `/var/lib/ignite/wg.key`, listen on UDP 51820
-- `ign swarm join`: Exchange public keys via HTTP, add as peers
+- `vyoma swarm init`: Generate keypair, store in `/var/lib/vyoma/wg.key`, listen on UDP 51820
+- `vyoma swarm join`: Exchange public keys via HTTP, add as peers
 
 ## Consequences
 **Positive:**

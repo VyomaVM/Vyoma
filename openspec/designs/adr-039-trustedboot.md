@@ -15,7 +15,7 @@ As part of Phase 4, we need to implement image signing and verification. This en
 Implement signing and verification as per the technical spec:
 
 ### Key Components
-1. **Signing**: Sign VMIF manifest with Ed25519 key
+1. **Signing**: Svyoma VMIF manifest with Ed25519 key
 2. **Verification**: Verify signature before booting
 3. **Trust Policy**: Configure trusted keys
 
@@ -31,10 +31,10 @@ pub struct SignedManifest {
 ## Implementation
 
 ### Location
-- `crates/ignite-image/src/signing.rs`
+- `crates/vyoma-image/src/signing.rs`
 
 ### Key Functions
-- `sign_manifest(manifest, key)` - Sign manifest with Ed25519
+- `sign_manifest(manifest, key)` - Svyoma manifest with Ed25519
 - `verify_manifest(signed, trusted_key)` - Verify signature
 
 ### Configuration
@@ -42,8 +42,8 @@ pub struct SignedManifest {
 [security]
 require_signed_images = true
 trusted_keys = [
-    "/etc/ignite/trusted-keys/ci.pub",
-    "/etc/ignite/trusted-keys/hub.pub",
+    "/etc/vyoma/trusted-keys/ci.pub",
+    "/etc/vyoma/trusted-keys/hub.pub",
 ]
 ```
 

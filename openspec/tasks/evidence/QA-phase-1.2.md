@@ -4,9 +4,9 @@
 **Branch:** `feat/phase1-virtiofsd`
 
 ## Validation Objectives
-- [x] Verify `/opt/ignite/bin/` and `/usr/libexec/ignite/` pathing takes priority over standard PATH inside `virtiofs_manager.rs`.
+- [x] Verify `/opt/vyoma/bin/` and `/usr/libexec/vyoma/` pathing takes priority over standard PATH inside `virtiofs_manager.rs`.
 - [x] Ensure `.deb` and `.rpm` build scripts fetch statically linked virtiofsd and place them inside the root directory mappings.
-- [x] Verify `ign doctor` recognizes the new hardcoded paths and successfully validates them.
+- [x] Verify `vyoma doctor` recognizes the new hardcoded paths and successfully validates them.
 
 ## Checks Performed
 1. **Compilation Check**: `cargo check --bin ign` compiled successfully without any errors (`0`). 

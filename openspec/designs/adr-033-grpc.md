@@ -1,14 +1,14 @@
-# ADR-033: gRPC Interface - ignite-proto Crate
+# ADR-033: gRPC Interface - vyoma-proto Crate
 
 **Status**: Accepted | Phase 3.4 (v1.5)
 
 ## Summary
-Implement gRPC interface for Ignite to support Kubernetes CRI (Container Runtime Interface) integration in Phase 4.
+Implement gRPC interface for Vyoma to support Kubernetes CRI (Container Runtime Interface) integration in Phase 4.
 
 ## Context
-As part of Phase 3, we need to add a gRPC interface to Ignite. This enables:
+As part of Phase 3, we need to add a gRPC interface to Vyoma. This enables:
 - Kubernetes CRI integration in Phase 4
-- Better programmatic access to Ignite API
+- Better programmatic access to Vyoma API
 - Streaming support for exec and logs
 
 ## Decision
@@ -33,7 +33,7 @@ service VmService {
 ## Implementation
 
 ### Crate Structure
-Create `crates/ignite-proto/` with:
+Create `crates/vyoma-proto/` with:
 - `proto/vm.proto` - Protocol definitions
 - `src/lib.rs` - Generated code wrapper
 - `src/server.rs` - gRPC server implementation

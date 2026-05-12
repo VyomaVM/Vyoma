@@ -9,7 +9,7 @@
 - [x] Verify module integration
 
 ## Checks Performed
-1. **Implementation**: Created `crates/ignited/src/hibernation.rs` with:
+1. **Implementation**: Created `crates/vyomad/src/hibernation.rs` with:
    - `HibernationInfo` struct with vm_id, hib_dir, snap_path, mem_path, preserved_ip, tap_device
    - `VmState` with status management (Running, Stopped, Hibernated, Paused)
    - `HibernationManager` for managing hibernation lifecycle

@@ -3,10 +3,10 @@
 **Status**: Accepted | Phase 3.3 (v1.5)
 
 ## Summary
-Implement pre-copy live VM migration (Teleport) for the Ignite Swarm, enabling VMs to migrate between nodes with minimal downtime.
+Implement pre-copy live VM migration (Teleport) for the Vyoma Swarm, enabling VMs to migrate between nodes with minimal downtime.
 
 ## Context
-As part of Phase 3, we need to support live VM migration in the Ignite Swarm. This enables:
+As part of Phase 3, we need to support live VM migration in the Vyoma Swarm. This enables:
 - Load balancing across nodes
 - Node maintenance without VM downtime
 - High availability deployment
@@ -22,7 +22,7 @@ Implement pre-copy memory migration using the protocol defined in the technical 
 ## Implementation
 
 ### Crate Structure
-Create `crates/ignite-teleport/` with:
+Create `crates/vyoma-teleport/` with:
 - `sender.rs` - Source node migration logic
 - `receiver.rs` - Destination node receive logic
 - `protocol.rs` - Wire protocol for memory transfer

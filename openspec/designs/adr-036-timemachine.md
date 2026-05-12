@@ -15,18 +15,18 @@ As part of Phase 4, we need to implement the TimeMachine feature that provides g
 Implement TimeMachine as per the technical spec:
 
 ### CLI Commands
-1. `ign history <vm-id>` - View snapshot timeline
-2. `ign time-travel <vm-id> --to snap:N` - Restore to snapshot
+1. `vyoma history <vm-id>` - View snapshot timeline
+2. `vyoma time-travel <vm-id> --to snap:N` - Restore to snapshot
 
 ### Auto-Snapshot Policy
-Support automatic snapshots from Ignitefile with configurable interval and retention.
+Support automatic snapshots from Vyomafile with configurable interval and retention.
 
 ## Implementation
 
 ### Location
-- `crates/ign/src/commands/snapshot.rs` - CLI commands
-- `crates/ignited/src/timemachine.rs` - Core implementation
-- `crates/ignited/src/auto_snapshot.rs` - Auto-snapshot task
+- `crates/vyoma/src/commands/snapshot.rs` - CLI commands
+- `crates/vyomad/src/timemachine.rs` - Core implementation
+- `crates/vyomad/src/auto_snapshot.rs` - Auto-snapshot task
 
 ### SnapshotEntry Structure
 ```rust

@@ -4,12 +4,12 @@
 **Branch:** `feat/phase3-teleport`
 
 ## Validation Objectives
-- [x] Verify Teleport implementation in ignite-teleport crate
+- [x] Verify Teleport implementation in vyoma-teleport crate
 - [x] Check unit tests exist and pass
 - [x] Verify module structure matches spec
 
 ## Checks Performed
-1. **Implementation**: Created `crates/ignite-teleport/` with:
+1. **Implementation**: Created `crates/vyoma-teleport/` with:
    - `sender.rs`: MigrationSender with pre-copy protocol
    - `receiver.rs`: MigrationReceiver for destination node
    - `protocol.rs`: Wire protocol definitions
@@ -29,7 +29,7 @@
 
 3. **Module Integration**: Added to workspace in Cargo.toml
 
-4. **Compilation**: All tests pass with `cargo test --package ignite-teleport`
+4. **Compilation**: All tests pass with `cargo test --package vyoma-teleport`
 
 ## Technical Details
 The Teleport implementation provides:

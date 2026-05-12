@@ -12,7 +12,7 @@
 1. **Implementation**: Created `vk8s/` Go project with:
    - `cmd/main.go` - Main entry point
    - `pkg/cri/server.go` - CRI server implementation
-   - `pkg/ignite/client.go` - Ignite gRPC client wrapper
+   - `pkg/vyoma/client.go` - Vyoma gRPC client wrapper
 
 2. **CRI Server**: Implements Kubernetes CRI API:
    - `RunPodSandbox` - Create VM for Pod
@@ -35,14 +35,14 @@
    - `TestContainerStatus` - Verify container status
 
 4. **Configuration**:
-   - Socket path: `/var/run/ignite-cri.sock`
-   - Uses gRPC to communicate with ignited
+   - Socket path: `/var/run/vyoma-cri.sock`
+   - Uses gRPC to communicate with vyomad
 
 ## Technical Details
 - Go-based CRI server
 - Communicates with kubelet via CRI API
-- Uses gRPC client to interact with ignited
-- Maps Kubernetes Pods to Ignite VMs
+- Uses gRPC client to interact with vyomad
+- Maps Kubernetes Pods to Vyoma VMs
 
 ## Status: PASSED
 

@@ -18,7 +18,7 @@
 
 ## Technical Details
 The issue was a race condition on WSL2:
-- Time 0ms: ignited starts
+- Time 0ms: vyomad starts
 - Time 100ms: Creates ign0 bridge
 - Time 200ms: Assigns IP 10.61.0.1 to bridge
 - Time 150ms: DNS tries to bind ← TOO EARLY!

@@ -1,4 +1,4 @@
-# QA Evidence - Phase 5.7: Ignite Studio v2
+# QA Evidence - Phase 5.7: Vyoma Studio v2
 
 ## Feature Description
 Enhanced dashboard with TimeMachine, Network Topology, Compose Editor, and Hub Browser views.

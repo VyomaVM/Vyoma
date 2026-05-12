@@ -10,7 +10,7 @@
 
 ## Checks Performed
 1. **build_deb.sh**: Added KVM group configuration:
-   - `usermod -aG kvm ignite` to add ignite user to kvm group
+   - `usermod -aG kvm vyoma` to add vyoma user to kvm group
    - `chmod 0660 /dev/kvm` to fix permissions
    - `chown root:kvm /dev/kvm` for group ownership
 2. **build_rpm.sh**: Same KVM fixes added

@@ -1,4 +1,4 @@
-# ADR-026: ignite-storage Crate - Storage Layer Refactor
+# ADR-026: vyoma-storage Crate - Storage Layer Refactor
 
 ## Status
 Accepted | Phase 2 (v1.3)
@@ -11,11 +11,11 @@ Currently (v1.2), the storage layer uses subprocess calls to `dmsetup` and `lose
 - External dependency on specific CLI tools
 
 ## Decision
-Create a new `ignite-storage` crate with Rust-native bindings to `devicemapper` and `loopdev` crates.
+Create a new `vyoma-storage` crate with Rust-native bindings to `devicemapper` and `loopdev` crates.
 
 ### Crate Structure
 ```
-crates/ignite-storage/
+crates/vyoma-storage/
 ├── Cargo.toml
 └── src/
     ├── lib.rs          # Re-exports
@@ -33,7 +33,7 @@ thiserror = "1.0"
 anyhow = "1.0"
 ```
 
-### API Design
+### API Desvyoma
 
 #### Device Mapper (dm.rs)
 ```rust
@@ -92,7 +92,7 @@ impl LoopManager {
 - Native library dependencies (libdevmapper, libloop)
 
 ## Migration Strategy
-1. Create `ignite-storage` crate alongside existing code
+1. Create `vyoma-storage` crate alongside existing code
 2. Add to workspace Cargo.toml
 3. Migrate one function at a time
 4. Remove subprocess calls once migration complete

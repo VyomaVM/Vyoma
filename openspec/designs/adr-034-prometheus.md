@@ -3,10 +3,10 @@
 **Status**: Accepted | Phase 3.5 (v1.6)
 
 ## Summary
-Implement Prometheus metrics endpoint for Ignite to enable monitoring and observability.
+Implement Prometheus metrics endpoint for Vyoma to enable monitoring and observability.
 
 ## Context
-As part of Phase 3, we need to add Prometheus metrics to Ignite. This enables:
+As part of Phase 3, we need to add Prometheus metrics to Vyoma. This enables:
 - VM and container runtime monitoring
 - Performance tracking and alerting
 - Integration with Prometheus-compatible tools
@@ -15,7 +15,7 @@ As part of Phase 3, we need to add Prometheus metrics to Ignite. This enables:
 Implement metrics endpoint as per the technical spec:
 
 ```rust
-pub struct IgniteMetrics {
+pub struct VyomaMetrics {
     pub vms_running:      Gauge,
     pub vms_total:        Counter,
     pub vm_boot_duration: Histogram,
@@ -28,7 +28,7 @@ pub struct IgniteMetrics {
 ## Implementation
 
 ### Location
-- `crates/ignited/src/metrics.rs`
+- `crates/vyomad/src/metrics.rs`
 
 ### Metrics Types
 1. **vms_running**: Current number of running VMs (Gauge)

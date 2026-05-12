@@ -6,11 +6,11 @@
 ## Validation Objectives
 - [x] Verify Prometheus metrics implementation
 - [x] Check unit tests exist and pass
-- [x] Verify module integration in ignited
+- [x] Verify module integration in vyomad
 
 ## Checks Performed
-1. **Implementation**: Created `crates/ignited/src/metrics.rs` with:
-   - `IgniteMetrics` struct with all required metrics
+1. **Implementation**: Created `crates/vyomad/src/metrics.rs` with:
+   - `VyomaMetrics` struct with all required metrics
    - `vms_running`: Gauge - Number of currently running VMs
    - `vms_total`: Counter - Total VMs created
    - `vm_boot_duration`: Histogram - VM boot time in seconds
