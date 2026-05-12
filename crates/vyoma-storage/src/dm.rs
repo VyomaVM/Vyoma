@@ -104,7 +104,9 @@ pub fn create_snapshot(
             .table_load(&DevId::Name(&snap_name), &snap_table, DmOptions::default())
             .map_err(|e| StorageError::Other(format!("Failed to load snapshot table via dm API: {}", e)))?;
 
-        // Activate both devices (resume without DM_SUSPEND flag)
+        // Activate both devices by calling device_suspend without DM_SUSPEND flag.
+        // device_suspend() with no flags = RESUMES/activates the device for I/O.
+        // device_suspend() with DM_SUSPEND flag = SUSPENDS/freezes I/O.
         self.dm
             .device_suspend(&DevId::Name(&origin_name), DmOptions::default())
             .map_err(|e| StorageError::Other(format!("Failed to activate origin device: {}", e)))?;
