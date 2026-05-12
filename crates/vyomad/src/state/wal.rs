@@ -168,4 +168,37 @@ impl Wal {
             })
             .collect()
     }
+
+    pub fn get_active_vm_ids(&self) -> Vec<(String, u64)> {
+        use std::collections::HashMap;
+        let mut latest: HashMap<String, (WalEntry, u64)> = HashMap::new();
+        
+        for (key, entry) in self.iterate_wal() {
+            let parts: Vec<&str> = key.splitn(2, ':').collect();
+            if parts.len() == 2 {
+                let ts = parts[0].parse::<u64>().unwrap_or(0);
+                let vm_id = parts[1].to_string();
+                
+                match latest.get_mut(&vm_id) {
+                    Some((_, existing_ts)) if ts > *existing_ts => {
+                        *existing_ts = ts;
+                    },
+                    None => { 
+                        latest.insert(vm_id, (entry, ts)); 
+                    },
+                    _ => {}
+                }
+            }
+        }
+        
+        latest.into_iter()
+            .filter(|(_, (entry, _))| {
+                matches!(entry,
+                    WalEntry::VmCreate { .. } |
+                    WalEntry::VmStart { .. }
+                )
+            })
+            .map(|(vm_id, (_, ts))| (vm_id, ts))
+            .collect()
+    }
 }

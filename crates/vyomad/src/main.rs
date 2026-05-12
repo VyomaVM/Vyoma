@@ -137,18 +137,6 @@ async fn main() {
         }
     };
 
-    // Run crash recovery
-    match Recovery::recover_on_startup(&home, &wal) {
-        Ok(recovered_vms) => {
-            for vm in &recovered_vms {
-                info!("Recovered VM: {} with status: {:?}", vm.vm_id, vm.status);
-            }
-        }
-        Err(e) => {
-            warn!("Recovery scan failed: {}", e);
-        }
-    }
-
     let (events_tx, _rx) = broadcast::channel(100);
 
     let timemachine = Arc::new(tokio::sync::RwLock::new(timemachine::TimeMachine::new(&db)));
@@ -186,7 +174,55 @@ async fn main() {
         api_token,
     };
 
-    api::handlers::initialize_state(&state).await;
+    // Run WAL-based crash recovery and adopt surviving VMs
+    let recovered_vms = match Recovery::recover_on_startup(&home, &state.wal, &state).await {
+        Ok(vms) => vms,
+        Err(e) => {
+            warn!("Recovery scan failed: {}", e);
+            vec![]
+        }
+    };
+
+    // Adopt recovered VMs into state
+    for rvm in recovered_vms {
+        if matches!(rvm.status, crate::state::recovery::VmRecoveryStatus::Running) {
+            info!("Adopting recovered VM: {}", rvm.vm_id);
+            
+            let vm_dir = home.join(".vyoma").join("vms").join(&rvm.vm_id);
+            let ch_socket = vm_dir.join("ch.sock").to_string_lossy().to_string();
+            
+            let vmm = vyoma_core::vmm::VmmManager::new(&ch_socket);
+            
+            let vm_instance = crate::state::VmInstance {
+                vmm,
+                id: rvm.vm_id.clone(),
+                status: crate::state::VmStatus::Running,
+                attestation_status: None,
+                ch_socket_path: ch_socket,
+                tap_name: rvm.state.tap_name.clone(),
+                dm_name: rvm.state.dm_name.clone(),
+                loop_devices: rvm.state.loop_devices.clone(),
+                cow_file_path: rvm.state.cow_file_path.clone(),
+                ip_address: rvm.state.ip_address.clone(),
+                proxy_tasks: vec![],
+                fs_managers: vec![],
+                vtpm_manager: None,
+                cgroup_path: rvm.state.cgroup_path.clone(),
+                netns_path: rvm.state.netns_path.clone(),
+                config_ports: rvm.state.ports.clone(),
+                config_volumes: rvm.state.volumes.clone(),
+                hostname: rvm.state.hostname.clone(),
+                labels: rvm.state.labels.clone(),
+                networks: rvm.state.networks.clone(),
+                base_image_path: rvm.state.base_image_path.clone(),
+                vcpu: rvm.state.vcpu,
+                mem_size_mib: rvm.state.mem_size_mib,
+            };
+            
+            let mut vms = state.vms.lock().unwrap();
+            vms.insert(rvm.vm_id, Arc::new(tokio::sync::Mutex::new(vm_instance)));
+        }
+    }
 
     api::handlers::start_process_monitor(state.clone()).await;
 
