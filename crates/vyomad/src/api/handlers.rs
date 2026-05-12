@@ -1701,11 +1701,9 @@ pub async fn attest_vm_handler(
         }
     };
 
-    let (tpm_socket, base_image_path) = {
+    let tpm_socket = {
         let vm = vm_arc.lock().await;
-        let socket = vm.vtpm_manager.as_ref().map(|vtpm| vtpm.socket_path().to_string());
-        let path = vm.base_image_path.clone();
-        (socket, path)
+        vm.vtpm_manager.as_ref().map(|vtpm| vtpm.socket_path().to_string())
     };
 
     let tpm_socket = match tpm_socket {
@@ -1718,61 +1716,37 @@ pub async fn attest_vm_handler(
         }
     };
 
-    let image_name = resolve_image_name_from_path(&base_image_path);
-    let signed_manifest = match load_signed_manifest_for_attest(&image_name) {
-        Ok(m) => m,
-        Err(e) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                format!("Failed to load manifest: {}", e),
-            ));
-        }
-    };
+    // Build attestation config from policy (same as boot-time does)
+    let config = crate::vm_service::policy::build_attestation_config(&Arc::new(state.clone()));
+    let image_name = resolve_image_name_from_path(&vm_arc.lock().await.base_image_path);
 
-    let expected_pcrs = match signed_manifest.manifest.measured_boot.pcr_policy {
-        Some(pcrs) => pcrs,
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!("Image {} has no PCR policy defined", image_name),
-            ));
-        }
-    };
+    // Call the shared verification function
+    let result = crate::vm_service::policy::verify_attestation_from_manifest(
+        &image_name,
+        &tpm_socket,
+        &config,
+    ).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    let pcrs = read_pcrs_from_socket(&tpm_socket, &[0u32, 1, 4, 5, 7, 9, 10, 14])
-        .map_err(|e| {
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read PCRs from vTPM: {}", e))
-        })?;
+    // Map policy PcrResult to handler PcrResult
+    let pcr_results = result.pcr_results.into_iter().map(|pcr| PcrResult {
+        pcr_index: pcr.pcr_index,
+        expected: pcr.expected,
+        actual: pcr.actual,
+        verified: pcr.verified,
+    }).collect();
 
-    let mut pcr_results = Vec::new();
-    let mut all_verified = true;
-
-    for (pcr_idx, expected_hash) in &expected_pcrs {
-        let actual_hash = pcrs.get(pcr_idx).cloned().unwrap_or_default();
-        let verified = actual_hash == *expected_hash;
-
-        if !verified {
-            all_verified = false;
-        }
-
-        pcr_results.push(PcrResult {
-            pcr_index: *pcr_idx,
-            expected: expected_hash.clone(),
-            actual: actual_hash.clone(),
-            verified,
-        });
-    }
+    let verified = result.verified;
 
     info!(
         "Attestation for VM {}: {}",
         id,
-        if all_verified { "VERIFIED" } else { "FAILED" }
+        if verified { "VERIFIED" } else { "FAILED" }
     );
 
     // Update the VM instance's attestation status
     {
         let mut vm = vm_arc.lock().await;
-        vm.attestation_status = Some(if all_verified {
+        vm.attestation_status = Some(if verified {
             "VERIFIED".to_string()
         } else {
             "FAILED".to_string()
@@ -1781,29 +1755,10 @@ pub async fn attest_vm_handler(
 
     Ok(Json(AttestResponse {
         vm_id: id,
-        verified: all_verified,
+        verified,
         pcr_results,
-        error: if all_verified { None } else { Some("PCR mismatch detected".to_string()) },
+        error: result.error,
     }))
-}
-
-fn read_pcrs_from_socket(socket: &str, indices: &[u32]) -> Result<std::collections::HashMap<u32, String>, String> {
-    let pcr_list = indices.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
-    let output = std::process::Command::new("tpm2_pcrread")
-        .args(&[
-            "-T", &format!("socket:path={}", socket),
-            "-g", "sha256",
-            "-o", &pcr_list,
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run tpm2_pcrread: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!("tpm2_pcrread failed: {}", String::from_utf8_lossy(&output.stderr)));
-    }
-
-    vyoma_core::attest::parse_pcr_values(&output.stdout)
-        .map_err(|e| format!("Failed to parse PCR values: {}", e))
 }
 
 fn resolve_image_name_from_path(base_image_path: &str) -> String {
@@ -1814,39 +1769,6 @@ fn resolve_image_name_from_path(base_image_path: &str) -> String {
         }
     }
     base_image_path.to_string()
-}
-
-fn load_signed_manifest_for_attest(image_name: &str) -> Result<vyoma_image::SignedManifest, String> {
-    let home = dirs::home_dir().ok_or_else(|| "No home directory".to_string())?;
-
-    let candidates = [
-        home.join(".vyoma").join("images").join(image_name),
-        home.join(".vyoma").join("images").join(image_name),
-    ];
-
-    for image_dir in &candidates {
-        let sig_path = image_dir.join("vyoma.toml.sig");
-        if sig_path.exists() {
-            return vyoma_image::VmifConverter::load_signed_manifest(&sig_path)
-                .map_err(|e| format!("Failed to load signed manifest: {}", e));
-        }
-
-        let manifest_path = image_dir.join("vyoma.toml");
-        if manifest_path.exists() {
-            let manifest = vyoma_image::VmifConverter::load_manifest(&manifest_path)
-                .map_err(|e| format!("Failed to load manifest: {}", e))?;
-            return Ok(vyoma_image::SignedManifest {
-                manifest,
-                signature: Vec::new(),
-                public_key: Vec::new(),
-            });
-        }
-    }
-
-    Err(format!(
-        "Image {} not found in ~/.vyoma/images or ~/.vyoma/images",
-        image_name
-    ))
 }
 
 pub async fn set_policy_handler(

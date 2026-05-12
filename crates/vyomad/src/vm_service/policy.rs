@@ -11,6 +11,23 @@ use vyoma_core::vtpm::VtpmManager;
 use vyoma_core::vmm::VmmManager;
 use vyoma_image::{VmifConverter, SignedManifest};
 
+/// PCR comparison result for a single PCR index.
+#[derive(Debug, Clone)]
+pub struct PcrResult {
+    pub pcr_index: u32,
+    pub expected: String,
+    pub actual: String,
+    pub verified: bool,
+}
+
+/// Result of an attestation verification.
+pub struct AttestationResult {
+    pub verified: bool,
+    pub pcr_results: Vec<PcrResult>,
+    pub signed_manifest_verified: bool,
+    pub error: Option<String>,
+}
+
 /// Configuration for measured boot verification behavior.
 #[derive(Debug, Clone)]
 pub struct MeasuredBootConfig {
@@ -82,22 +99,28 @@ pub async fn check_policy_and_perform_attestation(
     let start = Instant::now();
 
     // Perform the attestation check with timeout
-    let result = timeout(verification_timeout, perform_attestation_check(
-        state.clone(),
-        vm_id.clone(),
-        vm_dir,
-        image_name,
-        tpm_socket.clone(),
-        attestation_config,
+    let result = timeout(verification_timeout, verify_attestation_from_manifest(
+        &image_name,
+        &tpm_socket,
+        &attestation_config,
     )).await;
 
     match result {
-        Ok(Ok(())) => {
-            let elapsed = start.elapsed();
-            info!("Attestation verification succeeded for VM {} in {:.2?}", vm_id, elapsed);
-            update_vm_status(&state, &vm_id, VmStatus::Running).await
-                .map_err(|e| format!("Failed to update VM status: {}", e))?;
-            Ok(())
+        Ok(Ok(attestation_result)) => {
+            if attestation_result.verified {
+                let elapsed = start.elapsed();
+                info!("Attestation verification succeeded for VM {} in {:.2?}", vm_id, elapsed);
+                update_vm_status(&state, &vm_id, VmStatus::Running).await
+                    .map_err(|e| format!("Failed to update VM status: {}", e))?;
+                Ok(())
+            } else {
+                let elapsed = start.elapsed();
+                let error_msg = attestation_result.error
+                    .unwrap_or_else(|| "Attestation failed".to_string());
+                error!("Attestation verification failed for VM {} after {:.2?}: {}", vm_id, elapsed, error_msg);
+                handle_attestation_failure(&state, &vm_id, &format!("Attestation failed: {}", error_msg)).await;
+                Err(error_msg)
+            }
         }
         Ok(Err(e)) => {
             let elapsed = start.elapsed();
@@ -117,28 +140,26 @@ pub async fn check_policy_and_perform_attestation(
 }
 
 /// The core attestation check logic - gets PCR quote, loads manifest, verifies.
-async fn perform_attestation_check(
-    state: Arc<AppState>,
-    vm_id: String,
-    _vm_dir: PathBuf,
-    image_name: String,
-    tpm_socket: String,
-    config: MeasuredBootConfig,
-) -> Result<(), String> {
+/// Returns an AttestationResult with detailed verification info.
+pub async fn verify_attestation_from_manifest(
+    image_name: &str,
+    tpm_socket: &str,
+    config: &MeasuredBootConfig,
+) -> Result<AttestationResult, String> {
     // Step 1: Get PCR quote from the vTPM
-    info!("Getting PCR quote from vTPM for VM {}", vm_id);
-    let quote_data = get_pcr_quote(&vm_id, &tpm_socket)
+    info!("Getting PCR quote from vTPM for image {}", image_name);
+    let quote_data = get_pcr_quote("attest", tpm_socket)
         .map_err(|e| format!("Failed to get PCR quote: {}", e))?;
-    info!("Retrieved PCR quote ({} bytes) for VM {}", quote_data.len(), vm_id);
+    info!("Retrieved PCR quote ({} bytes) for image {}", quote_data.len(), image_name);
 
     // Step 2: Parse the PCR quote to extract PCR values
     let live_pcrs = vyoma_core::attest::parse_pcr_values(&quote_data)
         .map_err(|e| format!("Failed to parse PCR values from quote: {}", e))?;
-    info!("Parsed {} PCR values from quote for VM {}", live_pcrs.len(), vm_id);
+    info!("Parsed {} PCR values from quote for image {}", live_pcrs.len(), image_name);
 
     // Step 3: Load and verify the signed manifest
     info!("Loading signed manifest for image {}", image_name);
-    let signed_manifest = load_and_verify_manifest(&image_name, &config).await?;
+    let signed_manifest = load_and_verify_manifest(image_name, config).await?;
     info!("Successfully loaded and verified signed manifest for image {}", image_name);
 
     // Step 4: Extract expected PCR values from the manifest
@@ -148,7 +169,7 @@ async fn perform_attestation_check(
 
     // Step 5: Build an AttestationResponse from the parsed quote
     let attestation_response = AttestationResponse {
-        vm_id: vm_id.clone(),
+        vm_id: image_name.to_string(),
         verified: true,
         quote: Some(TpmQuote {
             quote: quote_data,
@@ -165,38 +186,73 @@ async fn perform_attestation_check(
     let result = verifier.verify_tpm_attestation(&attestation_response, &expected_pcrs)
         .map_err(|e| format!("Attestation verification error: {}", e))?;
 
+    // Step 7: Build detailed PCR results
+    let mut pcr_results = Vec::new();
+    for (pcr_index, expected_hash) in &expected_pcrs {
+        let actual_hash = live_pcrs.get(pcr_index).cloned().unwrap_or_default();
+        let verified = actual_hash == *expected_hash;
+        pcr_results.push(PcrResult {
+            pcr_index: *pcr_index,
+            expected: expected_hash.clone(),
+            actual: actual_hash,
+            verified,
+        });
+    }
+
+    let signed_manifest_verified = result.verified;
+
     if !result.verified {
         let error_msg = result.error
             .unwrap_or_else(|| "PCR verification failed".to_string());
         // Log which PCRs failed
-        for measurement in &result.measurements {
-            if !measurement.verified {
+        for pcr_result in &pcr_results {
+            if !pcr_result.verified {
                 warn!("PCR {} verification FAILED - expected value did not match live value: {}",
-                    measurement.name, measurement.value);
+                    pcr_result.pcr_index, pcr_result.actual);
             }
         }
-        return Err(format!("PCR attestation failed: {}", error_msg));
+        return Ok(AttestationResult {
+            verified: false,
+            pcr_results,
+            signed_manifest_verified,
+            error: Some(error_msg),
+        });
     }
 
     // Additional direct check: verify all expected PCRs are present and match
     for (pcr_index, expected_hash) in &expected_pcrs {
         if let Some(actual_hash) = live_pcrs.get(pcr_index) {
             if actual_hash != expected_hash {
-                return Err(format!(
-                    "PCR {} mismatch after unified verification: expected {}, got {}",
-                    pcr_index, expected_hash, actual_hash
-                ));
+                return Ok(AttestationResult {
+                    verified: false,
+                    pcr_results,
+                    signed_manifest_verified,
+                    error: Some(format!(
+                        "PCR {} mismatch after unified verification: expected {}, got {}",
+                        pcr_index, expected_hash, actual_hash
+                    )),
+                });
             }
         } else {
-            return Err(format!(
-                "PCR {} not found in live quote but expected in manifest",
-                pcr_index
-            ));
+            return Ok(AttestationResult {
+                verified: false,
+                pcr_results,
+                signed_manifest_verified,
+                error: Some(format!(
+                    "PCR {} not found in live quote but expected in manifest",
+                    pcr_index
+                )),
+            });
         }
     }
 
-    info!("All PCR values verified successfully for VM {}", vm_id);
-    Ok(())
+    info!("All PCR values verified successfully for image {}", image_name);
+    Ok(AttestationResult {
+        verified: true,
+        pcr_results,
+        signed_manifest_verified,
+        error: None,
+    })
 }
 
 /// Get a PCR quote from the vTPM using the tpm2-tools.
@@ -408,7 +464,7 @@ async fn kill_vm(state: &Arc<AppState>, vm_id: &str) -> Result<(), String> {
 }
 
 /// Build a MeasuredBootConfig from the current policy manager state.
-fn build_attestation_config(state: &Arc<AppState>) -> MeasuredBootConfig {
+pub fn build_attestation_config(state: &Arc<AppState>) -> MeasuredBootConfig {
     let policy = state.policy_manager.lock().unwrap();
     let config = policy.get_config();
 
