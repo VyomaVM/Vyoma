@@ -44,7 +44,7 @@ sudo rpm -i vyoma-2.1.2-1.x86_64.rpm
 
 **What's Installed:**
 *   `/usr/bin/vyomad`: The Daemon (Run via Systemd).
-*   `/usr/bin/ign`: The CLI Tool.
+*   `/usr/bin/vyoma`: The CLI Tool.
 *   `/usr/bin/cloud-hypervisor`: Bundled VMM binary.
 *   `/usr/lib/vyoma/cni/bin/`: CNI plugins for networking.
 *   `/usr/lib/vyoma/ui/`: Web dashboard (served at `http://localhost:3000`).

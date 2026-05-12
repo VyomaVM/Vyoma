@@ -1,9 +1,9 @@
 #!/bin/bash
 # cleanup_resouces.sh
-# DANGER: This script force-cleans all Ignite-related resources.
+# DANGER: This script force-cleans all Vyoma-related resources.
 # run with sudo.
 
-echo ">>> Cleaning up Ignite resources..."
+echo ">>> Cleaning up Vyoma resources..."
 
 # 1. Kill all Firecracker processes
 echo "Killing VMMs..."
