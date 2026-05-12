@@ -107,7 +107,7 @@ impl NetworkIntegration {
         self.remove_subnet_route(subnet_id);
     }
 
-    pub fn update_node(&self, node_id: u64, old_subnet_id: u8, new_addr: Option<&str>, new_wg_key: Option<&str>, new_wg_port: Option<u16>, _new_subnet_id: u8) {
+    pub fn update_node(&self, _node_id: u64, old_subnet_id: u8, new_addr: Option<&str>, new_wg_key: Option<&str>, new_wg_port: Option<u16>, _new_subnet_id: u8) {
         if new_addr.is_some() || new_wg_key.is_some() {
             if let Some(addr) = new_addr {
                 if let (Some(key), Some(port)) = (new_wg_key, new_wg_port) {

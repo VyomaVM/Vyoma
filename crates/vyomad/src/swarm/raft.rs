@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error};
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SwarmCommand {
