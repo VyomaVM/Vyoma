@@ -70,6 +70,7 @@ impl AppState {
 pub enum VmStatus {
     PendingAttestation,
     Running,
+    AttestationFailed { reason: String },
     Error { reason: String },
 }
 
