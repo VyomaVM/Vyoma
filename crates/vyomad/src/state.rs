@@ -11,7 +11,6 @@ use vyoma_core::vmm::VmmManager;
 use vyoma_core::vtpm::VtpmManager;
 use vyoma_core::policy::PolicyManager;
 
-use crate::swarm::raft_types::SwarmConfig;
 use crate::swarm::{SwarmRaft, NetworkIntegration};
 
 pub mod wal;
@@ -26,7 +25,6 @@ pub struct AppState {
     pub events_tx: broadcast::Sender<String>,
     pub wal: Arc<wal::Wal>,
     pub data_dir: String,
-    pub raft: Option<openraft::Raft<SwarmConfig>>,
     pub swarm_raft: Arc<StdMutex<SwarmRaft>>,
     pub network_integration: Arc<StdMutex<Option<NetworkIntegration>>>,
     pub timemachine: Arc<tokio::sync::RwLock<crate::timemachine::TimeMachine>>,
@@ -47,7 +45,6 @@ impl AppState {
             events_tx,
             wal: Arc::new(wal::Wal::new_test()),
             data_dir: "/tmp/test".to_string(),
-            raft: None,
             swarm_raft: Arc::new(StdMutex::new(SwarmRaft::new(1))),
             network_integration: Arc::new(StdMutex::new(None)),
             timemachine: Arc::new(tokio::sync::RwLock::new(crate::timemachine::TimeMachine::new_test())),
@@ -64,7 +61,6 @@ impl AppState {
             events_tx: self.events_tx.clone(),
             wal: self.wal.clone(),
             data_dir: self.data_dir.clone(),
-            raft: self.raft.clone(),
             swarm_raft: self.swarm_raft.clone(),
             network_integration: self.network_integration.clone(),
             timemachine: self.timemachine.clone(),
