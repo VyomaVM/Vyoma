@@ -74,7 +74,7 @@ mkdir -p "$PACKAGE_DIR/DEBIAN"
 cp "$PROJECT_ROOT/target/release/ign" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 cp "$PROJECT_ROOT/target/release/vyomad" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 
-# Copy ignite binaries
+# Copy vyoma binaries
 cp "$PROJECT_ROOT/target/release/vyoma-agent" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 
 # Copy UI dist
