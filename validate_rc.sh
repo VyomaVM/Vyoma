@@ -1,15 +1,15 @@
 #!/bin/bash
 set -e
 
-# Ignite Release Candidate Validation Script
-# Assumes 'ign' and 'ignited' are in target/release/ or available in PATH if configured.
+# Vyoma Release Candidate Validation Script
+# Assumes 'vyoma' and 'vyomad' are in target/release/ or available in PATH if configured.
 # This script starts the daemon, runs a VM, checks it, and shuts down.
 
 echo ">>> Setting up environment..."
 export RUST_LOG=info
-DAEMON_BIN="./target/release/ignited"
-CLI_BIN="./target/release/ign"
-PID_FILE="ignited.pid"
+DAEMON_BIN="./target/release/vyomad"
+CLI_BIN="./target/release/vyoma"
+PID_FILE="vyomad.pid"
 
 # Cleanup function
 cleanup() {

@@ -15,7 +15,7 @@ pkill -f "virtiofsd" || echo "No VirtioFS processes running."
 
 # 3. Kill Daemon
 echo "Killing Daemon..."
-pkill -f "ignited" || echo "No Daemon running."
+pkill -f "vyomad" || echo "No Daemon running."
 
 # 4. Remove Device Mapper devices
 echo "Removing DM devices (ign-*)..."
@@ -26,7 +26,7 @@ done
 
 # 5. Detach Loop Devices
 echo "Detaching Loop devices..."
-losetup -a | grep ".ignite" | awk -F: '{print $1}' | while read -r dev; do
+losetup -a | grep ".vyoma" | awk -F: '{print $1}' | while read -r dev; do
     echo "Detaching $dev..."
     losetup -d "$dev"
 done

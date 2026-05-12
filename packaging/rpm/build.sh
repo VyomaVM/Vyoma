@@ -75,13 +75,13 @@ mkdir -p "$PACKAGE_DIR/usr/bin"
 mkdir -p "$PACKAGE_DIR/usr/lib/vyoma"
 mkdir -p "$PACKAGE_DIR/usr/share/applications"
 mkdir -p "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps"
-mkdir -p "$PACKAGE_DIR/usr/share/doc/ignite"
+mkdir -p "$PACKAGE_DIR/usr/share/doc/vyoma"
 mkdir -p "$PACKAGE_DIR/SOURCES"
 
 # Copy binaries
 cp "$PROJECT_ROOT/target/release/ign" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 cp "$PROJECT_ROOT/target/release/vyomad" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
-cp "$PROJECT_ROOT/target/release/ignite-agent" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
+cp "$PROJECT_ROOT/target/release/vyoma-agent" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 
 # Copy UI dist
 if [ -d "$PROJECT_ROOT/ui/dist" ]; then
@@ -104,7 +104,7 @@ fi
 
 # Copy favicon as icon
 if [ -f "$PROJECT_ROOT/ui/public/favicon.svg" ]; then
-    cp "$PROJECT_ROOT/ui/public/favicon.svg" "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps/ignite.svg"
+    cp "$PROJECT_ROOT/ui/public/favicon.svg" "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps/vyoma.svg"
 fi
 
 # Create desktop file
@@ -113,7 +113,7 @@ cat > "$PACKAGE_DIR/usr/share/applications/vyoma.desktop" << 'EOF'
 Name=Vyoma
 Comment=MicroVM Management Dashboard
 Exec=/usr/bin/vyomad
-Icon=ignite
+Icon=vyoma
 Terminal=false
 Type=Application
 Categories=System;Virtualization;
@@ -125,8 +125,8 @@ mkdir -p "$PACKAGE_DIR/lib/systemd/system"
 cp "$PROJECT_ROOT/packaging/systemd/vyomad.service" "$PACKAGE_DIR/lib/systemd/system/"
 
 # Create RPM SPEC file
-cat > "$BUILD_DIR/ignite.spec" << SPECFILE
-Name:           ignite
+cat > "$BUILD_DIR/vyoma.spec" << SPECFILE
+Name:           vyoma
 Version:        ${VERSION}
 Release:        1%{?dist}
 Summary:        Lightweight MicroVM runtime
@@ -156,30 +156,30 @@ mkdir -p %{buildroot}/usr/bin
 mkdir -p %{buildroot}/usr/lib/vyoma
 mkdir -p %{buildroot}/usr/share/applications
 mkdir -p %{buildroot}/usr/share/icons/hicolor/64x64/apps
-mkdir -p %{buildroot}/usr/share/doc/ignite
+mkdir -p %{buildroot}/usr/share/doc/vyoma
 mkdir -p %{buildroot}/lib/systemd/system
 
 # Copy binaries
 cp -r usr/bin/* %{buildroot}/usr/bin/
 
 # Copy UI
-if [ -d usr/lib/ignite/ui ]; then
-    cp -r usr/lib/ignite/ui %{buildroot}/usr/lib/vyoma/
+if [ -d usr/lib/vyoma/ui ]; then
+    cp -r usr/lib/vyoma/ui %{buildroot}/usr/lib/vyoma/
 fi
 
 # Copy firecracker binaries
-if [ -d usr/lib/ignite/bin ]; then
-    cp -r usr/lib/ignite/bin %{buildroot}/usr/lib/vyoma/
+if [ -d usr/lib/vyoma/bin ]; then
+    cp -r usr/lib/vyoma/bin %{buildroot}/usr/lib/vyoma/
 fi
 
 # Copy virtiofsd
-if [ -f usr/lib/ignite/virtiofsd ]; then
-    cp usr/lib/ignite/virtiofsd %{buildroot}/usr/lib/vyoma/
+if [ -f usr/lib/vyoma/virtiofsd ]; then
+    cp usr/lib/vyoma/virtiofsd %{buildroot}/usr/lib/vyoma/
 fi
 
 # Copy icon
-if [ -f usr/share/icons/hicolor/64x64/apps/ignite.svg ]; then
-    cp usr/share/icons/hicolor/64x64/apps/ignite.svg %{buildroot}/usr/share/icons/hicolor/64x64/apps/
+if [ -f usr/share/icons/hicolor/64x64/apps/vyoma.svg ]; then
+    cp usr/share/icons/hicolor/64x64/apps/vyoma.svg %{buildroot}/usr/share/icons/hicolor/64x64/apps/
 fi
 
 # Copy desktop file
@@ -192,28 +192,28 @@ cp lib/systemd/system/vyomad.service %{buildroot}/lib/systemd/system/
 %defattr(-,root,root,-)
 /usr/bin/ign
 /usr/bin/vyomad
-/usr/bin/ignite-agent
+/usr/bin/vyoma-agent
 %dir /usr/lib/vyoma
-%if exists(usr/lib/ignite/ui)
+%if exists(usr/lib/vyoma/ui)
 /usr/lib/vyoma/ui
 %endif
-%if exists(usr/lib/ignite/bin)
+%if exists(usr/lib/vyoma/bin)
 /usr/lib/vyoma/bin
 %endif
-%if exists(usr/lib/ignite/virtiofsd)
+%if exists(usr/lib/vyoma/virtiofsd)
 /usr/lib/vyoma/virtiofsd
 %endif
 /usr/share/applications/vyoma.desktop
-/usr/share/icons/hicolor/64x64/apps/ignite.svg
+/usr/share/icons/hicolor/64x64/apps/vyoma.svg
 /lib/systemd/system/vyomad.service
 
 %post
-# Create ignite user (for socket ownership)
-if ! getent passwd ignite > /dev/null 2>&1; then
-    useradd -r -s /sbin/nologin -c "Vyoma MicroVM Daemon" -d /var/lib/vyoma ignite 2>/dev/null || true
+# Create vyoma user (for socket ownership)
+if ! getent passwd vyoma > /dev/null 2>&1; then
+    useradd -r -s /sbin/nologin -c "Vyoma MicroVM Daemon" -d /var/lib/vyoma vyoma 2>/dev/null || true
 fi
 
-# Add ignite daemon user to kvm group (for /dev/kvm access)
+# Add vyoma daemon user to kvm group (for /dev/kvm access)
 if getent group kvm > /dev/null 2>&1; then
     usermod vyoma 2>/dev/null || true
 fi
@@ -224,14 +224,14 @@ chown root:kvm /dev/kvm 2>/dev/null || true
 
 # Create data directory
 mkdir -p /var/lib/vyoma
-chown ignite:ignite /var/lib/vyoma 2>/dev/null || true
+chown vyoma:vyoma /var/lib/vyoma 2>/dev/null || true
 
 # Create runtime directory
-mkdir -p /run/ignite
-chown root:ignite /run/ignite 2>/dev/null || true
-chmod 0755 /run/ignite 2>/dev/null || true
+mkdir -p /run/vyoma
+chown root:vyoma /run/vyoma 2>/dev/null || true
+chmod 0755 /run/vyoma 2>/dev/null || true
 
-# Add installing user to ignite and kvm groups
+# Add installing user to vyoma and kvm groups
 if [ -n "$USER" ]; then
     usermod vyoma $USER 2>/dev/null || true
     usermod -aG kvm $USER 2>/dev/null || true
@@ -249,8 +249,8 @@ echo "Run 'ign run nginx:latest' to start your first VM"
 %postun
 # Reload systemd on removal
 if [ \$1 -eq 0 ]; then
-    userdel ignite 2>/dev/null || true
-    rm -rf /var/lib/vyoma /run/ignite 2>/dev/null || true
+    userdel vyoma 2>/dev/null || true
+    rm -rf /var/lib/vyoma /run/vyoma 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
 fi
 
@@ -258,7 +258,7 @@ fi
 * Tue Mar 31 2026 Subeshrock <subesh.rock.3@gmail.com> - ${VERSION}-1
 - Bundle virtiofsd for volume mounts
 - Fix KVM permissions and socket ownership
-- Add ignite user to kvm group
+- Add vyoma user to kvm group
 - Improve post-install setup
 SPECFILE
 
@@ -269,9 +269,9 @@ cp -r "$PACKAGE_DIR" SOURCES
 echo "Building RPM package..."
 rpmbuild --define "_topdir $BUILD_DIR" \
          --define "_rpmdir $BUILD_DIR/RPMS" \
-         -bb "$BUILD_DIR/ignite.spec"
+         -bb "$BUILD_DIR/vyoma.spec"
 
 # Cleanup virtiofsd temp files
 rm -f virtiofsd.zip virtiofsd virtiofsd_bin 2>/dev/null || true
 
-echo "Done! Package created at: $BUILD_DIR/RPMS/x86_64/ignite-${VERSION}-1.x86_64.rpm"
+echo "Done! Package created at: $BUILD_DIR/RPMS/x86_64/vyoma-${VERSION}-1.x86_64.rpm"

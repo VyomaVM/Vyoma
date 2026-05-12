@@ -67,7 +67,7 @@ mkdir -p "$PACKAGE_DIR/usr/bin"
 mkdir -p "$PACKAGE_DIR/usr/lib/vyoma"
 mkdir -p "$PACKAGE_DIR/usr/share/applications"
 mkdir -p "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps"
-mkdir -p "$PACKAGE_DIR/usr/share/doc/ignite"
+mkdir -p "$PACKAGE_DIR/usr/share/doc/vyoma"
 mkdir -p "$PACKAGE_DIR/DEBIAN"
 
 # Copy binaries
@@ -75,7 +75,7 @@ cp "$PROJECT_ROOT/target/release/ign" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || tru
 cp "$PROJECT_ROOT/target/release/vyomad" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 
 # Copy ignite binaries
-cp "$PROJECT_ROOT/target/release/ignite-agent" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
+cp "$PROJECT_ROOT/target/release/vyoma-agent" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 
 # Copy UI dist
 if [ -d "$PROJECT_ROOT/ui/dist" ]; then
@@ -97,7 +97,7 @@ else
 fi
 
 # Copy favicon as icon
-cp "$PROJECT_ROOT/ui/public/favicon.svg" "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps/ignite.svg" 2>/dev/null || true
+cp "$PROJECT_ROOT/ui/public/favicon.svg" "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps/vyoma.svg" 2>/dev/null || true
 
 # Create desktop file
 cat > "$PACKAGE_DIR/usr/share/applications/vyoma.desktop" << 'EOF'
@@ -105,7 +105,7 @@ cat > "$PACKAGE_DIR/usr/share/applications/vyoma.desktop" << 'EOF'
 Name=Vyoma
 Comment=MicroVM Management Dashboard
 Exec=/usr/bin/vyomad
-Icon=ignite
+Icon=vyoma
 Terminal=false
 Type=Application
 Categories=System;Virtualization;
@@ -124,12 +124,12 @@ set -e
 # Update icons cache
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 
-# Create ignite user (for socket ownership)
-if ! id ignite >/dev/null 2>&1; then
-    useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Vyoma MicroVM Daemon" ignite 2>/dev/null || true
+# Create vyoma user (for socket ownership)
+if ! id vyoma >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Vyoma MicroVM Daemon" vyoma 2>/dev/null || true
 fi
 
-# Add ignite daemon user to kvm group (for /dev/kvm access)
+# Add vyoma daemon user to kvm group (for /dev/kvm access)
 if getent group kvm > /dev/null 2>&1; then
     usermod vyoma 2>/dev/null || true
 fi
@@ -140,18 +140,18 @@ chown root:kvm /dev/kvm 2>/dev/null || true
 
 # Create data directory
 mkdir -p /var/lib/vyoma
-chown ignite:ignite /var/lib/vyoma 2>/dev/null || true
+chown vyoma:vyoma /var/lib/vyoma 2>/dev/null || true
 
 # Create runtime directory
-mkdir -p /run/ignite
-chown root:ignite /run/ignite 2>/dev/null || true
-chmod 0755 /run/ignite 2>/dev/null || true
+mkdir -p /run/vyoma
+chown root:vyoma /run/vyoma 2>/dev/null || true
+chmod 0755 /run/vyoma 2>/dev/null || true
 
-# Add installing user to ignite and kvm groups
+# Add installing user to vyoma and kvm groups
 if [ -n "$SUDO_USER" ]; then
     usermod vyoma "$SUDO_USER" 2>/dev/null || true
     usermod -aG kvm "$SUDO_USER" 2>/dev/null || true
-    echo "Added $SUDO_USER to ignite and kvm groups. Log out and back in to use CLI."
+    echo "Added $SUDO_USER to vyoma and kvm groups. Log out and back in to use CLI."
 fi
 
 # Enable and start systemd service automatically
@@ -174,15 +174,15 @@ cat <<'POSTRM' > "$PACKAGE_DIR/DEBIAN/postrm"
 set -e
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 if [ "$1" = "purge" ]; then
-    userdel ignite 2>/dev/null || true
-    rm -rf /var/lib/vyoma /run/ignite 2>/dev/null || true
+    userdel vyoma 2>/dev/null || true
+    rm -rf /var/lib/vyoma /run/vyoma 2>/dev/null || true
 fi
 POSTRM
 chmod +x "$PACKAGE_DIR/DEBIAN/postrm"
 
 # Create control file
 cat > "$PACKAGE_DIR/DEBIAN/control" << EOF
-Package: ignite
+Package: vyoma
 Version: ${VERSION}
 Section: utils
 Priority: optional

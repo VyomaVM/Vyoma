@@ -12,7 +12,7 @@ run_test() {
         echo "❌ FAIL: $script"
     fi
     # Cleanup between tests just in case
-    sudo pkill ignited || true
+    sudo pkill vyomad || true
     echo ""
 }
 

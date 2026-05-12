@@ -18,7 +18,7 @@ VYOMA="$VYOMA_BIN --socket-path /run/vyoma/test.sock --http-port 3004"
 # 1. Setup Compose File
 mkdir -p $TEST_HOME/compose_test
 cd $TEST_HOME/compose_test
-cat <<EOF > ignite-compose.yml
+cat <<EOF > vyoma-compose.yml
 version: '1'
 services:
   web:
