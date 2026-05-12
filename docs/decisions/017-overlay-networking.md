@@ -8,7 +8,7 @@ Proposed
 
 ## Context
 
-We need to enable communication between VMs running on different hosts (Ignite Swarm). 
+We need to enable communication between VMs running on different hosts (Vyoma Swarm). 
 The solution must support:
 1.  Unique IP per VM across the cluster.
 2.  Routing between hosts.

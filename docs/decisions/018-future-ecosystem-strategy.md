@@ -8,15 +8,15 @@ Proposed
 
 ## Context
 
-To ensure **Ignite v1.0** is a complete "Docker Desktop Alternative" and viable for AI/Cluster workloads, we must integrate these ecosystems BEFORE the stable release.
+To ensure **Vyoma v1.0** is a complete "Docker Desktop Alternative" and viable for AI/Cluster workloads, we must integrate these ecosystems BEFORE the stable release.
 These features will be delivered in **v0.8 (Workloads)** and **v0.9 (Distribution)**.
 
 ## Key Strategic Pillars
 
 ### 1. Kubernetes Compatibility
-Ignite should function as a container runtime or have a CRI (Container Runtime Interface) shim.
-*   **Goal**: Allow Kubernetes nodes to schedule pods as Ignite MicroVMs.
-*   **Implementation**: A `containerd` shim (`shim-ignite-v2`) or a direct Virtual Kubelet provider.
+Vyoma should function as a container runtime or have a CRI (Container Runtime Interface) shim.
+*   **Goal**: Allow Kubernetes nodes to schedule pods as Vyoma MicroVMs.
+*   **Implementation**: A `containerd` shim (`shim-vyoma-v2`) or a direct Virtual Kubelet provider.
 
 ### 2. AI & LLM Workloads
 Support running Large Language Models (LLMs) efficiently.
@@ -35,7 +35,7 @@ We will split the delivery model based on the user persona:
     *   **Features**: Auto-updating, easy networking, visual management.
 
 *   **Server/Production**:
-    *   **Artifact**: Standard package manager (`apt-get install ignited`).
+    *   **Artifact**: Standard package manager (`apt-get install vyomad`).
     *   **Experience**: Headless Daemon + CLI.
     *   **Features**: Systemd integration, telemetry, swarm mode enabled.
 

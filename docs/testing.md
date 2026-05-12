@@ -45,7 +45,7 @@ Configure behavior using `.env` or shell variables:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `RUST_LOG` | Logging level (`info`, `debug`, `trace`) | `info` |
-| `VYOMA_HOME` | Custom root directory (overrides `~/.vyoma`) | `~/.vyoma` |
+| `VYOMA_HOME` | Custom root directory (overrides `.vyoma/.vyoma`) | `.vyoma/.vyoma` |
 | `VYOMA_SOCK` | Path to daemon socket (if applicable) | `/tmp/vyoma.sock` |
 
 ## 4. Contributing

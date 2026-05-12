@@ -4,9 +4,9 @@ This document tracks significant architectural decisions, their context, consequ
 
 ## 001. Project Naming & Branding
 *   **Date**: 2025-12-23
-*   **Decision**: Rename project from "Generic Micro-VM (MVM)" to **Ignite**.
-*   **Visuals**: Daemon = `ignited`, CLI = `ign`.
-*   **Context**: User requested a "premium" and energetic brand. "Ignite" aligns with Firecracker (the underlying VMM).
+*   **Decision**: Rename project from "Generic Micro-VM (MVM)" to **Vyoma**.
+*   **Visuals**: Daemon = `vyomad`, CLI = `ign`.
+*   **Context**: User requested a "premium" and energetic brand. "Vyoma" aligns with Firecracker (the underlying VMM).
 *   **Alternatives**: "Capsule" (discarded for being too generic/safe).
 
 ## 002. CLI Wrapper Strategy for System Operations
@@ -24,7 +24,7 @@ This document tracks significant architectural decisions, their context, consequ
 
 ## 003. OCI Image Handling
 *   **Date**: 2025-12-23
-*   **Decision**: Implement a custom simple OCI client in `ignite-core` using `reqwest` instead of using the `oci-distribution` crate.
+*   **Decision**: Implement a custom simple OCI client in `vyoma-core` using `reqwest` instead of using the `oci-distribution` crate.
 *   **Reasoning**:
     *   The `oci-distribution` crate (v0.9.4) is heavy and had compatibility issues with recent tokio/http versions in our testing.
     *   We need specific control over handling OCI Indexes vs Docker V2 Manifests to force `linux/amd64` resolution.
@@ -35,7 +35,7 @@ This document tracks significant architectural decisions, their context, consequ
 ## 004. Database / State Management
 *   **Status**: Pending
 *   **Context**: We need to track running VMs, allocated IPs, and active loop devices.
-*   **Current Direction**: Likely file-based JSON/ToML in `~/.ignite/state` for MVP.
+*   **Current Direction**: Likely file-based JSON/ToML in `.vyoma/.vyoma/state` for MVP.
 
 ## 005. Networking Strategy
 *   **Date**: 2025-12-23
@@ -70,12 +70,12 @@ This document tracks significant architectural decisions, their context, consequ
     *   **Networking**: `ip link` and `iptables` require `NET_ADMIN`/`sudo`.
     *   **Firecracker Boot**: Requires user to be in `kvm` group or have RW access to `/dev/kvm`.
 *   **Risk Mitigation**:
-    *   The `ignite-core` library is designed to be modular. If one component fails (e.g., networking), the others (storage) remain testable.
+    *   The `vyoma-core` library is designed to be modular. If one component fails (e.g., networking), the others (storage) remain testable.
     *   Future CI pipeline MUST run on a bare-metal or nested-virt enabled runner with passwordless sudo to fully validate the `#[ignore]` tests.
 
 ## 008. Daemon State Management
 *   **Date**: 2025-12-24
-*   **Decision**: Store active VM instances in `ignited` memory using `Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<VmmManager>>>>>`.
+*   **Decision**: Store active VM instances in `vyomad` memory using `Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<VmmManager>>>>>`.
 *   **Reasoning**:
     *   Daemon is the source of truth for running processes.
     *   `VmmManager` owns the `std::process::Child` handle.
@@ -88,7 +88,7 @@ This document tracks significant architectural decisions, their context, consequ
 *   **Decision**: Use userspace TCP proxying (Tokio tasks) instead of `iptables` DNAT.
 *   **Reasoning**:
     1.  **Flexibility**: Allows mapping `localhost:8080` to VM `80` without managing complex NAT tables or avoiding port conflicts on the bridge.
-    2.  **Safety**: Isolates the port opening logic to the `ignited` process. If the daemon dies, the ports close automatically (unlike iptables rules which persist).
+    2.  **Safety**: Isolates the port opening logic to the `vyomad` process. If the daemon dies, the ports close automatically (unlike iptables rules which persist).
     3.  **Future-Proofing**: Aligns with "Rootless" goals (Phase 11). Userspace proxies don't strictly *need* root (if binding non-privileged ports), whereas `iptables` always does.
 *   **Implementation**:
     *   Spawn a `tokio::task` for each mapped port.
@@ -120,11 +120,11 @@ This document tracks significant architectural decisions, their context, consequ
     *   **Socket**: `virtiofsd` listens on a Unix socket, Firecracker connects to it.
     *   **Kernel**: Depends on guest kernel having `virtiofs`.
 
-## 012. Builder Strategy (Ignitefile)
+## 012. Builder Strategy (Vyomafile)
 *   **Date**: 2025-12-24
 *   **Decision**: Implement `ign build` via a Client-Server model where the Daemon performs the build using `chroot` for `RUN` instructions.
 *   **Reasoning**:
-    *   **Context**: The daemon manages the image store (`~/.ignite/images`), which is often root-owned or privileged.
+    *   **Context**: The daemon manages the image store (`.vyoma/.vyoma/images`), which is often root-owned or privileged.
     *   **Performance**: `RUN` commands are executed via `chroot` on a mounted loopback device of the image. This avoids the overhead of booting a full Firecracker VM for every build step, similar to how Docker builds work (mostly).
     *   **Simplicity**: We mimic Docker's context sending (streaming tarball to daemon).
 *   **Directives MVP**:
@@ -137,8 +137,8 @@ This document tracks significant architectural decisions, their context, consequ
 *   **Decision**: Use Cgroups v2 explicitly to manage VM resource limits (CPU, Memory).
 *   **Reasoning**:
     *   **Modern Standard**: Cgroups v2 is the standard on modern Linux (Ubuntu 22.04+).
-    *   **Firecracker Integration**: Firecracker supports running inside a Cgroup. We will create a parent cgroup `ignite.slice` and sub-cgroups for each VM `ignite-<id>.scope`.
-    *   **Implementation**: We will use direct file system manipulation of `/sys/fs/cgroup/ignite.slice/` for simplicity and control, rather than `systemd-run` for now, unless `systemd` integration is strictly required. Direct FS manipulation is more educational and portable for a "from scratch" project build.
+    *   **Firecracker Integration**: Firecracker supports running inside a Cgroup. We will create a parent cgroup `vyoma.slice` and sub-cgroups for each VM `vyoma-<id>.scope`.
+    *   **Implementation**: We will use direct file system manipulation of `/sys/fs/cgroup/vyoma.slice/` for simplicity and control, rather than `systemd-run` for now, unless `systemd` integration is strictly required. Direct FS manipulation is more educational and portable for a "from scratch" project build.
 
 ## 014. Rootless Strategy (Future)
 *   **Date**: 2025-12-25
@@ -177,7 +177,7 @@ User-mode networking for unprivileged network namespaces.
 ## 014. Rootless Strategy (Future)
 *   **Date**: 2025-12-25
 *   **Status**: Proposed / In Progress
-*   **Context**: Running `ignited` as root is a security risk.
+*   **Context**: Running `vyomad` as root is a security risk.
 *   **Decision**: We will transition to "Rootless" capability using **Slirp4netns** or **Passt** for unprivileged networking.
 *   **Challenges**:
     1.  **Networking**: Creating TAP/Bridge requires root. `slirp4netns` runs in userspace.
@@ -493,16 +493,16 @@ User-mode networking for unprivileged network namespaces.
 -h, --help               show this help and exit
 -v, --version            show version and exit installed on host.
 
-## 018. Ignite Compose Strategy
+## 018. Vyoma Compose Strategy
 *   **Date**: 2026-01-23
-*   **Decision**: Implement `ignite-compose` crate and `ign up` command to support multi-VM orchestration using a Docker Compose-like YAML format.
+*   **Decision**: Implement `vyoma-compose` crate and `ign up` command to support multi-VM orchestration using a Docker Compose-like YAML format.
 *   **Reasoning**:
     *   **User Experience**: Adopting the familiar Compose spec reduces the learning curve for users migrating from Docker.
-    *   **Separation of Concerns**: The orchestration logic (dependency resolution, config parsing) is separated into a dedicated library (`ignite-compose`), keeping the core primitives (`ignite-core`) focused on single-VM lifecycle.
+    *   **Separation of Concerns**: The orchestration logic (dependency resolution, config parsing) is separated into a dedicated library (`vyoma-compose`), keeping the core primitives (`vyoma-core`) focused on single-VM lifecycle.
     *   **Integrated Workflow**: Supporting `build` contexts allows for a seamless "Source to Running App" workflow, unlike a pure runtime orchestrator.
 *   **Implementation**:
-    *   **Crate**: `crates/ignite-compose` for strong typing of the YAML schema.
-    *   **CLI**: `ign up` acts as the entry point. It orchestrates the `ignite-core` API (or daemon API) to start services.
+    *   **Crate**: `crates/vyoma-compose` for strong typing of the YAML schema.
+    *   **CLI**: `ign up` acts as the entry point. It orchestrates the `vyoma-core` API (or daemon API) to start services.
     *   **Networking**: Services will eventually share a dedicated CNI network (bridge) to allow name-based resolution (Phase 16).
 *   **Consequences**:
     *   Introduces `serde_yaml` dependency.
@@ -514,10 +514,10 @@ User-mode networking for unprivileged network namespaces.
 *   **Reasoning**:
     *   **Eliminates race conditions**: No shared mount points between concurrent VM boots
     *   **Supports rootless mode**: Initramfs passed to CH, no root required for injection
-    *   **Better performance**: No mount/unmount overhead (~500ms savings)
+    *   **Better performance**: No mount/unmount overhead (.vyoma500ms savings)
     *   **Atomic creation**: File written once, no partial state
 *   **Details**: See `docs/decisions/020-initramfs-agent-injection.md`
 *   **Consequences**:
     *   Larger memory footprint (initramfs in RAM)
-    *   ~400KB agent binary per VM (acceptable)
+    *   .vyoma400KB agent binary per VM (acceptable)
     *   Initramfs regenerated each boot (milliseconds, acceptable)

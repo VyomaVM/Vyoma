@@ -1,12 +1,12 @@
-# Ignite: Docker for Micro-VMs - Project Summary
+# Vyoma: Docker for Micro-VMs - Project Summary
 
 ## Overview
-**Ignite** is a Rust-based container-like orchestrator for Micro-VMs (Firecracker). It brings the developer experience of Docker (images, containers, ease of use) to the world of secure, isolated Micro-VMs.
+**Vyoma** is a Rust-based container-like orchestrator for Micro-VMs (Firecracker). It brings the developer experience of Docker (images, containers, ease of use) to the world of secure, isolated Micro-VMs.
 
 ## Architecture
 The project is organized as a Rust Workspace with three main crates:
 
-1.  **`ignited` (Daemon)**: The background service running as root.
+1.  **`vyomad` (Daemon)**: The background service running as root.
     *   Manages the lifecycle of VMs.
     *   Handles Storage (Loop devices, Device Mapper).
     *   Handles Networking (Tun/Tap, Bridges, DHCP/IPAM).
@@ -17,7 +17,7 @@ The project is organized as a Rust Workspace with three main crates:
     *   Communicates with the daemon via HTTP.
     *   Commands: `run`, `stop`, `ps`, `snapshot`, `restore`, `export`, `import`, `logs`, `build`, `doctor`.
 
-3.  **`ignite-core` (Library)**: Shared business logic.
+3.  **`vyoma-core` (Library)**: Shared business logic.
     *   **`oci`**: Pulls Docker images (manifests/layers) and parses them.
     *   **`layers`**: Unpacks gzipped tarballs into raw filesystems.
     *   **`storage`**: manages `mkfs.ext4`, `losetup`, `dmsetup` (snapshots), and sparse COW files.
@@ -28,7 +28,7 @@ The project is organized as a Rust Workspace with three main crates:
 
 ### 1. OCI-to-Block Engine ("Just-in-Time Conversion")
 *   **Problem**: Firecracker needs a block device (file), Docker gives tarballs.
-*   **Solution**: Ignite pulls layers, unpacks them into a temp dir, creates a sized empty file, formats it as `ext4`, and populates it.
+*   **Solution**: Vyoma pulls layers, unpacks them into a temp dir, creates a sized empty file, formats it as `ext4`, and populates it.
 
 ### 2. Storage: Instant Clones
 *   **Problem**: Copying a 2GB OS image for every VM is slow.
@@ -62,9 +62,9 @@ micro-vm-ecosystem/
 ├── crates/
 │   ├── ign/            # CLI Tool
 │   │   └── src/main.rs
-│   ├── ignited/        # Daemon
+│   ├── vyomad/        # Daemon
 │   │   └── src/main.rs
-│   └── ignite-core/    # Core Logic
+│   └── vyoma-core/    # Core Logic
 │       ├── src/
 │       │   ├── oci.rs       # Image Pulling
 │       │   ├── storage.rs   # Device Mapper & Filesystem
@@ -75,7 +75,7 @@ micro-vm-ecosystem/
 ├── bin/
 │   ├── firecracker     # Binary dependencies
 │   └── vmlinux         # Kernel binary
-├── .ignite/            # Runtime State (Created in User Home)
+├── .vyoma/            # Runtime State (Created in User Home)
 │   ├── images/         # Cached Base Images
 │   └── vms/            # Active VM State (COW, Snapshots, Git)
 ├── tasks.md            # Progress Tracker
@@ -98,11 +98,11 @@ micro-vm-ecosystem/
     ```
 2.  **Start Daemon** (Needs Root):
     ```bash
-    sudo ./target/release/ignited
+    sudo ./target/release/vyomad
     ```
 3.  **Run a VM** (In new terminal):
     ```bash
-    ./target/release/ign run alpine:latest
+    ./target/release/vyoma run alpine:latest
     ```
 4.  **Manage**:
     ```bash

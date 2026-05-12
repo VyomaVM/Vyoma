@@ -1,7 +1,7 @@
-# Ignite: Technical Implementation Specification
+# Vyoma: Technical Implementation Specification
 ## v1.1 → v2.0 Complete Engineering Guide
 
-**Purpose**: This document is the single source of truth for coding Ignite from its current v1.1 state to the production-grade v2.0 release. Every section is a direct coding directive — no marketing, no vision statements. Follow this phase by phase.
+**Purpose**: This document is the single source of truth for coding Vyoma from its current v1.1 state to the production-grade v2.0 release. Every section is a direct coding directive — no marketing, no vision statements. Follow this phase by phase.
 
 ---
 
@@ -25,18 +25,18 @@
 
 | Crate | Binary | Status | Notes |
 |-------|--------|--------|-------|
-| `crates/ign` | `/usr/bin/ign` | ✅ Working | CLI, ~20 commands |
-| `crates/ignited` | `/usr/bin/ignited` | ✅ Working | Daemon, runs as root |
-| `crates/ignite-core` | library | ✅ Working | OCI, storage, network, vmm |
-| `crates/ignite-compose` | library | ✅ Working | compose YAML parsing, `ign up/down` |
+| `crates/ign` | `/usr/bin/ign` | ✅ Working | CLI, .vyoma20 commands |
+| `crates/vyomad` | `/usr/bin/vyomad` | ✅ Working | Daemon, runs as root |
+| `crates/vyoma-core` | library | ✅ Working | OCI, storage, network, vmm |
+| `crates/vyoma-compose` | library | ✅ Working | compose YAML parsing, `ign up/down` |
 | `crates/ui` | — | ✅ Working | TypeScript/React dashboard at `:3000` |
 
 ### 1.2 Confirmed Working (Do Not Break)
 
-- `ign run <image> --vcpu N --memory MB -p H:V -v H:V --name N`
+- `vyoma run <image> --vcpu N --memory MB -p H:V -v H:V --name N`
 - `ign ps`, `ign stop`, `ign rm`, `ign start`, `ign restart`
 - `ign logs -f`, `ign exec <id> <cmd>`
-- `ign pull`, `ign build -t <tag> .` (FROM, RUN, COPY only)
+- `vyoma pull`, `ign build -t <tag> .` (FROM, RUN, COPY only)
 - `ign snapshot`, `ign restore`, `ign export`, `ign import`
 - `ign network create/ls/rm`
 - `ign up -d`, `ign down`, `ign scale <svc>=N`
@@ -48,17 +48,17 @@
 - CNI integration (bridge/ptp plugins)
 - Internal DNS on gateway IP (172.16.0.1:53)
 - Virtiofs volume mounts (external `virtiofsd` binary required)
-- State persistence across daemon restarts (`.ignite/state/` JSON files)
+- State persistence across daemon restarts (`.vyoma/state/` JSON files)
 - VXLAN overlay networking skeleton for Swarm
 - `.deb`/`.rpm` packaging with bundled Firecracker binary
-- `systemd` service unit for `ignited`
+- `systemd` service unit for `vyomad`
 
 ### 1.3 Known Broken / Missing (Coding Debt Ranked by Severity)
 
 #### CRITICAL — blocks production adoption
-1. **CMD/ENTRYPOINT/ENV not parsed** — Ignitefile `FROM`/`RUN`/`COPY` work but `CMD`, `ENTRYPOINT`, `ENV` are silently dropped. VMs start `/bin/sh`. Most Docker Hub images are non-functional.
+1. **CMD/ENTRYPOINT/ENV not parsed** — Vyomafile `FROM`/`RUN`/`COPY` work but `CMD`, `ENTRYPOINT`, `ENV` are silently dropped. VMs start `/bin/sh`. Most Docker Hub images are non-functional.
 2. **virtiofsd is an unmanaged external dep** — `-v` silently fails on clean installs. "Batteries Included" promise is broken.
-3. **ignited runs as full root** — ADR-019 adopted the Docker model but never constrained capabilities. Should be a dedicated `ignite` system user with `CAP_NET_ADMIN` + `CAP_SYS_ADMIN` only, not a full root process.
+3. **vyomad runs as full root** — ADR-019 adopted the Docker model but never constrained capabilities. Should be a dedicated `vyoma` system user with `CAP_NET_ADMIN` + `CAP_SYS_ADMIN` only, not a full root process.
 4. **No WAL / crash recovery** — ADR-008 acknowledged daemon restart loses running VM control handles. ADR consequence: "Future task: State persistence/recovery" — never implemented properly. JSON state files partially address this but have no crash-safe write path.
 
 #### IMPORTANT — blocks cluster production use
@@ -88,15 +88,15 @@ Add these crates progressively through the phases. Each gets its own `crates/<na
 [workspace]
 members = [
     "crates/ign",             # CLI binary
-    "crates/ignited",         # Daemon binary
-    "crates/ignite-core",     # VM lifecycle, OCI, storage, network, vmm
-    "crates/ignite-compose",  # Compose YAML schema + orchestrator
-    "crates/ignite-net",      # Network management (Phase 1 refactor)
-    "crates/ignite-storage",  # Storage layer refactor (Phase 2)
-    "crates/ignite-image",    # VMIF format + OCI bridge (Phase 3)
-    "crates/ignite-agent",    # In-VM agent binary, musl target (Phase 4)
-    "crates/ignite-teleport", # Pre-copy live migration (Phase 3)
-    "crates/ignite-proto",    # Protobuf definitions for gRPC (Phase 3)
+    "crates/vyomad",         # Daemon binary
+    "crates/vyoma-core",     # VM lifecycle, OCI, storage, network, vmm
+    "crates/vyoma-compose",  # Compose YAML schema + orchestrator
+    "crates/vyoma-net",      # Network management (Phase 1 refactor)
+    "crates/vyoma-storage",  # Storage layer refactor (Phase 2)
+    "crates/vyoma-image",    # VMIF format + OCI bridge (Phase 3)
+    "crates/vyoma-agent",    # In-VM agent binary, musl target (Phase 4)
+    "crates/vyoma-teleport", # Pre-copy live migration (Phase 3)
+    "crates/vyoma-proto",    # Protobuf definitions for gRPC (Phase 3)
 ]
 
 [workspace.dependencies]
@@ -131,9 +131,9 @@ micro-vm-ecosystem/
 │   │       │   ├── compose.rs     (up, down, scale, logs)
 │   │       │   ├── swarm.rs       (swarm init/join/ls, service create/ls/update)
 │   │       │   └── system.rs      (doctor, stats, inspect)
-│   │       └── client.rs       # HTTP+gRPC client for ignited
+│   │       └── client.rs       # HTTP+gRPC client for vyomad
 │   │
-│   ├── ignited/                # Daemon
+│   ├── vyomad/                # Daemon
 │   │   └── src/
 │   │       ├── main.rs
 │   │       ├── api/            # REST handlers (axum routes)
@@ -151,14 +151,14 @@ micro-vm-ecosystem/
 │   │       ├── firecracker.rs  # Firecracker API wrapper
 │   │       └── metrics.rs      # Prometheus exporter
 │   │
-│   ├── ignite-core/            # Existing — refactored
+│   ├── vyoma-core/            # Existing — refactored
 │   │   └── src/
 │   │       ├── oci.rs          # OCI client (keep custom impl, improve)
 │   │       ├── layers.rs       # Layer unpacking
 │   │       ├── vmm.rs          # Firecracker HTTP client
 │   │       └── types.rs        # Shared domain types
 │   │
-│   ├── ignite-net/             # NEW — extracted from ignite-core
+│   ├── vyoma-net/             # NEW — extracted from vyoma-core
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── bridge.rs       # Linux bridge management via rtnetlink
@@ -168,7 +168,7 @@ micro-vm-ecosystem/
 │   │       ├── nat.rs          # iptables NAT management
 │   │       └── wireguard.rs    # boringtun integration (Phase 3)
 │   │
-│   ├── ignite-storage/         # NEW — extracted + improved
+│   ├── vyoma-storage/         # NEW — extracted + improved
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── dm.rs           # Device Mapper via devicemapper-rs crate
@@ -176,39 +176,39 @@ micro-vm-ecosystem/
 │   │       ├── ext4.rs         # ext4 image creation and population
 │   │       └── snapshot_tree.rs # CoW delta history tree (TimeMachine backend)
 │   │
-│   ├── ignite-image/           # NEW — VMIF format
+│   ├── vyoma-image/           # NEW — VMIF format
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── vmif.rs         # VMIF struct (kernel + rootfs + metadata)
 │   │       ├── hub_bridge.rs   # Docker Hub → VMIF conversion
 │   │       └── signing.rs      # Ed25519 signing (Phase 4)
 │   │
-│   ├── ignite-compose/         # Existing — extended
+│   ├── vyoma-compose/         # Existing — extended
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── schema_v3.rs    # Docker Compose v3 schema (replaces v1.0)
 │   │       └── orchestrator.rs
 │   │
-│   ├── ignite-proto/           # NEW — gRPC definitions (Phase 3)
+│   ├── vyoma-proto/           # NEW — gRPC definitions (Phase 3)
 │   │   ├── proto/
 │   │   │   ├── vm.proto
 │   │   │   ├── image.proto
 │   │   │   └── cri.proto       # Kubernetes CRI v1
 │   │   └── build.rs
 │   │
-│   ├── ignite-teleport/        # NEW — live migration (Phase 3)
+│   ├── vyoma-teleport/        # NEW — live migration (Phase 3)
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── sender.rs       # Source node: dirty page tracking
 │   │       ├── receiver.rs     # Destination node: page receiver
 │   │       └── protocol.rs     # Wire protocol for memory transfer
 │   │
-│   └── ignite-agent/           # NEW — in-VM binary (Phase 4)
+│   └── vyoma-agent/           # NEW — in-VM binary (Phase 4)
 │       └── src/
-│           └── main.rs         # Compiled for musl, ~400KB static binary
+│           └── main.rs         # Compiled for musl, .vyoma400KB static binary
 │
 ├── services/
-│   └── ignite-hub/             # NEW — OCI registry + Docker Hub bridge (Phase 3)
+│   └── vyoma-hub/             # NEW — OCI registry + Docker Hub bridge (Phase 3)
 │       └── src/
 │           ├── main.rs
 │           ├── registry.rs     # OCI registry protocol
@@ -231,7 +231,7 @@ micro-vm-ecosystem/
 ├── kernels/                    # NEW — slim kernel build configs (Phase 3)
 ├── packaging/
 │   ├── systemd/
-│   │   └── ignited.service     # systemd unit with capability constraints
+│   │   └── vyomad.service     # systemd unit with capability constraints
 │   ├── deb/
 │   └── rpm/
 ├── scripts/
@@ -244,23 +244,23 @@ micro-vm-ecosystem/
 ## 3. Phase 1 — v1.2: Critical Fixes
 
 **Duration**: 8 weeks  
-**Goal**: Make `ign run` actually work for the vast majority of Docker Hub images. Make the system production-safe at the privilege level. Make the daemon crash-safe.
+**Goal**: Make `vyoma run` actually work for the vast majority of Docker Hub images. Make the system production-safe at the privilege level. Make the daemon crash-safe.
 
-### 3.1 CMD / ENTRYPOINT / ENV Support in Ignitefile + OCI Bridge
+### 3.1 CMD / ENTRYPOINT / ENV Support in Vyomafile + OCI Bridge
 
-**Crate**: `ignite-core` (oci.rs, layers.rs) + `crates/ignited` (vm startup path)  
+**Crate**: `vyoma-core` (oci.rs, layers.rs) + `crates/vyomad` (vm startup path)  
 **Priority**: P0 — highest impact fix in the entire project
 
 #### 3.1.1 What to Build
 
-When `ign pull <image>` or `ign build` runs, extract the OCI image config JSON and persist it alongside the ext4 rootfs. When `ign run` starts a VM, inject the config values as a small init wrapper.
+When `vyoma pull <image>` or `ign build` runs, extract the OCI image config JSON and persist it alongside the ext4 rootfs. When `vyoma run` starts a VM, inject the config values as a small init wrapper.
 
 #### 3.1.2 Implementation
 
-**Step 1**: Extend the OCI client in `ignite-core/src/oci.rs` to parse the image config blob.
+**Step 1**: Extend the OCI client in `vyoma-core/src/oci.rs` to parse the image config blob.
 
 ```rust
-// ignite-core/src/oci.rs
+// vyoma-core/src/oci.rs
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OciImageConfig {
@@ -296,19 +296,19 @@ impl OciImageConfig {
 }
 ```
 
-**Step 2**: After layer flattening, write `ignite-config.json` into the image cache directory.
+**Step 2**: After layer flattening, write `vyoma-config.json` into the image cache directory.
 
 ```
-~/.ignite/images/<image-hash>/
+.vyoma/.vyoma/images/<image-hash>/
     rootfs.ext4       # Read-only base image
-    ignite-config.json  # NEW: parsed OCI config
+    vyoma-config.json  # NEW: parsed OCI config
     manifest.json
 ```
 
-**Step 3**: In `crates/ignited/src/vm_manager.rs`, before calling the Firecracker boot API, generate `/sbin/ignite-init` inside the VM's rootfs COW layer and set it as the kernel `init=` boot parameter.
+**Step 3**: In `crates/vyomad/src/vm_manager.rs`, before calling the Firecracker boot API, generate `/sbin/vyoma-init` inside the VM's rootfs COW layer and set it as the kernel `init=` boot parameter.
 
 ```rust
-// crates/ignited/src/vm_manager.rs
+// crates/vyomad/src/vm_manager.rs
 
 fn generate_init_script(config: &OciImageConfig) -> String {
     let mut script = String::from("#!/bin/sh\n");
@@ -337,7 +337,7 @@ fn generate_init_script(config: &OciImageConfig) -> String {
     script
 }
 
-/// Inject /sbin/ignite-init into the COW layer before VM boot.
+/// Inject /sbin/vyoma-init into the COW layer before VM boot.
 /// We use debugfs to write the script without mounting the filesystem.
 fn inject_init_script(cow_path: &Path, config: &OciImageConfig) -> Result<()> {
     let script = generate_init_script(config);
@@ -346,7 +346,7 @@ fn inject_init_script(cow_path: &Path, config: &OciImageConfig) -> Result<()> {
     // Write script into ext4 image via debugfs (no mount required, no root needed)
     Command::new("debugfs")
         .args(["-w", cow_path.to_str().unwrap()])
-        .stdin(format!("write {} /sbin/ignite-init\nchmod 0755 /sbin/ignite-init\n", 
+        .stdin(format!("write {} /sbin/vyoma-init\nchmod 0755 /sbin/vyoma-init\n", 
                        script_path.display()))
         .status()?;
     
@@ -354,7 +354,7 @@ fn inject_init_script(cow_path: &Path, config: &OciImageConfig) -> Result<()> {
 }
 ```
 
-**Step 4**: Pass `init=/sbin/ignite-init` in the kernel boot arguments when launching Firecracker.
+**Step 4**: Pass `init=/sbin/vyoma-init` in the kernel boot arguments when launching Firecracker.
 
 ```rust
 // In the kernel boot args construction:
@@ -362,16 +362,16 @@ let boot_args = format!(
     "console=ttyS0 reboot=k panic=1 pci=off \
      ip={vm_ip}::172.16.0.1:255.255.0.0::eth0:on \
      hostname={name} \
-     init=/sbin/ignite-init"
+     init=/sbin/vyoma-init"
 );
 ```
 
-**Step 5**: For the Ignitefile `CMD`, `ENTRYPOINT`, `ENV` directives in `ign build`:
+**Step 5**: For the Vyomafile `CMD`, `ENTRYPOINT`, `ENV` directives in `ign build`:
 
 ```rust
-// crates/ignite-core/src/oci.rs - Ignitefile parser extension
+// crates/vyoma-core/src/oci.rs - Vyomafile parser extension
 
-pub enum IgnitefileInstruction {
+pub enum VyomafileInstruction {
     From(String),
     Run(String),
     Copy { src: String, dst: String },
@@ -389,16 +389,16 @@ pub enum IgnitefileInstruction {
 }
 ```
 
-After `ign build` completes, serialize the accumulated `CMD`/`ENTRYPOINT`/`ENV` into `ignite-config.json` in the image cache.
+After `ign build` completes, serialize the accumulated `CMD`/`ENTRYPOINT`/`ENV` into `vyoma-config.json` in the image cache.
 
 ### 3.2 Bundle virtiofsd — Make `-v` Work on Clean Install
 
-**Crate**: `packaging/deb/`, `packaging/rpm/`, `crates/ignited/src/`  
+**Crate**: `packaging/deb/`, `packaging/rpm/`, `crates/vyomad/src/`  
 **Priority**: P0
 
 #### 3.2.1 Static virtiofsd Bundle
 
-Add the static `virtiofsd` binary to `bin/` alongside `firecracker`. The packaging scripts must include it in the `.deb`/`.rpm` at `/usr/lib/ignite/virtiofsd`.
+Add the static `virtiofsd` binary to `bin/` alongside `firecracker`. The packaging scripts must include it in the `.deb`/`.rpm` at `/usr/lib/vyoma/virtiofsd`.
 
 ```bash
 # packaging/scripts/download_deps.sh
@@ -411,12 +411,12 @@ chmod +x bin/virtiofsd
 #### 3.2.2 Daemon virtiofsd Lookup
 
 ```rust
-// crates/ignited/src/vm_manager.rs
+// crates/vyomad/src/vm_manager.rs
 
 fn find_virtiofsd() -> Option<PathBuf> {
     // Priority order: bundled > system PATH
     let candidates = [
-        PathBuf::from("/usr/lib/ignite/virtiofsd"),
+        PathBuf::from("/usr/lib/vyoma/virtiofsd"),
         PathBuf::from("/usr/bin/virtiofsd"),
         PathBuf::from("/usr/local/bin/virtiofsd"),
     ];
@@ -444,7 +444,7 @@ fn start_virtiofsd(host_path: &Path, socket: &Path) -> Result<Child> {
 // crates/ign/src/commands/system.rs
 
 fn check_virtiofsd(results: &mut Vec<DoctorCheck>) {
-    let found = ["/usr/lib/ignite/virtiofsd", "/usr/bin/virtiofsd"]
+    let found = ["/usr/lib/vyoma/virtiofsd", "/usr/bin/virtiofsd"]
         .iter()
         .any(|p| Path::new(p).exists());
     
@@ -462,7 +462,7 @@ fn check_virtiofsd(results: &mut Vec<DoctorCheck>) {
 
 ### 3.3 Privilege Model Fix — Dedicated System User
 
-**Files**: `packaging/systemd/ignited.service`, `ignited/src/main.rs`  
+**Files**: `packaging/systemd/vyomad.service`, `vyomad/src/main.rs`  
 **Priority**: P0
 
 #### 3.3.1 systemd Service Unit — Constrained Capabilities
@@ -470,22 +470,22 @@ fn check_virtiofsd(results: &mut Vec<DoctorCheck>) {
 Replace the current blanket-root service with a dedicated user and explicit capabilities:
 
 ```ini
-# packaging/systemd/ignited.service
+# packaging/systemd/vyomad.service
 [Unit]
-Description=Ignite MicroVM Daemon
+Description=Vyoma MicroVM Daemon
 Documentation=https://github.com/Subeshrock/micro-vm-ecosystem
 After=network.target
 Wants=network.target
 
 [Service]
 Type=notify
-ExecStart=/usr/bin/ignited
+ExecStart=/usr/bin/vyomad
 ExecReload=/bin/kill -s HUP $MAINPID
 
 # ── Privilege Model ──────────────────────────────────────────────
-# Run as dedicated ignite system user, NOT root
-User=ignite
-Group=ignite
+# Run as dedicated vyoma system user, NOT root
+User=vyoma
+Group=vyoma
 
 # Grant only the capabilities actually needed:
 #   CAP_NET_ADMIN  — create/manage TAP devices, bridges, iptables rules
@@ -500,16 +500,16 @@ CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_NET_RAW CAP_SETUID CAP_SET
 NoNewPrivileges=false
 PrivateTmp=true
 ProtectHome=read-only
-ProtectSystem=false  # Must manage /var/lib/ignite
+ProtectSystem=false  # Must manage /var/lib/vyoma
 
 # Runtime directory
-RuntimeDirectory=ignite
+RuntimeDirectory=vyoma
 RuntimeDirectoryMode=0750
-StateDirectory=ignite
+StateDirectory=vyoma
 StateDirectoryMode=0750
 
 # Socket group allows ign CLI (user) to connect
-SocketGroup=ignite
+SocketGroup=vyoma
 
 [Install]
 WantedBy=multi-user.target
@@ -520,32 +520,32 @@ WantedBy=multi-user.target
 ```bash
 # packaging/scripts/postinstall.sh
 #!/bin/sh
-# Create ignite system user if it doesn't exist
-if ! id ignite >/dev/null 2>&1; then
+# Create vyoma system user if it doesn't exist
+if ! id vyoma >/dev/null 2>&1; then
     useradd --system --no-create-home --shell /usr/sbin/nologin \
-            --comment "Ignite MicroVM Daemon" ignite
+            --comment "Vyoma MicroVM Daemon" vyoma
 fi
 
-# Add ignite to kvm group for /dev/kvm access
-usermod -aG kvm ignite
+# Add vyoma to kvm group for /dev/kvm access
+usermod -aG kvm vyoma
 
 # Set socket permissions so ign CLI users can connect
-# Users must be in the 'ignite' group to use ign CLI
-chown root:ignite /var/run/ignite.sock 2>/dev/null || true
-chmod 0660 /var/run/ignite.sock 2>/dev/null || true
+# Users must be in the 'vyoma' group to use ign CLI
+chown root:vyoma /var/run/vyoma.sock 2>/dev/null || true
+chmod 0660 /var/run/vyoma.sock 2>/dev/null || true
 
 # /dev/kvm access
 chmod 0660 /dev/kvm 2>/dev/null || true
 chown root:kvm /dev/kvm 2>/dev/null || true
 
 systemctl daemon-reload
-systemctl enable ignited
+systemctl enable vyomad
 ```
 
-#### 3.3.3 Socket Permissions in ignited
+#### 3.3.3 Socket Permissions in vyomad
 
 ```rust
-// crates/ignited/src/main.rs
+// crates/vyomad/src/main.rs
 
 fn create_api_socket(path: &Path) -> Result<UnixListener> {
     if path.exists() {
@@ -553,8 +553,8 @@ fn create_api_socket(path: &Path) -> Result<UnixListener> {
     }
     let listener = UnixListener::bind(path)?;
     
-    // Set socket to group-writable so 'ignite' group members can connect
-    std::os::unix::fs::chown(path, None, Some(get_gid("ignite")?))?;
+    // Set socket to group-writable so 'vyoma' group members can connect
+    std::os::unix::fs::chown(path, None, Some(get_gid("vyoma")?))?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o660))?;
     
     Ok(listener)
@@ -563,7 +563,7 @@ fn create_api_socket(path: &Path) -> Result<UnixListener> {
 
 ### 3.4 WAL + Crash Recovery
 
-**Crate**: `crates/ignited/src/state/` (new module)  
+**Crate**: `crates/vyomad/src/state/` (new module)  
 **Priority**: P1 — prevents data loss on daemon crash
 
 #### 3.4.1 WAL Design
@@ -571,7 +571,7 @@ fn create_api_socket(path: &Path) -> Result<UnixListener> {
 Use `sled` embedded database for the WAL. Sled is pure Rust, has atomic batch writes, and does not require a separate process.
 
 ```toml
-# crates/ignited/Cargo.toml
+# crates/vyomad/Cargo.toml
 [dependencies]
 sled = "0.34"
 ```
@@ -581,7 +581,7 @@ sled = "0.34"
 Every mutation to daemon state writes a WAL entry before changing in-memory state:
 
 ```rust
-// crates/ignited/src/state/wal.rs
+// crates/vyomad/src/state/wal.rs
 
 use sled::{Db, Tree};
 use serde::{Serialize, Deserialize};
@@ -654,7 +654,7 @@ impl Wal {
 #### 3.4.3 Recovery on Startup
 
 ```rust
-// crates/ignited/src/state/recovery.rs
+// crates/vyomad/src/state/recovery.rs
 
 pub struct RecoveryResult {
     pub adopted: Vec<String>,   // VMs successfully re-adopted
@@ -707,15 +707,15 @@ fn process_exists(pid: u32) -> bool {
 
 ### 3.5 Docker Compose v3 Schema Compatibility
 
-**Crate**: `crates/ignite-compose/src/`  
+**Crate**: `crates/vyoma-compose/src/`  
 **Priority**: P1
 
 #### 3.5.1 Replace Custom v1.0 Schema
 
-Create `schema_v3.rs` that parses standard Docker Compose v3 YAML. The existing `ignite-compose.yml` with `version: "1.0"` must still parse for backward compatibility, then internally convert to the v3 schema struct.
+Create `schema_v3.rs` that parses standard Docker Compose v3 YAML. The existing `vyoma-compose.yml` with `version: "1.0"` must still parse for backward compatibility, then internally convert to the v3 schema struct.
 
 ```rust
-// crates/ignite-compose/src/schema_v3.rs
+// crates/vyoma-compose/src/schema_v3.rs
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -762,7 +762,7 @@ pub struct ServiceConfig {
     
     pub deploy: Option<DeployConfig>,   // for 'replicas'
     
-    /// VM-specific extension block (Ignite-only, ignored by docker-compose)
+    /// VM-specific extension block (Vyoma-only, ignored by docker-compose)
     pub vm: Option<VmExtension>,
     
     // Renamed from v1.0 'cpus'/'memory' — keep for backward compat
@@ -774,10 +774,10 @@ pub struct ServiceConfig {
     pub restart: Option<String>,        // "no", "always", "on-failure", "unless-stopped"
 }
 
-/// Ignite-specific VM configuration — silently ignored by docker-compose
+/// Vyoma-specific VM configuration — silently ignored by docker-compose
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VmExtension {
-    pub kernel: Option<String>,         // "ignite/kernels:6.1-slim"
+    pub kernel: Option<String>,         // "vyoma/kernels:6.1-slim"
     pub vcpus: Option<u32>,
     pub memory: Option<u64>,            // MiB
     pub iops_limit: Option<u32>,
@@ -792,7 +792,7 @@ pub struct NetworkConfig {
     #[serde(default)]
     pub internal: bool,                 // No external connectivity
     pub ipam: Option<IpamConfig>,
-    /// Ignite overlay will use WireGuard automatically when driver="overlay"
+    /// Vyoma overlay will use WireGuard automatically when driver="overlay"
     pub external: Option<bool>,
 }
 
@@ -823,7 +823,7 @@ pub enum EnvSpec {
 When a compose stack specifies `networks:`, create a separate Linux bridge per named network. Services without an explicit network assignment go on the default bridge.
 
 ```rust
-// crates/ignite-compose/src/orchestrator.rs
+// crates/vyoma-compose/src/orchestrator.rs
 
 async fn provision_compose_networks(
     compose: &ComposeFile,
@@ -863,13 +863,13 @@ async fn provision_compose_networks(
 
 ### 3.6 Fix `ign rm` Resource Cleanup
 
-**Crate**: `crates/ignited/src/api/vms.rs` and `vm_manager.rs`  
+**Crate**: `crates/vyomad/src/api/vms.rs` and `vm_manager.rs`  
 **Priority**: P1 — current behavior leaves dangling resources
 
 #### 3.6.1 Complete Teardown Sequence
 
 ```rust
-// crates/ignited/src/vm_manager.rs
+// crates/vyomad/src/vm_manager.rs
 
 pub async fn destroy_vm(&self, vm_id: &str) -> Result<()> {
     let state = self.get_state(vm_id)?;
@@ -926,7 +926,7 @@ pub async fn destroy_vm(&self, vm_id: &str) -> Result<()> {
 
 ### 3.7 Implement `ign commit`, `ign save`, `ign load`
 
-**Crate**: `crates/ign/src/commands/image.rs`, `crates/ignited/src/api/images.rs`  
+**Crate**: `crates/ign/src/commands/image.rs`, `crates/vyomad/src/api/images.rs`  
 **Priority**: P2
 
 #### 3.7.1 `ign commit <vm-id> <new-image-tag>`
@@ -934,7 +934,7 @@ pub async fn destroy_vm(&self, vm_id: &str) -> Result<()> {
 Pauses the VM, flushes the COW delta to the base image layer to create a new read-only image, then resumes.
 
 ```rust
-// crates/ignited/src/api/images.rs
+// crates/vyomad/src/api/images.rs
 
 pub async fn commit_vm(vm_id: &str, tag: &str, vm_manager: &VmManager) -> Result<ImageId> {
     // 1. Pause VM via Firecracker API
@@ -954,7 +954,7 @@ pub async fn commit_vm(vm_id: &str, tag: &str, vm_manager: &VmManager) -> Result
         ])
         .status()?;
     
-    // 3. Write ignite-config.json for the new image
+    // 3. Write vyoma-config.json for the new image
     let config = vm_manager.get_vm_config(vm_id)?;
     std::fs::write(
         new_image_path.with_extension("json"),
@@ -972,7 +972,7 @@ pub async fn commit_vm(vm_id: &str, tag: &str, vm_manager: &VmManager) -> Result
 
 #### 3.7.2 `ign save <image> -o <file.tar.gz>` and `ign load -i <file.tar.gz>`
 
-Bundle the ext4 image file + ignite-config.json into a compressed tar. This is a simpler version of the existing `ign export` / `ign import` which operates on VM snapshots.
+Bundle the ext4 image file + vyoma-config.json into a compressed tar. This is a simpler version of the existing `ign export` / `ign import` which operates on VM snapshots.
 
 ```rust
 // crates/ign/src/commands/image.rs
@@ -984,7 +984,7 @@ pub async fn cmd_save(image: &str, output: &Path, client: &Client) -> Result<()>
     let mut tar = TarBuilder::new(gz);
     
     tar.append_data(&mut resp.ext4_reader(), "rootfs.ext4")?;
-    tar.append_data(&mut Cursor::new(&resp.config_json), "ignite-config.json")?;
+    tar.append_data(&mut Cursor::new(&resp.config_json), "vyoma-config.json")?;
     tar.append_data(&mut Cursor::new(&resp.manifest_json), "manifest.json")?;
     
     tar.finish()?;
@@ -1010,14 +1010,14 @@ pub async fn cmd_load(input: &Path, client: &Client) -> Result<()> {
 **Duration**: 6 weeks  
 **Goal**: Refactor the brittle CLI-subprocess internals into proper Rust-native library calls. Build the chaos test framework. Expand the Docker Hub compatibility test matrix.
 
-### 4.1 Storage Refactor — `ignite-storage` Crate
+### 4.1 Storage Refactor — `vyoma-storage` Crate
 
 **Priority**: P1 — `std::process::Command("dmsetup")` error handling is string parsing; brittle.
 
-Extract `ignite-core/src/storage.rs` into `crates/ignite-storage/` and replace the CLI subprocess calls with the `devicemapper` Rust crate.
+Extract `vyoma-core/src/storage.rs` into `crates/vyoma-storage/` and replace the CLI subprocess calls with the `devicemapper` Rust crate.
 
 ```toml
-# crates/ignite-storage/Cargo.toml
+# crates/vyoma-storage/Cargo.toml
 [dependencies]
 devicemapper = "0.34"   # Safe Rust bindings for libdevmapper
 loopdev = "0.4"         # Safe Rust bindings for loop devices
@@ -1026,7 +1026,7 @@ loopdev = "0.4"         # Safe Rust bindings for loop devices
 #### 4.1.1 Device Mapper — Replace subprocess calls
 
 ```rust
-// crates/ignite-storage/src/dm.rs
+// crates/vyoma-storage/src/dm.rs
 
 use devicemapper::{DmOptions, DmName, DevId, Segment, LinearDev, SnapshotDev};
 
@@ -1079,7 +1079,7 @@ impl DmSnapshots {
 #### 4.1.2 Loop Device — Replace losetup subprocess
 
 ```rust
-// crates/ignite-storage/src/cow.rs
+// crates/vyoma-storage/src/cow.rs
 
 use loopdev::{LoopControl, LoopDevice};
 
@@ -1103,12 +1103,12 @@ pub fn create_cow_file(path: &Path, size_bytes: u64) -> Result<()> {
 }
 ```
 
-### 4.2 Network Refactor — `ignite-net` Crate
+### 4.2 Network Refactor — `vyoma-net` Crate
 
-Extract `ignite-core/src/network.rs` into `crates/ignite-net/`. Replace `ip link`/`brctl`/`iptables` subprocess calls with `rtnetlink`.
+Extract `vyoma-core/src/network.rs` into `crates/vyoma-net/`. Replace `ip link`/`brctl`/`iptables` subprocess calls with `rtnetlink`.
 
 ```toml
-# crates/ignite-net/Cargo.toml
+# crates/vyoma-net/Cargo.toml
 [dependencies]
 rtnetlink = "0.13"
 netlink-packet-route = "0.17"
@@ -1116,7 +1116,7 @@ ipnetwork = "0.20"
 ```
 
 ```rust
-// crates/ignite-net/src/bridge.rs
+// crates/vyoma-net/src/bridge.rs
 
 use rtnetlink::{new_connection, Handle};
 
@@ -1177,7 +1177,7 @@ impl BridgeManager {
 
 ### 4.3 Replace Git-Based Time Travel with Proper Snapshot Tree
 
-**Crate**: `crates/ignite-storage/src/snapshot_tree.rs`  
+**Crate**: `crates/vyoma-storage/src/snapshot_tree.rs`  
 **Priority**: P1 — git is an external dep, wrong abstraction, and breaks CoW delta efficiency.
 
 The git-based approach (ADR in the codebase) must be removed and replaced with a proper snapshot graph backed by sled.
@@ -1185,7 +1185,7 @@ The git-based approach (ADR in the codebase) must be removed and replaced with a
 #### 4.3.1 Snapshot Tree Data Model
 
 ```rust
-// crates/ignite-storage/src/snapshot_tree.rs
+// crates/vyoma-storage/src/snapshot_tree.rs
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotNode {
@@ -1322,8 +1322,8 @@ async fn test_running_vm_survives_daemon_restart() {
 
 Build an automated nightly test that pulls the top-N Docker Hub images and verifies:
 1. Pull succeeds (OCI → ext4 conversion)
-2. `ignite-config.json` is correctly extracted (CMD/ENTRYPOINT/ENV)
-3. VM boots (`ign run` returns Running status)
+2. `vyoma-config.json` is correctly extracted (CMD/ENTRYPOINT/ENV)
+3. VM boots (`vyoma run` returns Running status)
 4. Healthcheck passes (if declared in the OCI config)
 5. Main process responds (TCP probe on exposed port if declared)
 
@@ -1370,16 +1370,16 @@ async fn test_docker_hub_compatibility() {
 ## 5. Phase 3 — v1.5: Power Features
 
 **Duration**: 12 weeks  
-**Goal**: WireGuard-encrypted Swarm, Raft consensus, live VM migration (Teleport), Ignite Hub, gRPC interface, Prometheus metrics.
+**Goal**: WireGuard-encrypted Swarm, Raft consensus, live VM migration (Teleport), Vyoma Hub, gRPC interface, Prometheus metrics.
 
-### 5.1 WireGuard Encryption in Swarm — `ignite-net` Crate
+### 5.1 WireGuard Encryption in Swarm — `vyoma-net` Crate
 
 **Priority**: P0 for multi-tenant Swarm — all VXLAN traffic is currently plaintext.
 
-Use `boringtun` (pure Rust WireGuard implementation) embedded in ignited. No external `wg` binary dependency.
+Use `boringtun` (pure Rust WireGuard implementation) embedded in vyomad. No external `wg` binary dependency.
 
 ```toml
-# crates/ignite-net/Cargo.toml
+# crates/vyoma-net/Cargo.toml
 [dependencies]
 boringtun = "0.6"
 ```
@@ -1387,7 +1387,7 @@ boringtun = "0.6"
 #### 5.1.1 WireGuard Integration
 
 ```rust
-// crates/ignite-net/src/wireguard.rs
+// crates/vyoma-net/src/wireguard.rs
 
 use boringtun::crypto::{X25519PublicKey, X25519SecretKey};
 use boringtun::device::drop_privileges;
@@ -1412,7 +1412,7 @@ impl WireGuardNode {
             ..Default::default()
         };
         
-        let handle = DeviceHandle::new("ignite-wg0", config)?;
+        let handle = DeviceHandle::new("vyoma-wg0", config)?;
         
         Ok(Self { secret_key, public_key, handle })
     }
@@ -1442,7 +1442,7 @@ impl WireGuardNode {
 #### 5.1.2 Swarm Init/Join Key Exchange
 
 When `ign swarm init` is called:
-1. Generate WireGuard keypair, store in `/var/lib/ignite/wg.key`
+1. Generate WireGuard keypair, store in `/var/lib/vyoma/wg.key`
 2. Start listening on UDP port 51820
 3. Advertise public key + endpoint in the swarm gossip state
 
@@ -1455,19 +1455,19 @@ When `ign swarm join <seed-ip>` is called:
 
 ### 5.2 Raft Consensus for Swarm — Replace Seed Node Model
 
-**Crate**: `crates/ignited/src/swarm/`  
+**Crate**: `crates/vyomad/src/swarm/`  
 **Priority**: P1
 
 Replace the current seed-based approach with Raft via the `openraft` crate.
 
 ```toml
-# crates/ignited/Cargo.toml
+# crates/vyomad/Cargo.toml
 [dependencies]
 openraft = { version = "0.9", features = ["serde"] }
 ```
 
 ```rust
-// crates/ignited/src/swarm/raft.rs
+// crates/vyomad/src/swarm/raft.rs
 
 use openraft::{Config, Raft, RaftMetrics};
 
@@ -1482,20 +1482,20 @@ pub enum SwarmCommand {
     DeleteService { name: String },
 }
 
-pub type IgniteRaft = Raft<IgniteTypeConfig>;
+pub type VyomaRaft = Raft<VyomaTypeConfig>;
 
 pub async fn create_raft_node(
     node_id: u64,
     config: Arc<Config>,
-    network: Arc<IgniteNetwork>,
-    storage: Arc<IgniteStorage>,
-) -> Result<IgniteRaft> {
+    network: Arc<VyomaNetwork>,
+    storage: Arc<VyomaStorage>,
+) -> Result<VyomaRaft> {
     let raft = Raft::new(node_id, config, network, storage).await?;
     Ok(raft)
 }
 
 /// Called on `ign swarm init` — bootstrap a single-node cluster
-pub async fn bootstrap_cluster(raft: &IgniteRaft, node_id: u64, addr: String) -> Result<()> {
+pub async fn bootstrap_cluster(raft: &VyomaRaft, node_id: u64, addr: String) -> Result<()> {
     let members = BTreeMap::from([(node_id, BasicNode { addr })]);
     raft.initialize(members).await?;
     Ok(())
@@ -1503,7 +1503,7 @@ pub async fn bootstrap_cluster(raft: &IgniteRaft, node_id: u64, addr: String) ->
 
 /// Called on `ign swarm join` — add this node to existing cluster
 pub async fn join_cluster(
-    raft: &IgniteRaft,
+    raft: &VyomaRaft,
     leader_addr: &str,
     node_id: u64,
     my_addr: String,
@@ -1518,7 +1518,7 @@ pub async fn join_cluster(
 
 ### 5.3 Teleport — Live VM Migration
 
-**Crate**: `crates/ignite-teleport/`  
+**Crate**: `crates/vyoma-teleport/`  
 **Priority**: P2 — flagship feature
 
 #### 5.3.1 Protocol Overview
@@ -1556,7 +1556,7 @@ Source Node                              Destination Node
 #### 5.3.2 Source Node Implementation
 
 ```rust
-// crates/ignite-teleport/src/sender.rs
+// crates/vyoma-teleport/src/sender.rs
 
 use kvm_ioctls::{Kvm, VmFd};
 
@@ -1627,14 +1627,14 @@ impl MigrationSender {
 }
 ```
 
-### 5.4 gRPC Interface — `ignite-proto` Crate
+### 5.4 gRPC Interface — `vyoma-proto` Crate
 
 **Priority**: P1 — required for vk8s CRI (Phase 4)
 
 ```protobuf
-// crates/ignite-proto/proto/vm.proto
+// crates/vyoma-proto/proto/vm.proto
 syntax = "proto3";
-package ignite.v1;
+package vyoma.v1;
 
 service VmService {
     rpc CreateVm (CreateVmRequest) returns (CreateVmResponse);
@@ -1663,7 +1663,7 @@ message VmInfo {
 ```
 
 ```toml
-# crates/ignite-proto/Cargo.toml
+# crates/vyoma-proto/Cargo.toml
 [dependencies]
 tonic = "0.11"
 prost = "0.12"
@@ -1671,10 +1671,10 @@ prost = "0.12"
 tonic-build = "0.11"
 ```
 
-Add gRPC server alongside the existing axum REST server in ignited:
+Add gRPC server alongside the existing axum REST server in vyomad:
 
 ```rust
-// crates/ignited/src/main.rs
+// crates/vyomad/src/main.rs
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -1702,11 +1702,11 @@ async fn main() -> Result<()> {
 **Priority**: P2
 
 ```rust
-// crates/ignited/src/metrics.rs
+// crates/vyomad/src/metrics.rs
 
 use prometheus::{Registry, Gauge, Counter, Histogram, GaugeVec};
 
-pub struct IgniteMetrics {
+pub struct VyomaMetrics {
     pub vms_running:      Gauge,
     pub vms_total:        Counter,
     pub vm_boot_duration: Histogram,
@@ -1728,16 +1728,16 @@ async fn metrics_handler() -> impl IntoResponse {
 }
 ```
 
-### 5.6 VMIF Image Format — `ignite-image` Crate
+### 5.6 VMIF Image Format — `vyoma-image` Crate
 
 **Priority**: P2
 
 ```rust
-// crates/ignite-image/src/vmif.rs
+// crates/vyoma-image/src/vmif.rs
 
-/// VMIF (VM Image Format) — the stable on-disk format for Ignite images
+/// VMIF (VM Image Format) — the stable on-disk format for Vyoma images
 /// Layout (OCI-compatible artifact stored in any OCI registry):
-///   ignite.toml  — image metadata
+///   vyoma.toml  — image metadata
 ///   rootfs.sqfs  — squashfs root filesystem (read-only, compressed)
 ///   kernel.vmlinuz — guest kernel (optional, uses bundled default if absent)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1756,10 +1756,10 @@ pub struct VmifManifest {
 #### 5.6.1 Docker Hub → VMIF Bridge
 
 ```rust
-// crates/ignite-image/src/hub_bridge.rs
+// crates/vyoma-image/src/hub_bridge.rs
 
 /// Convert a Docker Hub OCI image to VMIF format.
-/// This is the core of the "Ignite Hub bridge" feature.
+/// This is the core of the "Vyoma Hub bridge" feature.
 /// Called once per image tag; result cached forever.
 pub async fn convert_docker_hub_to_vmif(
     image_ref: &str,
@@ -1780,7 +1780,7 @@ pub async fn convert_docker_hub_to_vmif(
                "-comp", "zstd", "-Xcompression-level", "9"])
         .status()?;
     
-    // 4. Build ignite.toml metadata
+    // 4. Build vyoma.toml metadata
     let vmif = VmifManifest {
         schema_version: 1,
         created: chrono::Utc::now().to_rfc3339(),
@@ -1796,7 +1796,7 @@ pub async fn convert_docker_hub_to_vmif(
 }
 ```
 
-### 5.7 Ignite Studio v2 — Enhanced Dashboard
+### 5.7 Vyoma Studio v2 — Enhanced Dashboard
 
 **Location**: `ui/src/`  
 **Priority**: P2
@@ -1807,9 +1807,9 @@ Extend the existing TypeScript dashboard. Add these views:
 
 2. **Network Topology View** — D3.js force-directed graph. Nodes = VMs, edges = network connections. Color by compose stack. Click a VM for inline stats panel.
 
-3. **Compose Editor** — Monaco editor (same as VS Code) with YAML schema validation for `ignite-compose.yml`. Live validate against the Docker Compose v3 JSON schema. One-click deploy button.
+3. **Compose Editor** — Monaco editor (same as VS Code) with YAML schema validation for `vyoma-compose.yml`. Live validate against the Docker Compose v3 JSON schema. One-click deploy button.
 
-4. **Hub Browser** — Search box. Hit Ignite Hub API (local cache) first, fall back to Docker Hub bridge. Shows conversion status badge.
+4. **Hub Browser** — Search box. Hit Vyoma Hub API (local cache) first, fall back to Docker Hub bridge. Shows conversion status badge.
 
 ---
 
@@ -1820,7 +1820,7 @@ Extend the existing TypeScript dashboard. Add these views:
 
 ### 6.1 TimeMachine — Full Implementation
 
-**Crate**: `crates/ignite-storage/src/snapshot_tree.rs` (extends Phase 2 foundation)  
+**Crate**: `crates/vyoma-storage/src/snapshot_tree.rs` (extends Phase 2 foundation)  
 **Priority**: P1 — headline v2.0 feature
 
 The snapshot tree is already built in Phase 2. This phase wires it to the CLI commands.
@@ -1873,10 +1873,10 @@ pub async fn cmd_time_travel(vm_id: &str, target: &str, client: &Client) -> Resu
 }
 ```
 
-#### 6.1.3 Auto-Snapshot Policy (from Ignitefile)
+#### 6.1.3 Auto-Snapshot Policy (from Vyomafile)
 
 ```rust
-// crates/ignited/src/vm_manager.rs
+// crates/vyomad/src/vm_manager.rs
 
 pub struct AutoSnapshotTask {
     vm_id: String,
@@ -1907,7 +1907,7 @@ impl AutoSnapshotTask {
 
 ### 6.2 Hibernation — State-to-Disk, All Resources Released
 
-**Crate**: `crates/ignited/src/vm_manager.rs`  
+**Crate**: `crates/vyomad/src/vm_manager.rs`  
 **Priority**: P1
 
 ```rust
@@ -2008,19 +2008,19 @@ package cri
 
 import (
     pb "k8s.io/cri-api/pkg/apis/runtime/v1"
-    ignite "github.com/Subeshrock/micro-vm-ecosystem/sdk/go"
+    vyoma "github.com/Subeshrock/micro-vm-ecosystem/sdk/go"
 )
 
-// IgniteCriServer implements the CRI RuntimeService and ImageService
-type IgniteCriServer struct {
-    client *ignite.Client  // gRPC client to ignited
+// VyomaCriServer implements the CRI RuntimeService and ImageService
+type VyomaCriServer struct {
+    client *vyoma.Client  // gRPC client to vyomad
     pb.UnimplementedRuntimeServiceServer
     pb.UnimplementedImageServiceServer
 }
 
 // RunPodSandbox — called when kubelet creates a new Pod
-// Each Pod = one Ignite MicroVM
-func (s *IgniteCriServer) RunPodSandbox(
+// Each Pod = one Vyoma MicroVM
+func (s *VyomaCriServer) RunPodSandbox(
     ctx context.Context,
     req *pb.RunPodSandboxRequest,
 ) (*pb.RunPodSandboxResponse, error) {
@@ -2028,7 +2028,7 @@ func (s *IgniteCriServer) RunPodSandbox(
     config := req.Config
     
     // Create VM configuration from pod spec
-    vmConfig := &ignite.CreateVmRequest{
+    vmConfig := &vyoma.CreateVmRequest{
         Name:       config.Metadata.Name,
         Namespace:  config.Metadata.Namespace,
         Vcpus:      uint32(config.Linux.Resources.CpuQuota / 100000),
@@ -2050,7 +2050,7 @@ func (s *IgniteCriServer) RunPodSandbox(
 
 // CreateContainer — called for each container in a pod
 // Containers within a pod share the same VM via namespaces
-func (s *IgniteCriServer) CreateContainer(
+func (s *VyomaCriServer) CreateContainer(
     ctx context.Context,
     req *pb.CreateContainerRequest,
 ) (*pb.CreateContainerResponse, error) {
@@ -2061,7 +2061,7 @@ func (s *IgniteCriServer) CreateContainer(
     vm_id := req.PodSandboxId
     cmd := append(req.Config.Command, req.Config.Args...)
     
-    execReq := &ignite.ExecRequest{
+    execReq := &vyoma.ExecRequest{
         VmId:    vm_id,
         Command: cmd,
         Env:     req.Config.Envs,
@@ -2077,11 +2077,11 @@ func (s *IgniteCriServer) CreateContainer(
 ```bash
 # Kubernetes setup
 # kubelet config (containerd-style):
-containerRuntimeEndpoint: unix:///var/run/ignite-cri.sock
+containerRuntimeEndpoint: unix:///var/run/vyoma-cri.sock
 
-# Pod spec to use Ignite MicroVM isolation:
+# Pod spec to use Vyoma MicroVM isolation:
 spec:
-  runtimeClassName: ignite-microvm
+  runtimeClassName: vyoma-microvm
   containers:
     - name: web
       image: nginx:alpine
@@ -2091,11 +2091,11 @@ spec:
 
 ### 6.4 Trusted Boot Chain
 
-**Crate**: `crates/ignited/src/` and `crates/ignite-image/src/signing.rs`  
+**Crate**: `crates/vyomad/src/` and `crates/vyoma-image/src/signing.rs`  
 **Priority**: P3
 
 ```rust
-// crates/ignite-image/src/signing.rs
+// crates/vyoma-image/src/signing.rs
 
 use ed25519_dalek::{SigningKey, VerifyingKey, Signer, Verifier, Signature};
 use sha2::{Sha256, Digest};
@@ -2123,25 +2123,25 @@ pub fn verify_manifest(signed: &SignedManifest, trusted_key: &VerifyingKey) -> R
 ```
 
 ```ini
-# Enforce signature policy via ignited config
-# /etc/ignite/config.toml
+# Enforce signature policy via vyomad config
+# /etc/vyoma/config.toml
 
 [security]
 require_signed_images = true
 trusted_keys = [
-    "/etc/ignite/trusted-keys/ci.pub",
-    "/etc/ignite/trusted-keys/hub.pub",
+    "/etc/vyoma/trusted-keys/ci.pub",
+    "/etc/vyoma/trusted-keys/hub.pub",
 ]
 ```
 
-### 6.5 ignite-agent — In-VM Binary
+### 6.5 vyoma-agent — In-VM Binary
 
-**Crate**: `crates/ignite-agent/`  
-**Target**: `x86_64-unknown-linux-musl` — static binary, ~400KB  
+**Crate**: `crates/vyoma-agent/`  
+**Target**: `x86_64-unknown-linux-musl` — static binary, .vyoma400KB  
 **Priority**: P2
 
 ```rust
-// crates/ignite-agent/src/main.rs
+// crates/vyoma-agent/src/main.rs
 // This binary is injected into every VMIF image at build time.
 // It runs as PID 2 (alongside the actual workload) via a wrapper init.
 
@@ -2204,16 +2204,16 @@ async fn collect_metrics() -> Result<VmMetrics> {
 
 **Priority**: P3 — enables ecosystem growth
 
-The Go SDK is auto-generated from the protobuf definitions in `ignite-proto`. The Rust and Python SDKs are thin ergonomic wrappers.
+The Go SDK is auto-generated from the protobuf definitions in `vyoma-proto`. The Rust and Python SDKs are thin ergonomic wrappers.
 
 ```go
 // sdk/go/client.go — Auto-generated from proto, then wrap with ergonomic API
 
-package ignite
+package vyoma
 
 import (
     "google.golang.org/grpc"
-    pb "github.com/Subeshrock/micro-vm-ecosystem/ignite-proto/gen/go"
+    pb "github.com/Subeshrock/micro-vm-ecosystem/vyoma-proto/gen/go"
 )
 
 type Client struct {
@@ -2250,7 +2250,7 @@ func (c *Client) Run(ctx context.Context, image string, opts ...RunOption) (*Vm,
 | Level | Crate | Command | CI Trigger | KVM Required |
 |-------|-------|---------|------------|--------------|
 | Unit | all | `cargo test` | Every PR | No |
-| Component (mocked) | ignited, ignite-core | `cargo test -p ignited` | Every PR | No |
+| Component (mocked) | vyomad, vyoma-core | `cargo test -p vyomad` | Every PR | No |
 | Integration (real FC) | tests/integration | `./scripts/test_integration.sh` | Every merge to main | Yes |
 | Chaos | tests/chaos | `cargo test --test chaos -- --ignored` | Nightly | Yes |
 | Compat matrix | tests/compat | `cargo test --test compat -- --ignored` | Nightly | Yes |
@@ -2271,7 +2271,7 @@ func (c *Client) Run(ctx context.Context, image string, opts ...RunOption) (*Vm,
 
 ### 7.3 Mock Firecracker Server
 
-For unit tests that test ignited behavior without KVM:
+For unit tests that test vyomad behavior without KVM:
 
 ```rust
 // tests/mocks/firecracker_server.rs
@@ -2312,16 +2312,16 @@ impl MockFirecracker {
 The `.deb` produced by CI must contain:
 
 ```
-/usr/bin/ignited              # Daemon binary
+/usr/bin/vyomad              # Daemon binary
 /usr/bin/ign                  # CLI binary
-/usr/lib/ignite/firecracker   # Bundled Firecracker VMM
-/usr/lib/ignite/virtiofsd     # Bundled virtiofs daemon (Phase 1)
-/usr/lib/ignite/kernels/      # Pre-built minimal kernels (Phase 3)
-    ignite-6.1-slim.vmlinuz
-    ignite-6.1-io_uring.vmlinuz
-/etc/systemd/system/ignited.service
-/var/lib/ignite/              # Runtime state directory (created by postinstall)
-/var/log/ignite/              # Log directory
+/usr/lib/vyoma/firecracker   # Bundled Firecracker VMM
+/usr/lib/vyoma/virtiofsd     # Bundled virtiofs daemon (Phase 1)
+/usr/lib/vyoma/kernels/      # Pre-built minimal kernels (Phase 3)
+    vyoma-6.1-slim.vmlinuz
+    vyoma-6.1-io_uring.vmlinuz
+/etc/systemd/system/vyomad.service
+/var/lib/vyoma/              # Runtime state directory (created by postinstall)
+/var/log/vyoma/              # Log directory
 ```
 
 ### 8.2 systemd Service Versions
@@ -2329,8 +2329,8 @@ The `.deb` produced by CI must contain:
 | Version | User | Capabilities |
 |---------|------|-------------|
 | v1.1 (current) | root | ALL |
-| v1.2 (Phase 1) | ignite | CAP_NET_ADMIN, CAP_SYS_ADMIN, CAP_NET_RAW, CAP_SETUID, CAP_SETGID |
-| v2.0 (target) | ignite | Same — no regression in capability set |
+| v1.2 (Phase 1) | vyoma | CAP_NET_ADMIN, CAP_SYS_ADMIN, CAP_NET_RAW, CAP_SETUID, CAP_SETGID |
+| v2.0 (target) | vyoma | Same — no regression in capability set |
 
 ### 8.3 GitHub Actions CI Workflow
 
@@ -2376,35 +2376,35 @@ This section documents every decision in the existing codebase that must be chan
 
 ### 9.1 Git-Based Time Travel (Remove Entirely)
 
-**Current**: The daemon calls `git init`, `git add`, `git commit` on snapshot directories. Lives in `ignited/src/` and uses `std::process::Command("git")`.
+**Current**: The daemon calls `git init`, `git add`, `git commit` on snapshot directories. Lives in `vyomad/src/` and uses `std::process::Command("git")`.
 
-**Remove**: All `git` calls from the daemon. Delete any `.git` directories in `.ignite/vms/`.
+**Remove**: All `git` calls from the daemon. Delete any `.git` directories in `.vyoma/vms/`.
 
-**Replace with**: The `SnapshotTree` implemented in `ignite-storage/src/snapshot_tree.rs` (Phase 2). The sled-backed snapshot tree provides all the same functionality (history, branching, time-travel) without the external git binary dependency and with proper CoW delta semantics.
+**Replace with**: The `SnapshotTree` implemented in `vyoma-storage/src/snapshot_tree.rs` (Phase 2). The sled-backed snapshot tree provides all the same functionality (history, branching, time-travel) without the external git binary dependency and with proper CoW delta semantics.
 
 **Migration for existing snapshots**: Write a one-time migration script that reads existing git history and converts it to sled snapshot tree entries. Run on first daemon startup after upgrade.
 
 ### 9.2 In-Memory VM State HashMap (Replace with WAL-backed Store)
 
-**Current**: `Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<VmmManager>>>>>` in ignited. ADR-008 acknowledged this loses state on restart.
+**Current**: `Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<VmmManager>>>>>` in vyomad. ADR-008 acknowledged this loses state on restart.
 
 **Replace with**: WAL + sled store from Phase 1 (Section 3.4). The in-memory HashMap becomes a cache of the WAL-persisted state. On startup, WAL replay rebuilds the HashMap.
 
-**Migration**: Non-breaking. The new store is additive. Existing state JSON files in `.ignite/state/` can be imported as the initial WAL state on first upgrade.
+**Migration**: Non-breaking. The new store is additive. Existing state JSON files in `.vyoma/state/` can be imported as the initial WAL state on first upgrade.
 
 ### 9.3 `std::process::Command` for dmsetup/losetup (Migrate Progressively)
 
 **Current**: ADR-002 chose CLI-subprocess wrapping as MVP approach with explicit note to migrate to native crates for production.
 
 **Migration path**:
-- Phase 2: Migrate `storage.rs` to `devicemapper` + `loopdev` crates in `ignite-storage` crate.
-- Phase 2: Migrate `network.rs` to `rtnetlink` crate in `ignite-net` crate.
+- Phase 2: Migrate `storage.rs` to `devicemapper` + `loopdev` crates in `vyoma-storage` crate.
+- Phase 2: Migrate `network.rs` to `rtnetlink` crate in `vyoma-net` crate.
 - Keep `iptables` subprocess calls for now (the `iptables` Rust crate is less mature).
 - Do NOT migrate `debugfs` calls — they're already the correct approach for rootless file population.
 
 ### 9.4 Compose Schema `version: "1.0"` (Supersede with Docker Compose v3)
 
-**Current**: Custom `version: "1.0"` YAML schema in `ignite-compose`.
+**Current**: Custom `version: "1.0"` YAML schema in `vyoma-compose`.
 
 **Migration**: The new parser (Phase 1, Section 3.5) accepts both `version: "1.0"` (old) and `version: "3.x"` (new) by branching in the deserialization path. Old files continue working. New documentation always shows Docker Compose v3 format.
 
@@ -2415,7 +2415,7 @@ This section documents every decision in the existing codebase that must be chan
 - VXLAN overlay (Swarm) requires root
 - User namespace restrictions cause crashes in standard shells
 
-**Decision stands**: Do NOT reintroduce rootless mode as a first-class feature in v1.2-v2.0. The privileged service model with a constrained `ignite` user (Phase 1, Section 3.3) is the correct security model — same as Docker.
+**Decision stands**: Do NOT reintroduce rootless mode as a first-class feature in v1.2-v2.0. The privileged service model with a constrained `vyoma` user (Phase 1, Section 3.3) is the correct security model — same as Docker.
 
 Mark rootless in docs as "not recommended for production" and remove it from the test matrix to reduce CI surface area.
 
@@ -2428,7 +2428,7 @@ Mark rootless in docs as "not recommended for production" and remove it from the
 **Improvements needed** (Phase 2):
 - Replace string-based error messages with typed `OciError` enum
 - Add retry logic with exponential backoff for transient 429/503 from Docker Hub
-- Add support for `~/.docker/config.json` auth (already partially in changelog — verify completeness)
+- Add support for `.vyoma/.docker/config.json` auth (already partially in changelog — verify completeness)
 - Add `Bearer` token caching to avoid re-authenticating on every layer pull
 
 ### 9.7 Userspace TCP Port Proxy (Keep — Minor Improvement)
@@ -2446,5 +2446,5 @@ Mark rootless in docs as "not recommended for production" and remove it from the
 | **v1.1** | Current state | — | Baseline |
 | **v1.2** | Critical fixes | 8 weeks | CMD/ENTRYPOINT works, virtiofsd bundled, constrained privileges, WAL, Compose v3 |
 | **v1.3** | Hardening | 6 weeks | Storage/net refactor to Rust-native crates, chaos tests, 98% Docker Hub compat |
-| **v1.5** | Power features | 12 weeks | WireGuard Swarm, Raft consensus, Teleport, gRPC, Ignite Hub, VMIF, Studio v2 |
-| **v2.0** | Revolutionary | 16 weeks | TimeMachine, Hibernation, vk8s CRI, Trusted Boot, ignite-agent, SDK |
+| **v1.5** | Power features | 12 weeks | WireGuard Swarm, Raft consensus, Teleport, gRPC, Vyoma Hub, VMIF, Studio v2 |
+| **v2.0** | Revolutionary | 16 weeks | TimeMachine, Hibernation, vk8s CRI, Trusted Boot, vyoma-agent, SDK |

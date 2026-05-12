@@ -28,7 +28,7 @@ No migration needed. Just use the new Raft-based endpoints.
 
 #### Option 1: Fresh Start (Recommended)
 1. Stop all daemon instances
-2. Clear Raft state: `rm -rf ~/.ignite/state/raft_db`
+2. Clear Raft state: `rm -rf .vyoma/.vyoma/state/raft_db`
 3. Restart with new configuration
 
 #### Option 2: Rolling Upgrade

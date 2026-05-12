@@ -1,19 +1,19 @@
-# Ignite Roadmap 🚀
+# Vyoma Roadmap 🚀
 
-This document outlines the development path for Ignite, tracking completed milestones and future goals.
+This document outlines the development path for Vyoma, tracking completed milestones and future goals.
 
 ## ✅ Completed Milestones
 
 ### v0.1.0: The Foundation ("Hello World")
 - **Core Engine**: OCI Pull, Layer Flattening, Firecracker VMM integration.
 - **Storage**: Device Mapper snapshots (Instant Clones).
-- **Basic CLI**: `ign run`, `ign ps`, `ign stop`.
+- **Basic CLI**: `vyoma run`, `ign ps`, `ign stop`.
 
 ### v0.2.0: The Developer Experience ("Localhost Gap")
 - **Volume Mounts**: VirtioFS support (`-v /host:/vm`) for hot-reloading code.
 - **Port Mapping**: Userspace TCP proxy (`-p 8080:80`).
 - **Telemetry**: Log streaming (`ign logs -f`) and OOM Monitoring.
-- **Building**: `Ignitefile` support (`ign build`) and `ign import/export` (Teleportation).
+- **Building**: `Vyomafile` support (`ign build`) and `ign import/export` (Teleportation).
 
 ### v0.3.0: The Maturity Update (Current)
 - **Rootless Mode**: Running `ign` without `sudo` (via `slirp4netns` and `debugfs`).
@@ -25,8 +25,8 @@ This document outlines the development path for Ignite, tracking completed miles
 
 
 ### v0.4.0: The Composer Edition (Completed)
-- **Private Registry Auth**: Support for authenticated pulls (`~/.docker/config.json`).
-- **Ignite Compose**: `ign up/down` with dependency resolution (`depends_on`).
+- **Private Registry Auth**: Support for authenticated pulls (`.vyoma/.docker/config.json`).
+- **Vyoma Compose**: `ign up/down` with dependency resolution (`depends_on`).
 - **Service Discovery**: Hostname-based resolution (e.g., `ping web`) via internal DNS.
 
 ---
@@ -47,7 +47,7 @@ This document outlines the development path for Ignite, tracking completed miles
 
 ## 🚧 Upcoming Roadmap
 
-### v0.7.0: The Cluster Edition ("Ignite Swarm") - [ALPHA RELEASED]
+### v0.7.0: The Cluster Edition ("Vyoma Swarm") - [ALPHA RELEASED]
 **Focus**: Multi-host networking and node orchestration.
 
 #### 1. Overlay Networking

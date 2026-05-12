@@ -1,11 +1,11 @@
 # Product Spec: The Micro-VM Ecosystem
 
 ## Vision
-**"Ignite: Docker for Micro-VMs"**
+**"Vyoma: Docker for Micro-VMs"**
 A comprehensive tooling suite that makes creating, running, and managing Micro-VMs (like Firecracker) as easy as managing containers.
 
 ## Technology Stack: Rust 🦀
-*   **Daemon (`ignited`)**: Rust + Tokio + Hyper.
+*   **Daemon (`vyomad`)**: Rust + Tokio + Hyper.
 *   **CLI (`ign`)**: Rust + Clap.
 *   **Core Logic**: `rtnetlink` (Networking), `devicemapper-rs` (Storage).
 
@@ -17,16 +17,16 @@ The hardest problem: Docker images are tarballs; VMs need block devices.
     1.  **Pull**: Use `oci-distribution` crate to pull standard Docker layers.
     2.  **Flatten**: Unpack layers (OverlayFS style) into a temporary directory.
     3.  **Format**: Create an empty file, format as `ext4`, and copy files in.
-    4.  **Result**: `~/.ignite/images/ubuntu-22.04.ext4` (Read-Only Base Image).
+    4.  **Result**: `.vyoma/.vyoma/images/ubuntu-22.04.ext4` (Read-Only Base Image).
 *   **Kernel**: We ship a default high-performance kernel (Linux 6.x) bundled with the daemon, but allow images to override it.
 
 ### 2. Storage Strategy: "Instant Clones" 💾
 We cannot copy a 500MB disk for every container start.
 *   **Solution**: **Device Mapper Snapshots** (The tech behind Docker's original speed).
     *   **Base**: The `ubuntu-22.04.ext4` file is setup as a Loop Device (`/dev/loop0`).
-    *   **Instance**: When `ign run` starts, we create a tiny "Cow File" (sparse file).
+    *   **Instance**: When `vyoma run` starts, we create a tiny "Cow File" (sparse file).
     *   **Map**: We use Device Mapper to create a virtual block device that reads from `loop0` but writes changes to the `cow-file`.
-    *   **Speed**: Creation time is < 10ms. Disk usage is ~10KB per new VM.
+    *   **Speed**: Creation time is < 10ms. Disk usage is .vyoma10KB per new VM.
 
 ### 3. Networking: "The Bridge to Everywhere" 🌐
 *   **Architecture**:
@@ -44,7 +44,7 @@ We cannot copy a 500MB disk for every container start.
 
 ## Ecosystem Architecture
 
-### 1. The Engine (`ignited`)
+### 1. The Engine (`vyomad`)
 *   **Role**: Background daemon.
 *   **Responsibilities**: API Server, Hypervisor Abstraction, Network Manager.
 

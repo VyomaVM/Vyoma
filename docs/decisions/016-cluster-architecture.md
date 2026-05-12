@@ -1,4 +1,4 @@
-# 16. Cluster Architecture (Ignite Swarm)
+# 16. Cluster Architecture (Vyoma Swarm)
 
 Date: 2026-01-24
 
@@ -34,7 +34,7 @@ Manual `ign node add <ip>`.
 ## Decision
 
 We will implement **Option 3 (Static)** for MVP, graduating to **Option 2 (Gossip/Memberlist)**.
-Ignite is designed to be lightweight. A heavy Etcd/Raft consensus is overkill for v0.7.0.
+Vyoma is designed to be lightweight. A heavy Etcd/Raft consensus is overkill for v0.7.0.
 
 **Architecture**:
 - Each Daemon exposes a Cluster API (gRPC or HTTP).

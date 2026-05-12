@@ -26,7 +26,7 @@ Vyoma's measured boot system provides cryptographic verification that your VM's 
 vyomad --require-measured-boot
 ```
 
-Or configure via policy file (`~/.vyoma/policy.json`):
+Or configure via policy file (`.vyoma/.vyoma/policy.json`):
 
 ```json
 {
@@ -161,7 +161,7 @@ When measured boot is enabled, VMs transition through these states:
 **Cause**: The manifest was signed with a different key than what's trusted.
 
 **Solutions**:
-- Ensure trusted keys are in `~/.vyoma/keys/trusted/`
+- Ensure trusted keys are in `.vyoma/.vyoma/keys/trusted/`
 - Add the correct public key to the trusted keys directory
 - Verify the build was done with the correct signing key
 

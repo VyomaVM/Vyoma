@@ -7,8 +7,8 @@
 *   **Vibe**: Fast, dangerous but controlled.
 *   **Ecosystem**:
     *   **CLI**: `ign` (Short, sharp).
-    *   **Daemon**: `ignited` (Always burning).
-    *   **Config**: `Ignitefile`.
+    *   **Daemon**: `vyomad` (Always burning).
+    *   **Config**: `Vyomafile`.
 *   **Visuals**:
     *   **Logo**: A geometric Flame or Spark.
     *   **Color Palette**: Orange, Red, Charcoal.
@@ -26,7 +26,7 @@
 
 ## 2. Logo Research
 *   **Constraint**: The logo must be decomposable (Core shape for the ecosystem, sub-shapes for CLI/Daemon).
-*   **Idea 1 (Ignite)**: Flame (Ecosystem) -> Spark (CLI) -> Coals (Daemon).
+*   **Idea 1 (Vyoma)**: Flame (Ecosystem) -> Spark (CLI) -> Coals (Daemon).
 *   **Idea 2 (Capsule)**: Pill (Ecosystem) -> Lid (CLI) -> Container (Daemon).
 
 ## 3. Decision Status
