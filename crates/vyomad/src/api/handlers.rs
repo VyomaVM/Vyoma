@@ -726,7 +726,8 @@ pub async fn build_image(
 
     // 6. Execute build using VM-isolated BuildRunner
     let mut build_runner = vyoma_build::BuildRunner::new(work_dir.clone())
-        .with_measured(measured, signing_key_path);
+        .with_measured(measured, signing_key_path)
+        .with_cgroups(Arc::clone(&state.cgroups));
     let build_result = build_runner
         .build(&vyomafile_path, &context_dir, &build_id)
         .await

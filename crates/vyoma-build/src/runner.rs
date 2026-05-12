@@ -4,15 +4,88 @@ use anyhow::{Context, Result};
 use tracing::{info, warn, error};
 use vyoma_core::oci::OciImageConfig;
 use vyoma_core::vtpm::VtpmManager;
+use vyoma_core::cgroups::CgroupManager;
 use vyoma_image::{VmifConverter, SquashfsCompression, SignedManifest, SigningKeyPair};
 use chrono;
 use std::process::Command;
 use tokio::time::{timeout, Duration};
 use std::sync::Arc;
+use tempfile::TempDir;
 
 use crate::Instruction;
 
 use crate::{BuildResult, BuildError, Vyomafile};
+
+struct BuildResourceGuard {
+    loop_devices: Vec<vyoma_storage::cow::LoopDevice>,
+    dm_name: Option<String>,
+    cgroup_vm_id: Option<String>,
+    temp_dir: Option<TempDir>,
+}
+
+impl BuildResourceGuard {
+    fn new(
+        loop_devices: Vec<vyoma_storage::cow::LoopDevice>,
+        dm_name: Option<String>,
+        cgroup_vm_id: Option<String>,
+        temp_dir: Option<TempDir>,
+    ) -> Self {
+        Self {
+            loop_devices,
+            dm_name,
+            cgroup_vm_id,
+            temp_dir,
+        }
+    }
+}
+
+impl Drop for BuildResourceGuard {
+    fn drop(&mut self) {
+        info!("BuildResourceGuard: cleaning up build resources");
+
+        let loop_mgr = match vyoma_storage::cow::LoopManager::new() {
+            Ok(mgr) => mgr,
+            Err(e) => {
+                warn!("BuildResourceGuard: failed to create loop manager: {}", e);
+                return;
+            }
+        };
+
+        for device in self.loop_devices.drain(..) {
+            if let Err(e) = loop_mgr.detach(&device) {
+                warn!("BuildResourceGuard: failed to detach loop device {}: {}", device.path.display(), e);
+            } else {
+                info!("BuildResourceGuard: detached loop device {}", device.path.display());
+            }
+        }
+
+        if let Some(ref dm_name) = self.dm_name {
+            let dm_mgr = match vyoma_storage::dm::DmManager::new() {
+                Ok(mgr) => mgr,
+                Err(e) => {
+                    warn!("BuildResourceGuard: failed to create DM manager: {}", e);
+                    return;
+                }
+            };
+            if let Err(e) = dm_mgr.remove_snapshot(dm_name) {
+                warn!("BuildResourceGuard: failed to remove DM snapshot {}: {}", dm_name, e);
+            } else {
+                info!("BuildResourceGuard: removed DM snapshot {}", dm_name);
+            }
+        }
+
+        if let Some(ref cgroup_vm_id) = self.cgroup_vm_id {
+            let cgroup_mgr = CgroupManager::new();
+            if let Err(e) = cgroup_mgr.remove_vm_cgroup(cgroup_vm_id) {
+                warn!("BuildResourceGuard: failed to remove cgroup {}: {}", cgroup_vm_id, e);
+            } else {
+                info!("BuildResourceGuard: removed cgroup {}", cgroup_vm_id);
+            }
+        }
+
+        info!("BuildResourceGuard: cleanup complete");
+    }
+}
 
 /// Core build engine that executes Vyomafile instructions in isolated VMs
 pub struct BuildRunner {
@@ -24,6 +97,8 @@ pub struct BuildRunner {
     pub signing_key_path: Option<String>,
     /// Cache of converted ext4 base images (image name -> ext4 path)
     ext4_cache: std::collections::HashMap<String, PathBuf>,
+    /// Optional cgroup manager for resource limits
+    cgroups: Option<Arc<CgroupManager>>,
 }
 
 impl BuildRunner {
@@ -35,12 +110,18 @@ impl BuildRunner {
             measured: false,
             signing_key_path: None,
             ext4_cache: std::collections::HashMap::new(),
+            cgroups: None,
         }
     }
 
     pub fn with_measured(mut self, measured: bool, signing_key_path: Option<String>) -> Self {
         self.measured = measured;
         self.signing_key_path = signing_key_path;
+        self
+    }
+
+    pub fn with_cgroups(mut self, cgroups: Arc<CgroupManager>) -> Self {
+        self.cgroups = Some(cgroups);
         self
     }
 
@@ -325,8 +406,7 @@ impl BuildRunner {
         build_dir: &Path,
     ) -> Result<PathBuf, BuildError> {
         let cache_key = base_squashfs.to_string_lossy().to_string();
-        
-        // Check cache first
+
         let ext4_path = if let Some(cached_ext4) = self.ext4_cache.get(&cache_key) {
             if cached_ext4.exists() {
                 info!("Using cached ext4 base image: {:?}", cached_ext4);
@@ -337,23 +417,24 @@ impl BuildRunner {
         } else {
             self.create_cached_ext4(base_squashfs, &cache_key).await?
         };
-        
+
         let cow_path = build_dir.join("cow.img");
         let dm_name = format!("vyoma-build-{}", std::process::id());
         let new_layer_path = build_dir.join("layer.sqfs");
-        
+        let cgroup_vm_id = format!("vyoma-build-{}", std::process::id());
+
         info!("Using ext4 base: {:?}", ext4_path);
-        
+
         vyoma_storage::cow::LoopManager::create_cow_file(&cow_path, 1024)
             .map_err(|e| BuildError::ExecutionError(format!("Failed to create COW file: {}", e)))?;
-        
+
         let loop_mgr = vyoma_storage::cow::LoopManager::new()
             .map_err(|e| BuildError::ExecutionError(format!("Failed to create loop manager: {}", e)))?;
         let base_loop = loop_mgr.attach(&ext4_path)
             .map_err(|e| BuildError::ExecutionError(format!("Failed to attach base ext4: {}", e)))?;
         let cow_loop = loop_mgr.attach(&cow_path)
             .map_err(|e| BuildError::ExecutionError(format!("Failed to attach COW: {}", e)))?;
-        
+
         info!("Creating device mapper snapshot");
         let dm_mgr = vyoma_storage::dm::DmManager::new()
             .map_err(|e| BuildError::ExecutionError(format!("Failed to create DM manager: {}", e)))?;
@@ -362,21 +443,37 @@ impl BuildRunner {
             base_loop.path(),
             cow_loop.path(),
         ).map_err(|e| BuildError::ExecutionError(format!("Failed to create DM snapshot: {}", e)))?;
-        
-        let vm_result = self.run_command_in_ch(&dm_dev.path().to_path_buf(), command, build_dir).await;
-        
-        info!("Cleaning up device mapper");
-        let _ = dm_mgr.remove_snapshot(&dm_name);
-        
-        info!("Detaching loop devices");
-        let _ = loop_mgr.detach(&base_loop);
-        let _ = loop_mgr.detach(&cow_loop);
-        
+
+        let loop_devices = vec![base_loop, cow_loop];
+
+        let cgroup_id = if self.cgroups.is_some() {
+            Some(cgroup_vm_id.as_str())
+        } else {
+            None
+        };
+
+        let vm_result = self.run_command_in_ch(&dm_dev.path().to_path_buf(), command, build_dir, cgroup_id).await;
+
         let _ = std::fs::remove_file(&ext4_path);
         let _ = std::fs::remove_file(&cow_path);
-        
+
+        let cgroup_id_to_store = if self.cgroups.is_some() {
+            Some(cgroup_vm_id)
+        } else {
+            None
+        };
+
+        let guard = BuildResourceGuard::new(
+            loop_devices,
+            Some(dm_name.clone()),
+            cgroup_id_to_store,
+            None,
+        );
+
+        drop(guard);
+
         match vm_result {
-            Ok(0) => {
+            Ok((0, _)) => {
                 info!("Creating new squashfs layer from DM device");
                 let dm_device_path = PathBuf::from(format!("/dev/mapper/{}", dm_name));
                 if dm_device_path.exists() {
@@ -388,7 +485,7 @@ impl BuildRunner {
                     ))
                 }
             }
-            Ok(code) => Err(BuildError::ExecutionError(
+            Ok((code, _)) => Err(BuildError::ExecutionError(
                 format!("Build command failed with exit code {}", code)
             )),
             Err(e) => Err(e),
@@ -487,13 +584,14 @@ impl BuildRunner {
         rootdisk: &Path,
         command: &str,
         vm_dir: &Path,
-    ) -> Result<i32, BuildError> {
+        cgroup_vm_id: Option<&str>,
+    ) -> Result<(i32, Option<u32>), BuildError> {
         info!("Launching Cloud Hypervisor for build command: {}", command);
-        
+
         let kernel_path = self.find_kernel_path()?;
         let initramfs_path = self.create_build_initramfs(command).await?;
         let socket_path = vm_dir.join("ch.sock");
-        
+
         let ch_args = vec![
             "--kernel".to_string(),
             kernel_path.to_string_lossy().to_string(),
@@ -512,26 +610,48 @@ impl BuildRunner {
             "--memory".to_string(),
             "size=512M".to_string(),
         ];
-        
-        info!("Starting Cloud Hypervisor with rootdisk: {:?}", rootdisk);
-        
+
         let mut child = Command::new("cloud-hypervisor")
             .args(&ch_args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| BuildError::VmError(format!("Failed to start cloud-hypervisor: {}", e)))?;
-        
+
+        let pid = child.id();
+
+        if let Some(cgroup_id) = cgroup_vm_id {
+            if let Some(ref cgroups) = self.cgroups {
+                let cgroup_id_only = cgroup_id.trim_start_matches("vyoma-build-");
+                if let Err(e) = cgroups.create_vm_cgroup(cgroup_id_only) {
+                    warn!("Failed to create cgroup {}: {}", cgroup_id, e);
+                } else {
+                    if let Err(e) = cgroups.set_cpu_limit(cgroup_id_only, 100) {
+                        warn!("Failed to set CPU limit: {}", e);
+                    }
+                    if let Err(e) = cgroups.set_memory_limit(cgroup_id_only, 512 * 1024 * 1024) {
+                        warn!("Failed to set memory limit: {}", e);
+                    }
+                    if let Err(e) = cgroups.add_process(cgroup_id_only, pid) {
+                        warn!("Failed to add process to cgroup: {}", e);
+                    }
+                    info!("Added build VM {} to cgroup with PID {}", cgroup_id, pid);
+                }
+            }
+        }
+
+        info!("Starting Cloud Hypervisor with rootdisk: {:?}", rootdisk);
+
         let timeout_duration = Duration::from_secs(300);
         let exit_status = timeout(timeout_duration, async {
             child.wait()
         }).await
         .map_err(|_| BuildError::VmError("VM execution timed out".to_string()))?
         .map_err(|e| BuildError::VmError(format!("VM process error: {}", e)))?;
-        
+
         let code = exit_status.code().unwrap_or(1);
         info!("Build VM exited with code: {}", code);
-        Ok(code)
+        Ok((code, Some(pid)))
     }
 
     async fn execute_in_vm(&self, command: &str) -> Result<i32, BuildError> {
