@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub use vyoma_core::oci::OciImageConfig;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmifManifest {
     pub schema_version: u32,
     pub created: String,
@@ -22,17 +24,7 @@ pub struct VmifManifest {
     pub confidential_computing: ConfidentialComputingInfo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct OciImageConfig {
-    pub entrypoint: Option<Vec<String>>,
-    pub cmd: Option<Vec<String>>,
-    pub env: Option<Vec<String>>,
-    pub working_dir: Option<String>,
-    pub exposed_ports: Option<HashMap<String, serde_json::Value>>,
-    pub user: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FirmwareInfo {
     #[serde(default)]
     pub firmware_type: String,
@@ -44,7 +36,7 @@ pub struct FirmwareInfo {
     pub signature: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeasuredBootInfo {
     #[serde(default)]
     pub pcr_policy: Option<HashMap<u32, String>>,
@@ -58,7 +50,19 @@ pub struct MeasuredBootInfo {
     pub trust_policy_key: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+impl Default for MeasuredBootInfo {
+    fn default() -> Self {
+        Self {
+            pcr_policy: None,
+            kernel_signature: None,
+            initrd_signature: None,
+            rootfs_hash: None,
+            trust_policy_key: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConfidentialComputingInfo {
     #[serde(default)]
     pub enabled: bool,
@@ -70,7 +74,7 @@ pub struct ConfidentialComputingInfo {
     pub intel_tdx: Option<TdxInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SevSnpInfo {
     #[serde(default)]
     pub enabled: bool,
@@ -86,7 +90,7 @@ pub struct SevSnpInfo {
     pub amd_author_key: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TdxInfo {
     #[serde(default)]
     pub enabled: bool,
@@ -229,19 +233,6 @@ impl VmifImage {
         }
 
         Ok(())
-    }
-}
-
-impl Default for OciImageConfig {
-    fn default() -> Self {
-        Self {
-            entrypoint: None,
-            cmd: Some(vec!["/bin/sh".to_string()]),
-            env: None,
-            working_dir: None,
-            exposed_ports: None,
-            user: None,
-        }
     }
 }
 
