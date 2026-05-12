@@ -8,8 +8,9 @@ use tokio::sync::broadcast;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{CorsLayer, AllowOrigin};
 use tower_service::Service;
+use http::Method;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 
@@ -69,6 +70,10 @@ struct Args {
     /// Do not drop privileges (keep running as root). For development only.
     #[arg(long)]
     keep_root: bool,
+    /// Comma-separated list of allowed CORS origins (defaults to the daemon's own HTTP URL).
+    /// Use "*" to allow all origins (not recommended for production).
+    #[arg(long)]
+    cors_origins: Option<String>,
 }
 
 #[tokio::main]
@@ -278,11 +283,54 @@ async fn main() {
     let public_routes = Router::new()
         .route("/health", get(handlers::health_check));
 
+    // Build allowed CORS origins from configuration
+    let mut allowed_origins: Vec<String> = Vec::new();
+    let http_port = args.http_port;
+
+    // Default origin from the daemon's HTTP address
+    let default_origin = format!("http://{}:{}", args.http_bind_ip, http_port);
+    allowed_origins.push(default_origin);
+
+    // Always add localhost origins for convenience
+    if http_port > 0 {
+        allowed_origins.push(format!("http://localhost:{}", http_port));
+        allowed_origins.push(format!("http://127.0.0.1:{}", http_port));
+    }
+
+    // Add user-specified origins
+    if let Some(ref custom_origins) = args.cors_origins {
+        for origin in custom_origins.split(',') {
+            let origin = origin.trim().to_string();
+            if !origin.is_empty() {
+                allowed_origins.push(origin);
+            }
+        }
+    }
+
+    // Build CORS layer
+    let cors_layer = if allowed_origins.iter().any(|o| o == "*") {
+        warn!("CORS is configured to allow any origin. This is insecure and should only be used in development.");
+        CorsLayer::permissive()
+    } else {
+        let header_values: Vec<http::HeaderValue> = allowed_origins
+            .iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        info!("CORS allowed origins: {:?}", allowed_origins);
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(header_values))
+            .allow_methods([Method::GET, Method::POST, Method::DELETE])
+            .allow_headers(vec![
+                http::header::AUTHORIZATION,
+                http::header::CONTENT_TYPE,
+            ])
+    };
+
     // Combine: public routes + API routes (with auth) + UI fallback (public)
     let app = public_routes
         .merge(api_routes)
         .fallback(ui::ui_handler)
-        .layer(CorsLayer::permissive())
+        .layer(cors_layer)
         .with_state(state.clone());
 
     let socket_path = args.socket_path;
