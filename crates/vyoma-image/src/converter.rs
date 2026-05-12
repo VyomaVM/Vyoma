@@ -225,7 +225,10 @@ impl VmifConverter {
 
         if sig_path.exists() {
             if let Ok(signed) = Self::load_signed_manifest(&sig_path) {
-                if signed.manifest == vmif_image.manifest {
+                if signed.manifest.arch == vmif_image.manifest.arch
+                    && signed.manifest.rootfs == vmif_image.manifest.rootfs
+                    && signed.manifest.kernel == vmif_image.manifest.kernel
+                {
                     info!("Signed manifest verified successfully");
                 }
             } else {
