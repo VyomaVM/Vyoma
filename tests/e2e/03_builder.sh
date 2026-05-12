@@ -18,9 +18,9 @@ VYOMA="$VYOMA_BIN --socket-path /run/vyoma/test.sock --http-port 3003"
 # 1. Setup Context
 CTX=$TEST_HOME/build_ctx
 mkdir -p $CTX
-cat <<EOF > $CTX/Ignitefile
+cat <<EOF > $CTX/Vyomafile
 FROM alpine:latest
-RUN echo "Ignite Build Test" > /build_test.txt
+RUN echo "Vyoma Build Test" > /build_test.txt
 EOF
 
 # 2. Build

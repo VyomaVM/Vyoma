@@ -12,12 +12,12 @@ use crate::{
     MigrateRequest, MigrationProgress,
 };
 
-pub struct IgniteGrpcServer {
+pub struct VyomaGrpcServer {
     port: u16,
     shutdown_tx: broadcast::Sender<()>,
 }
 
-impl IgniteGrpcServer {
+impl VyomaGrpcServer {
     pub fn new(port: u16) -> Self {
         let (shutdown_tx, _) = broadcast::channel(1);
         Self { port, shutdown_tx }
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_server_creation() {
-        let server = IgniteGrpcServer::new(50051);
+        let server = VyomaGrpcServer::new(50051);
         assert_eq!(server.port(), 50051);
     }
 

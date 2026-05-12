@@ -28,11 +28,11 @@ impl SdkConfig {
     }
 }
 
-pub struct IgniteClient {
+pub struct VyomaClient {
     config: SdkConfig,
 }
 
-impl IgniteClient {
+impl VyomaClient {
     pub fn new(config: SdkConfig) -> Self {
         Self { config }
     }
@@ -181,11 +181,11 @@ pub mod mock {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    pub struct MockIgniteClient {
+    pub struct MockVyomaClient {
         vms: Mutex<HashMap<String, VmInfo>>,
     }
 
-    impl MockIgniteClient {
+    impl MockVyomaClient {
         pub fn new() -> Self {
             Self {
                 vms: Mutex::new(HashMap::new()),
@@ -314,7 +314,7 @@ pub mod mock {
         }
     }
 
-    impl Default for MockIgniteClient {
+    impl Default for MockVyomaClient {
         fn default() -> Self {
             Self::new()
         }
@@ -334,13 +334,13 @@ mod tests {
 
     #[test]
     fn test_client_connect() {
-        let client = IgniteClient::connect("localhost");
+        let client = VyomaClient::connect("localhost");
         assert_eq!(client.config.endpoint(), "localhost:50051");
     }
 
      #[test]
      fn test_mock_client_create_vm() {
-         let client = mock::MockIgniteClient::new();
+         let client = mock::MockVyomaClient::new();
          let request = CreateVmRequest {
              image: "ubuntu:latest".to_string(),
              vcpus: 2,
@@ -366,7 +366,7 @@ mod tests {
             ports: vec![],
             created_at: 1234567890,
         }];
-        let client = mock::MockIgniteClient::with_vms(vms);
+        let client = mock::MockVyomaClient::with_vms(vms);
         let response = client.list_vms().unwrap();
         assert_eq!(response.vms.len(), 1);
         assert_eq!(response.vms[0].id, "vm-1");
@@ -384,7 +384,7 @@ mod tests {
             ports: vec![],
             created_at: 1234567890,
         }];
-        let client = mock::MockIgniteClient::with_vms(vms);
+        let client = mock::MockVyomaClient::with_vms(vms);
         let response = client.start_vm("vm-1").unwrap();
         assert_eq!(response.status, "Running");
     }
@@ -401,42 +401,42 @@ mod tests {
             ports: vec![],
             created_at: 1234567890,
         }];
-        let client = mock::MockIgniteClient::with_vms(vms);
+        let client = mock::MockVyomaClient::with_vms(vms);
         let response = client.stop_vm("vm-1").unwrap();
         assert_eq!(response.status, "Stopped");
     }
 
     #[test]
     fn test_mock_client_exec_ls() {
-        let client = mock::MockIgniteClient::new();
+        let client = mock::MockVyomaClient::new();
         let output = client.exec(b"vm-1", &["ls".to_string(), "-la".to_string()]).unwrap();
         assert_eq!(output.exit_code, 0);
     }
 
     #[test]
     fn test_mock_client_exec_pwd() {
-        let client = mock::MockIgniteClient::new();
+        let client = mock::MockVyomaClient::new();
         let output = client.exec(b"vm-1", &["pwd".to_string()]).unwrap();
         assert_eq!(std::str::from_utf8(&output.stdout).unwrap().trim(), "/home");
     }
 
     #[test]
     fn test_mock_client_logs() {
-        let client = mock::MockIgniteClient::new();
+        let client = mock::MockVyomaClient::new();
         let logs = client.get_logs("vm-1", 100).unwrap();
         assert!(!logs.is_empty());
     }
 
     #[test]
     fn test_mock_client_create_snapshot() {
-        let client = mock::MockIgniteClient::new();
+        let client = mock::MockVyomaClient::new();
         let snap = client.create_snapshot("vm-1", "backup-1").unwrap();
         assert_eq!(snap.name, "backup-1");
     }
 
     #[test]
     fn test_mock_client_migrate() {
-        let client = mock::MockIgniteClient::new();
+        let client = mock::MockVyomaClient::new();
         let result = client.migrate("vm-1", "192.168.1.20", 1000).unwrap();
         assert!(result.completed);
     }

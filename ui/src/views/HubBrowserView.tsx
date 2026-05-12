@@ -41,7 +41,7 @@ export function HubBrowserView() {
     <div className="p-8 max-w-6xl mx-auto">
       <header className="mb-8">
         <h2 className="text-2xl font-bold text-white mb-1">Hub Browser</h2>
-        <p className="text-sm text-slate-400">Search images from Ignite Hub or Docker Hub.</p>
+        <p className="text-sm text-slate-400">Search images from Vyoma Hub or Docker Hub.</p>
       </header>
 
       <div className="flex gap-3 mb-6">

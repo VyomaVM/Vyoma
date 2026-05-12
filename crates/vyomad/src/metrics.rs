@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
 
-pub struct IgniteMetrics {
+pub struct VyomaMetrics {
     registry: Registry,
     pub vms_running: Gauge,
     pub vms_total: Counter,
@@ -15,7 +15,7 @@ pub struct IgniteMetrics {
     pub snapshot_count: GaugeVec,
 }
 
-impl IgniteMetrics {
+impl VyomaMetrics {
     pub fn new() -> Result<Self, prometheus::Error> {
         let registry = Registry::new();
 
@@ -116,16 +116,16 @@ impl IgniteMetrics {
     }
 }
 
-impl Default for IgniteMetrics {
+impl Default for VyomaMetrics {
     fn default() -> Self {
-        Self::new().expect("Failed to create IgniteMetrics")
+        Self::new().expect("Failed to create VyomaMetrics")
     }
 }
 
-pub type SharedMetrics = Arc<RwLock<IgniteMetrics>>;
+pub type SharedMetrics = Arc<RwLock<VyomaMetrics>>;
 
 pub fn create_metrics() -> Result<SharedMetrics, prometheus::Error> {
-    let metrics = IgniteMetrics::new()?;
+    let metrics = VyomaMetrics::new()?;
     Ok(Arc::new(RwLock::new(metrics)))
 }
 
@@ -135,14 +135,14 @@ mod tests {
 
     #[test]
     fn test_metrics_creation() {
-        let metrics = IgniteMetrics::new().unwrap();
+        let metrics = VyomaMetrics::new().unwrap();
         assert_eq!(metrics.vms_running.get(), 0.0);
         assert_eq!(metrics.vms_total.get(), 0.0);
     }
 
     #[test]
     fn test_register_vm() {
-        let metrics = IgniteMetrics::new().unwrap();
+        let metrics = VyomaMetrics::new().unwrap();
         metrics.register_vm("test-vm-1");
         assert_eq!(metrics.vms_running.get(), 1.0);
         assert_eq!(metrics.vms_total.get(), 1.0);
@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_unregister_vm() {
-        let metrics = IgniteMetrics::new().unwrap();
+        let metrics = VyomaMetrics::new().unwrap();
         metrics.register_vm("test-vm-1");
         metrics.unregister_vm("test-vm-1");
         assert_eq!(metrics.vms_running.get(), 0.0);
@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn test_set_memory_usage() {
-        let metrics = IgniteMetrics::new().unwrap();
+        let metrics = VyomaMetrics::new().unwrap();
         metrics.register_vm("test-vm-1");
         metrics.set_memory_usage("test-vm-1", 2048);
         let memory = metrics
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn test_set_cpu_usage() {
-        let metrics = IgniteMetrics::new().unwrap();
+        let metrics = VyomaMetrics::new().unwrap();
         metrics.register_vm("test-vm-1");
         metrics.set_cpu_usage("test-vm-1", 50.0);
         let cpu = metrics.vm_cpu_usage.with_label_values(&["test-vm-1"]).get();
@@ -179,14 +179,14 @@ mod tests {
 
     #[test]
     fn test_record_boot_duration() {
-        let metrics = IgniteMetrics::new().unwrap();
+        let metrics = VyomaMetrics::new().unwrap();
         metrics.record_boot_duration(1.5);
         metrics.record_boot_duration(2.0);
     }
 
     #[test]
     fn test_increment_snapshot_count() {
-        let metrics = IgniteMetrics::new().unwrap();
+        let metrics = VyomaMetrics::new().unwrap();
         metrics.register_vm("test-vm-1");
         metrics.increment_snapshot_count("test-vm-1");
         metrics.increment_snapshot_count("test-vm-1");
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_gather_metrics() {
-        let metrics = IgniteMetrics::new().unwrap();
+        let metrics = VyomaMetrics::new().unwrap();
         metrics.register_vm("test-vm-1");
         let output = metrics.gather();
         let text = String::from_utf8_lossy(&output);

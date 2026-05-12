@@ -46,7 +46,7 @@ fn resolve_socket_path(default_path: &str) -> String {
 
 #[derive(Parser)]
 #[command(name = "vyoma")]
-#[command(about = "Ignite: Docker for Micro-VMs", long_about = None)]
+#[command(about = "Vyoma: Docker for Micro-VMs", long_about = None)]
 struct Cli {
     /// Socket path to daemon (Unix Socket)
     #[arg(short, long, global = true, default_value = "/run/vyoma/vyoma.sock")]
@@ -909,7 +909,7 @@ async fn main() -> Result<()> {
             info!("Processing compose file: {}", file);
             match VyomaCompose::from_file(&file) {
                 Ok(compose) => {
-                    println!("Ignite Compose v{}", compose.version);
+                    println!("Vyoma Compose v{}", compose.version);
 
                     let stack_name = std::env::current_dir()
                         .ok()
@@ -1258,7 +1258,7 @@ async fn main() -> Result<()> {
 async fn run_doctor() -> Result<()> {
     println!(
         "{}",
-        "Ignite Doctor - System Health Check".bold().underline()
+        "Vyoma Doctor - System Health Check".bold().underline()
     );
     println!();
 
@@ -1311,14 +1311,14 @@ async fn run_doctor() -> Result<()> {
     }
 
     // 4. Networking
-    if !check("Ignite Bridge (ign0)", check_bridge(), false) {} // Warn only
+    if !check("Vyoma Bridge (ign0)", check_bridge(), false) {} // Warn only
 
     // 5. Rootless Tools
     if !check("debugfs (e2fsprogs)", check_binary("debugfs"), false) {} // Needed for rootless build
 
     println!();
     if all_passed {
-        println!("{}", "Your system is ready for Ignite!".green().bold());
+        println!("{}", "Your system is ready for Vyoma!".green().bold());
     } else {
         println!(
             "{}",

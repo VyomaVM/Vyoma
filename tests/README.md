@@ -30,7 +30,7 @@ sudo ./tests/e2e/01_lifecycle.sh
 ## Phase 2: Expanded Matrices
 
 ### Chaos Engineering (`tests/chaos/`)
-Simulates intense physical environment tearing under active Ignite VM loads.
+Simulates intense physical environment tearing under active Vyoma VM loads.
 *   `chaos_net.sh`: External processes deleting active VM `rtnetlink` structures.
 *   `chaos_storage.sh`: Hardware suspension of Devicemapper loops locally via `dmsetup suspend`.
 

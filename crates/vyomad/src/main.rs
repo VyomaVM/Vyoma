@@ -41,7 +41,7 @@ use api::handlers;
 use chaos::enable_chaos_on_startup;
 
 #[derive(Parser, Debug)]
-#[command(name = "vyomad", about = "Ignite MicroVM Daemon", version)]
+#[command(name = "vyomad", about = "Vyoma MicroVM Daemon", version)]
 struct Args {
     /// Path to listen on (Unix Socket)
     #[arg(short, long, default_value = "/run/vyoma/vyoma.sock")]
@@ -66,7 +66,7 @@ async fn main() {
 
     // Root requirement stripped in favor of AmbientCapabilities (ADR-022)
 
-    info!("vyomad (Ignite Daemon) starting up (Unix Socket: {})...", args.socket_path);
+    info!("vyomad (Vyoma Daemon) starting up (Unix Socket: {})...", args.socket_path);
 
     #[cfg(feature = "chaos")]
     {

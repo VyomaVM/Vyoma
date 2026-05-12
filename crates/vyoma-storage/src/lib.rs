@@ -1,4 +1,4 @@
-//! vyoma-storage - Storage layer for Ignite VM management
+//! vyoma-storage - Storage layer for Vyoma VM management
 //! 
 //! Provides Rust-native bindings for device mapper and loop device operations.
 

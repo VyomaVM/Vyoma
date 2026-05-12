@@ -1,4 +1,4 @@
-//! vyoma-net - Network layer for Ignite VM management
+//! vyoma-net - Network layer for Vyoma VM management
 //! 
 //! Provides Rust-native bindings for bridge and TAP device operations.
 
