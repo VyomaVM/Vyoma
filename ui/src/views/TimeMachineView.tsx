@@ -50,7 +50,7 @@ export function TimeMachineView() {
           <option value="">Select a VM...</option>
           {vmsData?.vms.map((v) => (
             <option key={v.id} value={v.id}>
-              {v.labels['ignite.service'] || v.id.slice(0, 12)}
+              {v.labels['vyoma.service'] || v.id.slice(0, 12)}
             </option>
           ))}
         </select>

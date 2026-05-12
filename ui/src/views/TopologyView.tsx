@@ -26,7 +26,7 @@ export function TopologyView() {
     if (!vmsData?.vms || !netsData?.networks) return;
 
     const topoNodes: TopologyNode[] = [
-      ...vmsData.vms.map((v) => ({ id: v.id, type: 'vm' as const, label: v.labels['ignite.service'] || v.id.slice(0, 8) })),
+      ...vmsData.vms.map((v) => ({ id: v.id, type: 'vm' as const, label: v.labels['vyoma.service'] || v.id.slice(0, 8) })),
       ...netsData.networks.map((n: { name: string }) => ({ id: n.name, type: 'network' as const, label: n.name })),
     ];
     const topoLinks: TopologyLink[] = vmsData.vms.map((v) => ({ source: v.id, target: v.labels['network'] || 'default' }));
