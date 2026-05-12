@@ -25,7 +25,7 @@
 
 | Crate | Binary | Status | Notes |
 |-------|--------|--------|-------|
-| `crates/ign` | `/usr/bin/ign` | ✅ Working | CLI, ~20 commands |
+| `crates/vyoma` | `/usr/bin/vyoma` | ✅ Working | CLI, ~20 commands |
 | `crates/vyomad` | `/usr/bin/vyomad` | ✅ Working | Daemon, runs as root |
 | `crates/vyoma-core` | library | ✅ Working | OCI, storage, network, vmm |
 | `crates/vyoma-compose` | library | ✅ Working | compose YAML parsing, `vyoma up/down` |
@@ -44,7 +44,7 @@
 - `vyoma doctor`
 - OCI pull from Docker Hub (custom reqwest client, handles Index vs V2 Manifest)
 - Device Mapper snapshots for instant clone (dm-snapshot via `dmsetup` CLI calls)
-- TAP + Linux bridge (`ign0`) networking with NAT
+- TAP + Linux bridge (`vyoma0`) networking with NAT
 - CNI integration (bridge/ptp plugins)
 - Internal DNS on gateway IP (172.16.0.1:53)
 - Virtiofs volume mounts (external `virtiofsd` binary required)
@@ -87,7 +87,7 @@ Add these crates progressively through the phases. Each gets its own `crates/<na
 # Cargo.toml (workspace root) — Target state
 [workspace]
 members = [
-    "crates/ign",             # CLI binary
+    "crates/vyoma",             # CLI binary
     "crates/vyomad",         # Daemon binary
     "crates/vyoma-core",     # VM lifecycle, OCI, storage, network, vmm
     "crates/vyoma-compose",  # Compose YAML schema + orchestrator
@@ -119,7 +119,7 @@ uuid = { version = "1", features = ["v4"] }
 ```
 vyoma/
 ├── crates/
-│   ├── ign/                    # CLI
+│   ├── vyoma/                 # CLI
 │   │   └── src/
 │   │       ├── main.rs
 │   │       ├── commands/       # One file per command group
@@ -441,7 +441,7 @@ fn start_virtiofsd(host_path: &Path, socket: &Path) -> Result<Child> {
 #### 3.2.3 vyoma doctor Check
 
 ```rust
-// crates/ign/src/commands/system.rs
+// crates/vyoma/src/commands/system.rs
 
 fn check_virtiofsd(results: &mut Vec<DoctorCheck>) {
     let found = ["/usr/lib/vyoma/virtiofsd", "/usr/bin/virtiofsd"]
@@ -926,7 +926,7 @@ pub async fn destroy_vm(&self, vm_id: &str) -> Result<()> {
 
 ### 3.7 Implement `vyoma commit`, `vyoma save`, `vyoma load`
 
-**Crate**: `crates/ign/src/commands/image.rs`, `crates/vyomad/src/api/images.rs`  
+**Crate**: `crates/vyoma/src/commands/image.rs`, `crates/vyomad/src/api/images.rs`  
 **Priority**: P2
 
 #### 3.7.1 `vyoma commit <vm-id> <new-image-tag>`
@@ -975,7 +975,7 @@ pub async fn commit_vm(vm_id: &str, tag: &str, vm_manager: &VmManager) -> Result
 Bundle the ext4 image file + vyoma-config.json into a compressed tar. This is a simpler version of the existing `vyoma export` / `vyoma import` which operates on VM snapshots.
 
 ```rust
-// crates/ign/src/commands/image.rs
+// crates/vyoma/src/commands/image.rs
 
 pub async fn cmd_save(image: &str, output: &Path, client: &Client) -> Result<()> {
     let resp = client.get_image_export(image).await?;
@@ -1828,7 +1828,7 @@ The snapshot tree is already built in Phase 2. This phase wires it to the CLI co
 #### 6.1.1 `vyoma history <vm-id>`
 
 ```rust
-// crates/ign/src/commands/snapshot.rs
+// crates/vyoma/src/commands/snapshot.rs
 
 pub async fn cmd_history(vm_id: &str, client: &Client) -> Result<()> {
     let history = client.get_snapshot_history(vm_id).await?;
