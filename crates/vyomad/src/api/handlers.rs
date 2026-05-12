@@ -1399,13 +1399,25 @@ pub async fn teleport_handler(
         let target_url = payload.target_node_ip.clone();
         let vms_for_cleanup = Arc::clone(&state.vms);
 
+        // Get local WireGuard IP for trusted source restriction
+        let local_wg_ip = state.network_integration
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|ni| ni.get_local_wireguard_ip());
+        
+        let trusted_ips = local_wg_ip.map(|ip| vec![ip.to_string()]);
+
         let http_client = reqwest::Client::new();
         let target_api = format!("http://{}:3000/receive-teleport", target_url);
 
-        info!("Telling target node at {} to prepare for reception...", target_api);
+        info!("Telling target node at {} to prepare for reception (trusted IPs: {:?})...", target_api, trusted_ips);
 
         let res = http_client.post(&target_api)
-            .json(&ReceiveTeleportRequest { vm_id: payload.vm_id.clone() })
+            .json(&ReceiveTeleportRequest {
+                vm_id: payload.vm_id.clone(),
+                trusted_source_ips: trusted_ips,
+            })
             .send()
             .await;
 
@@ -1577,6 +1589,8 @@ pub async fn teleport_handler(
 #[derive(Serialize, Deserialize)]
 pub struct ReceiveTeleportRequest {
     pub vm_id: String,
+    #[serde(default)]
+    pub trusted_source_ips: Option<Vec<String>>,
 }
 
 pub async fn receive_teleport_handler(
@@ -1584,6 +1598,13 @@ pub async fn receive_teleport_handler(
     Json(payload): Json<ReceiveTeleportRequest>,
 ) -> Result<String, (StatusCode, String)> {
     info!("Handling POST /receive-teleport for VM {}", payload.vm_id);
+    
+    // Warn if no trusted source IPs provided (insecure mode)
+    if payload.trusted_source_ips.is_none() {
+        warn!("Receiving teleport for VM {} WITHOUT trusted source IPs; migration port is open to any host!", payload.vm_id);
+    } else {
+        info!("Receiving teleport with trusted source IPs: {:?}", payload.trusted_source_ips);
+    }
     
     // Create directories
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
@@ -1601,9 +1622,9 @@ pub async fn receive_teleport_handler(
         ));
     }
 
-    // Call Receiver
+    // Call Receiver with trusted source IPs
     let receiver = vyoma_teleport::receiver::TeleportReceiver::new(PathBuf::new(), PathBuf::new(), "0.0.0.0".to_string());
-    if let Err(e) = receiver.start_receiving(&ch_socket).await {
+    if let Err(e) = receiver.start_receiving_with_config(&ch_socket, payload.trusted_source_ips.clone()).await {
         let _ = vmm.kill();
         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to set receive-migration mode: {}", e)));
     }
@@ -1612,7 +1633,7 @@ pub async fn receive_teleport_handler(
     // The VM state should probably be adopted by the daemon after migration completes.
     // In a complete implementation, we would wait for it and insert into `state.vms`.
     
-    Ok(format!("Cloud Hypervisor ready to receive VM {} on TCP port 9000", payload.vm_id))
+    Ok(format!("Cloud Hypervisor ready to receive VM {} on TCP port 9000 (trusted sources: {:?})", payload.vm_id, payload.trusted_source_ips))
 }
 
 #[derive(Serialize)]

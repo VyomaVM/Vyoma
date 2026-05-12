@@ -298,6 +298,13 @@ impl NetworkIntegration {
         
         info!("NetworkIntegration shutdown complete");
     }
+
+    pub fn get_local_wireguard_ip(&self) -> Option<Ipv4Addr> {
+        self.wireguard_node
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().and_then(|wg| wg.config.node_ip))
+    }
 }
 
 impl Clone for NetworkIntegration {
