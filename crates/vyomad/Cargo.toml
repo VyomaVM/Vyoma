@@ -55,7 +55,6 @@ chrono = { version = "0.4", features = ["serde"] }
 tonic = "0.11"
 prost = "0.12"
 vyoma-proto = { path = "../vyoma-proto" }
-openraft = { version = "0.9.22", features = ["serde"] }
 async-trait = "0.1.89"
 vyoma-teleport = { path = "../vyoma-teleport" }
 vyoma-net = { path = "../vyoma-net" }
