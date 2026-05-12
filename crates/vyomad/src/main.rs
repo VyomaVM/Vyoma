@@ -331,7 +331,7 @@ async fn main() {
         });
     }
 
-    let grpc_state = state.clone();
+    let grpc_state = Arc::new(state);
     tokio::spawn(async move {
         let addr = "[::1]:7071".parse().unwrap();
         info!("gRPC interface available at {}", addr);

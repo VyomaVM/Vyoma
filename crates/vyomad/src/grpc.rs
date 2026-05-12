@@ -11,14 +11,16 @@ use vyoma_proto::v1::{
 };
 
 use crate::state::AppState;
-use crate::api::handlers;
+use crate::vm_service;
+use crate::vm_service::types::VmRunRequest;
+use vyoma_core::api::{PortMapping, VolumeMount};
 
 pub struct GrpcVmService {
-    state: AppState,
+    state: Arc<AppState>,
 }
 
 impl GrpcVmService {
-    pub fn new(state: AppState) -> Self {
+    pub fn new(state: Arc<AppState>) -> Self {
         Self { state }
     }
 }
@@ -29,15 +31,77 @@ impl VmService for GrpcVmService {
         &self,
         request: Request<CreateVmRequest>,
     ) -> Result<Response<CreateVmResponse>, Status> {
-        // Just stub for now, logic will wrap around existing `api::handlers` soon!
-        Err(Status::unimplemented("Not implemented"))
+        let req = request.into_inner();
+        info!("gRPC: Request to create VM: {} (image: {})", req.name, req.image);
+
+        // Convert protobuf types to internal types
+        let ports: Vec<PortMapping> = req.ports.into_iter().map(|p| PortMapping {
+            host_port: p.host as u16,
+            vm_port: p.vm as u16,
+        }).collect();
+
+        let volumes: Vec<VolumeMount> = req.volumes.into_iter().map(|v| VolumeMount {
+            host_path: v.host_path,
+            vm_path: v.vm_path,
+            read_only: false, // default to read-write for CRI
+        }).collect();
+
+        // Build labels - include name as a label
+        let mut labels = std::collections::HashMap::new();
+        if !req.name.is_empty() {
+            labels.insert("name".to_string(), req.name.clone());
+            labels.insert("vyoma.service".to_string(), req.name.clone());
+        }
+
+        let vm_request = VmRunRequest {
+            image: req.image.clone(),
+            vcpu: req.vcpus as u32,
+            mem_size_mib: req.memory_mb as u32,
+            ports,
+            volumes,
+            hostname: if req.name.is_empty() { None } else { Some(req.name.clone()) },
+            networks: req.networks.clone(),
+            labels,
+            base_image_path: String::new(), // will be resolved during creation
+        };
+
+        let state = Arc::clone(&self.state);
+        match vm_service::run_vm(state, vm_request).await {
+            Ok(result) => {
+                info!("gRPC: VM created successfully: {}", result.vm_id);
+                Ok(Response::new(CreateVmResponse {
+                    vm_id: result.vm_id,
+                }))
+            }
+            Err(e) => {
+                error!("gRPC: Failed to create VM: {}", e);
+                Err(Status::internal(format!("Failed to create VM: {}", e)))
+            }
+        }
     }
 
     async fn start_vm(
         &self,
         request: Request<VmIdRequest>,
     ) -> Result<Response<VmStatusResponse>, Status> {
-        Err(Status::unimplemented("Not implemented"))
+        let req = request.into_inner();
+        let vm_id = req.vm_id;
+        info!("gRPC: Request to start VM: {}", vm_id);
+
+        // Check if VM exists - since run_vm already boots, just verify it exists
+        let exists = {
+            let vms = self.state.vms.lock().unwrap();
+            vms.contains_key(&vm_id)
+        };
+
+        if exists {
+            Ok(Response::new(VmStatusResponse {
+                vm_id,
+                status: "Running".to_string(),
+            }))
+        } else {
+            Err(Status::not_found("VM not found"))
+        }
     }
 
     async fn stop_vm(
@@ -79,7 +143,21 @@ impl VmService for GrpcVmService {
         &self,
         request: Request<VmIdRequest>,
     ) -> Result<Response<()>, Status> {
-        Err(Status::unimplemented("Not implemented"))
+        let req = request.into_inner();
+        let vm_id = req.vm_id;
+        info!("gRPC: Request to delete VM: {}", vm_id);
+
+        // Use the vm_service::state::stop_vm function
+        match crate::vm_service::state::stop_vm(&self.state, &vm_id).await {
+            Ok(_) => {
+                info!("gRPC: VM deleted successfully: {}", vm_id);
+                Ok(Response::new(()))
+            }
+            Err(e) => {
+                error!("gRPC: Failed to delete VM: {}", e);
+                Err(Status::internal(format!("Failed to delete VM: {}", e)))
+            }
+        }
     }
 
     async fn list_vms(
