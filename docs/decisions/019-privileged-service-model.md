@@ -9,7 +9,7 @@ We initially aimed for "True Rootless" operation to maximize security and ease o
 ## Decision
 For v1.0, we will adopt the **Privileged Service Model** (aka "The Docker Model"):
 - **Daemon (`vyomad`)**: Runs as `root` (managed by systemd). This grants access to KVM, Device Mapper, and Kernel Networking (Bridges/VXLAN).
-- **CLI (`ign`)**: Runs as an unprivileged user. It communicates with the daemon via a Unix Socket (`/var/run/vyoma.sock`).
+- **CLI (`vyoma`)**: Runs as an unprivileged user. It communicates with the daemon via a Unix Socket (`/var/run/vyoma.sock`).
 
 "True Rootless" mode is demoted to **Experimental/Alpha** status and is not a blocker for v1.0.
 

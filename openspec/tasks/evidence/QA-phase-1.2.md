@@ -9,7 +9,7 @@
 - [x] Verify `vyoma doctor` recognizes the new hardcoded paths and successfully validates them.
 
 ## Checks Performed
-1. **Compilation Check**: `cargo check --bin ign` compiled successfully without any errors (`0`). 
+1. **Compilation Check**: `cargo check --bin vyoma` compiled successfully without any errors (`0`). 
 2. **Logic verification in `fs.rs`**: Confirmed `try_find_binary` natively queries the `usr/libexec` block directly before querying `which` context.
 3. **Packaging script verification**: Confirmed both shell scripts include a `curl`/`wget` routine that dynamically targets the `virtio-fs/virtiofsd` GitLab release directory if `virtiofsd` is not present locally.
 

@@ -164,7 +164,7 @@ fi
 
 echo "Vyoma v2.1.1 installed successfully!"
 echo "Open http://localhost:3000 for the dashboard"
-echo "Run 'ign run nginx:latest' to start your first VM"
+echo "Run 'vyoma run nginx:latest' to start your first VM"
 POSTINST
 chmod +x "$PACKAGE_DIR/DEBIAN/postinst"
 

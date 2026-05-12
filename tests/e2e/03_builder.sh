@@ -25,7 +25,7 @@ EOF
 
 # 2. Build
 echo "Building Image..."
-# Output parsing needed? ign build currently prints to stdout?
+# Output parsing needed? vyoma build currently prints to stdout?
 OUTPUT=$($VYOMA build $CTX 2>&1)
 echo "$OUTPUT"
 assert_success "Build Command"

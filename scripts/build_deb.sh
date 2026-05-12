@@ -9,7 +9,7 @@ WORK_DIR="target/debian/${PKG_NAME}_${VERSION}_${ARCH}"
 echo "Building Vyoma v${VERSION} for Debian..."
 
 # 1. Build Binaries
-cargo build --release --bin vyomad --bin ign
+cargo build --release --bin vyomad --bin vyoma
 
 # 2. Prepare Directory Structure
 mkdir -p "${WORK_DIR}/usr/bin"

@@ -111,7 +111,7 @@ If issues occur, rollback to previous version:
 - Verify Raft initialization completed: `curl localhost:3000/swarm/nodes`
 
 ### Route issues
-- Check VXLAN device exists: `ip link show ign-vxlan`
+- Check VXLAN device exists: `ip link show vyoma-vxlan`
 - Check WireGuard status: `wg show`
 
 ### Leader election problems

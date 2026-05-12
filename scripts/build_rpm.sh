@@ -11,7 +11,7 @@ mkdir -p "${WORK_DIR}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 mkdir -p "${SOURCES_DIR}"
 
 # 1. Build Binaries
-cargo build --release --bin vyomad --bin ign
+cargo build --release --bin vyomad --bin vyoma
 
 # 2. Copy binaries to source dir
 cp target/release/vyomad "${SOURCES_DIR}/"
@@ -101,7 +101,7 @@ mkdir -p %{buildroot}/usr/bin
 mkdir -p %{buildroot}/usr/lib/vyoma
 mkdir -p %{buildroot}/etc/systemd/system
 install -m 755 vyomad %{buildroot}/usr/bin/vyomad
-install -m 755 vyoma %{buildroot}/usr/bin/ign
+install -m 755 vyoma %{buildroot}/usr/bin/vyoma
 install -m 755 cloud-hypervisor %{buildroot}/usr/bin/cloud-hypervisor
 install -m 644 vyomad.service %{buildroot}/etc/systemd/system/vyomad.service
 
@@ -128,7 +128,7 @@ SPEC_CONTENT="$SPEC_CONTENT
 
 %files
 /usr/bin/vyomad
-/usr/bin/ign
+/usr/bin/vyoma
 /usr/bin/cloud-hypervisor
 /etc/systemd/system/vyomad.service
 /usr/lib/vyoma/cni

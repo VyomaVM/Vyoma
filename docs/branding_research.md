@@ -6,7 +6,7 @@
 *   **Concept**: Explosive speed, starting something powerful, clean energy.
 *   **Vibe**: Fast, dangerous but controlled.
 *   **Ecosystem**:
-    *   **CLI**: `ign` (Short, sharp).
+    *   **CLI**: `vyoma` (Short, sharp).
     *   **Daemon**: `vyomad` (Always burning).
     *   **Config**: `Vyomafile`.
 *   **Visuals**:

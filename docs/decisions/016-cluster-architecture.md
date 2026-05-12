@@ -27,7 +27,7 @@ Like Serf/Memberlist.
 *   **Cons**: Convergence time, eventual consistency.
 
 ### 3. Static Mesh
-Manual `ign node add <ip>`.
+Manual `vyoma node add <ip>`.
 *   **Pros**: Trivial MVP.
 *   **Cons**: Manual management.
 
@@ -38,8 +38,8 @@ Vyoma is designed to be lightweight. A heavy Etcd/Raft consensus is overkill for
 
 **Architecture**:
 - Each Daemon exposes a Cluster API (gRPC or HTTP).
-- `ign swarm init`: Becomes a "Seed".
-- `ign swarm join <seed-ip>`: Joins the mesh.
+- `vyoma swarm init`: Becomes a "Seed".
+- `vyoma swarm join <seed-ip>`: Joins the mesh.
 - State (VM List) is broadcasted periodically (Anti-Entropy).
 
 ## Data structures

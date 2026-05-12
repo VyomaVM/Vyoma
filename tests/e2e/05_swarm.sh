@@ -31,7 +31,7 @@ assert_success "Swarm Init"
 
 # 2. Join Swarm
 echo "Joining Node 2 to Node 1..."
-# Syntax: ign swarm join <IP>
+# Syntax: vyoma swarm join <IP>
 IGNITE_DAEMON_PORT=3005 $VYOMA2 swarm join 127.0.0.1
 assert_success "Swarm Join"
 

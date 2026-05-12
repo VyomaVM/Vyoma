@@ -1687,7 +1687,7 @@ fn export_vm(vm_id: &str, output_path: &str) -> Result<()> {
 
     if !snap_path.exists() || !mem_path.exists() {
         return Err(anyhow::anyhow!(
-            "Snapshot files missing. Did you run 'ign snapshot <id>' first?"
+            "Snapshot files missing. Did you run 'vyoma snapshot <id>' first?"
         ));
     }
 

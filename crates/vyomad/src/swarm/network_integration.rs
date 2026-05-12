@@ -175,7 +175,7 @@ impl NetworkIntegration {
             }
         }
         
-        let if_name = "ign-vxlan";
+        let if_name = "vyoma-vxlan";
         let vxlan_id = "42";
         
         info!("Adding route to {} via VXLAN -> {}", subnet, peer_ip);
@@ -271,7 +271,7 @@ impl NetworkIntegration {
     }
 
     fn ensure_vxlan_device(&self) {
-        let if_name = "ign-vxlan";
+        let if_name = "vyoma-vxlan";
         
         let output = Command::new("ip").args(&["link", "show", if_name]).output();
         if let Ok(o) = output {

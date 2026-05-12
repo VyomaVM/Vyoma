@@ -20,16 +20,16 @@ mod tests {
     #[test]
     fn test_prepared_storage_serialization() {
         let storage = PreparedStorage {
-            dm_device_path: "/dev/mapper/ign-test".to_string(),
+            dm_device_path: "/dev/mapper/vyoma-test".to_string(),
             loop_devices: vec!["/dev/loop0".to_string(), "/dev/loop1".to_string()],
             cow_file_path: "/tmp/diff.cow".to_string(),
-            dm_name: "ign-test".to_string(),
+            dm_name: "vyoma-test".to_string(),
         };
         
         let json = serde_json::to_string(&storage).unwrap();
         let parsed: PreparedStorage = serde_json::from_str(&json).unwrap();
         
-        assert_eq!(parsed.dm_name, "ign-test");
+        assert_eq!(parsed.dm_name, "vyoma-test");
         assert_eq!(parsed.loop_devices.len(), 2);
     }
 
@@ -70,7 +70,7 @@ mod tests {
             ch_path: "/usr/bin/cloud-hypervisor".to_string(),
             socket_path: "/tmp/ch.sock".to_string(),
             boot_args: "console=ttyS0 init=/sbin/vyoma-init".to_string(),
-            rootfs_path: "/dev/mapper/ign-123".to_string(),
+            rootfs_path: "/dev/mapper/vyoma-123".to_string(),
             vsock_cid: 99,
             vsock_path: PathBuf::from("/tmp/vsock.sock"),
             initramfs_path: Some("/tmp/initramfs.cpio.gz".to_string()),
@@ -120,7 +120,7 @@ mod tests {
             vm_id: "vm-snapshot-1".to_string(),
             ch_socket_path: "/tmp/ch.sock".to_string(),
             tap_name: "tap0abc".to_string(),
-            dm_name: "ign-123".to_string(),
+            dm_name: "vyoma-123".to_string(),
             loop_devices: vec!["/dev/loop0".to_string()],
             cow_file_path: "/tmp/cow".to_string(),
             ip_address: "172.16.0.5".to_string(),

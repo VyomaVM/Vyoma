@@ -37,7 +37,7 @@ We will first validate **Flannel** for Rootful (Standard) mode.
 For Rootless, we will investigate if **Slirp4netns** can integrate with a multi-host backend or if we need a userspace router.
 
 **Plan**:
-1.  Implement `ign network create --driver=overlay`.
+1.  Implement `vyoma network create --driver=overlay`.
 2.  In Rootful mode, this invokes `flannel` CNI (managed by us or external).
 3.  In Rootless mode, we mark as "Experimental/Not Supported" initially, or fallback to a userspace tunnel (to be researched).
 

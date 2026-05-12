@@ -5,7 +5,7 @@ This document tracks significant architectural decisions, their context, consequ
 ## 001. Project Naming & Branding
 *   **Date**: 2025-12-23
 *   **Decision**: Rename project from "Generic Micro-VM (MVM)" to **Vyoma**.
-*   **Visuals**: Daemon = `vyomad`, CLI = `ign`.
+*   **Visuals**: Daemon = `vyomad`, CLI = `vyoma`.
 *   **Context**: User requested a "premium" and energetic brand. "Vyoma" aligns with Firecracker (the underlying VMM).
 *   **Alternatives**: "Capsule" (discarded for being too generic/safe).
 
@@ -99,7 +99,7 @@ This document tracks significant architectural decisions, their context, consequ
 *   **Date**: 2025-12-24
 *   **Decision**: Use `tokio::sync::broadcast` + Server-Sent Events (SSE) for log streaming.
 *   **Reasoning**:
-    *   `broadcast` generic channel allows multiple consumers (though we currently use one main one, it allows future expansion like "ign logs" + "dashboard" simultaneously).
+    *   `broadcast` generic channel allows multiple consumers (though we currently use one main one, it allows future expansion like "vyoma logs" + "dashboard" simultaneously).
     *   Firecracker logs (stdout/stderr) are captured via pipes and immediately pushed to the broadcast channel.
     *   SSE (`text/event-stream`) is a standard HTTP protocol for streaming updates, supported natively by browsers and easy to consume in CLI via `reqwest`.
     *   Avoids complex WebSocket setup just for read-only logs.
@@ -122,7 +122,7 @@ This document tracks significant architectural decisions, their context, consequ
 
 ## 012. Builder Strategy (Vyomafile)
 *   **Date**: 2025-12-24
-*   **Decision**: Implement `ign build` via a Client-Server model where the Daemon performs the build using `chroot` for `RUN` instructions.
+*   **Decision**: Implement `vyoma build` via a Client-Server model where the Daemon performs the build using `chroot` for `RUN` instructions.
 *   **Reasoning**:
     *   **Context**: The daemon manages the image store (`.vyoma/.vyoma/images`), which is often root-owned or privileged.
     *   **Performance**: `RUN` commands are executed via `chroot` on a mounted loopback device of the image. This avoids the overhead of booting a full Firecracker VM for every build step, similar to how Docker builds work (mostly).
@@ -495,14 +495,14 @@ User-mode networking for unprivileged network namespaces.
 
 ## 018. Vyoma Compose Strategy
 *   **Date**: 2026-01-23
-*   **Decision**: Implement `vyoma-compose` crate and `ign up` command to support multi-VM orchestration using a Docker Compose-like YAML format.
+*   **Decision**: Implement `vyoma-compose` crate and `vyoma up` command to support multi-VM orchestration using a Docker Compose-like YAML format.
 *   **Reasoning**:
     *   **User Experience**: Adopting the familiar Compose spec reduces the learning curve for users migrating from Docker.
     *   **Separation of Concerns**: The orchestration logic (dependency resolution, config parsing) is separated into a dedicated library (`vyoma-compose`), keeping the core primitives (`vyoma-core`) focused on single-VM lifecycle.
     *   **Integrated Workflow**: Supporting `build` contexts allows for a seamless "Source to Running App" workflow, unlike a pure runtime orchestrator.
 *   **Implementation**:
     *   **Crate**: `crates/vyoma-compose` for strong typing of the YAML schema.
-    *   **CLI**: `ign up` acts as the entry point. It orchestrates the `vyoma-core` API (or daemon API) to start services.
+    *   **CLI**: `vyoma up` acts as the entry point. It orchestrates the `vyoma-core` API (or daemon API) to start services.
     *   **Networking**: Services will eventually share a dedicated CNI network (bridge) to allow name-based resolution (Phase 16).
 *   **Consequences**:
     *   Introduces `serde_yaml` dependency.

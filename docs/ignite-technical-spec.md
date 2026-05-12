@@ -119,7 +119,7 @@ uuid = { version = "1", features = ["v4"] }
 ```
 micro-vm-ecosystem/
 ├── crates/
-│   ├── ign/                    # CLI
+│   ├── vyoma/                 # CLI
 │   │   └── src/
 │   │       ├── main.rs
 │   │       ├── commands/       # One file per command group
@@ -438,7 +438,7 @@ fn start_virtiofsd(host_path: &Path, socket: &Path) -> Result<Child> {
 }
 ```
 
-#### 3.2.3 ign doctor Check
+#### 3.2.3 vyoma doctor Check
 
 ```rust
 // crates/vyoma/src/commands/system.rs
@@ -508,7 +508,7 @@ RuntimeDirectoryMode=0750
 StateDirectory=vyoma
 StateDirectoryMode=0750
 
-# Socket group allows ign CLI (user) to connect
+# Socket group allows vyoma CLI (user) to connect
 SocketGroup=vyoma
 
 [Install]
@@ -529,8 +529,8 @@ fi
 # Add vyoma to kvm group for /dev/kvm access
 usermod -aG kvm vyoma
 
-# Set socket permissions so ign CLI users can connect
-# Users must be in the 'vyoma' group to use ign CLI
+# Set socket permissions so vyoma CLI users can connect
+# Users must be in the 'vyoma' group to use vyoma CLI
 chown root:vyoma /var/run/vyoma.sock 2>/dev/null || true
 chmod 0660 /var/run/vyoma.sock 2>/dev/null || true
 
@@ -1680,7 +1680,7 @@ Add gRPC server alongside the existing axum REST server in vyomad:
 async fn main() -> Result<()> {
     let state = Arc::new(DaemonState::new().await?);
     
-    // REST API on Unix socket (for ign CLI)
+    // REST API on Unix socket (for vyoma CLI)
     let rest_server = start_rest_server(state.clone());
     
     // gRPC on TCP (for vk8s CRI plugin, SDK)

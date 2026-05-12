@@ -190,7 +190,7 @@ cp lib/systemd/system/vyomad.service %{buildroot}/lib/systemd/system/
 
 %files
 %defattr(-,root,root,-)
-/usr/bin/ign
+/usr/bin/vyoma
 /usr/bin/vyomad
 /usr/bin/vyoma-agent
 %dir /usr/lib/vyoma
@@ -244,7 +244,7 @@ systemctl start vyomad.service 2>/dev/null || true
 
 echo "Vyoma v${VERSION} installed successfully!"
 echo "Open http://localhost:3000 for the dashboard"
-echo "Run 'ign run nginx:latest' to start your first VM"
+echo "Run 'vyoma run nginx:latest' to start your first VM"
 
 %postun
 # Reload systemd on removal

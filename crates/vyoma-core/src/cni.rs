@@ -287,7 +287,7 @@ impl CniManager {
     }
 
     pub fn create_network(&self, name: &str, subnet: &str) -> Result<()> {
-        let bridge_name = format!("ign-{}", name);
+        let bridge_name = format!("vyoma-{}", name);
         let config = serde_json::json!({
             "cniVersion": "0.3.1",
             "name": name,

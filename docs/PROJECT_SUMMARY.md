@@ -13,7 +13,7 @@ The project is organized as a Rust Workspace with three main crates:
     *   Interacts with the Firecracker VMM via Unix Socket API.
     *   Exposes a REST API for the CLI.
 
-2.  **`ign` (CLI)**: The user-facing command-line tool.
+2.  **`vyoma` (CLI)**: The user-facing command-line tool.
     *   Communicates with the daemon via HTTP.
     *   Commands: `run`, `stop`, `ps`, `snapshot`, `restore`, `export`, `import`, `logs`, `build`, `doctor`.
 
@@ -54,13 +54,13 @@ The project is organized as a Rust Workspace with three main crates:
 
 ### 6. Production Hardening
 *   **Resource Limits**: Uses Cgroups v2 to enforce CPU (`--vcpu`) and Memory (`--memory`) limits on VM processes.
-*   **Health Checks**: `ign doctor` validates system prerequisites (KVM, Cgroups, binaries, networking) to parse environment readiness.
+*   **Health Checks**: `vyoma doctor` validates system prerequisites (KVM, Cgroups, binaries, networking) to parse environment readiness.
 
 ## Directory Structure
 ```text
 micro-vm-ecosystem/
 ├── crates/
-│   ├── ign/            # CLI Tool
+│   ├── vyoma/          # CLI Tool
 │   │   └── src/main.rs
 │   ├── vyomad/        # Daemon
 │   │   └── src/main.rs

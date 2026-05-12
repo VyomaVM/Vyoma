@@ -303,7 +303,7 @@ pub async fn restore_vm(
         )
     })?;
 
-    let dm_name = format!("ign-{}", vm_id);
+    let dm_name = format!("vyoma-{}", vm_id);
     let size_mb = 2048; // Must match original
     let size_sectors = size_mb * 1024 * 1024 / 512;
     let dm_path = StorageManager::create_dm_snapshot(&dm_name, &base_loop, &cow_loop, size_sectors)

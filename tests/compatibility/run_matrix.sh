@@ -16,10 +16,10 @@ if [ "$EUID" -ne 0 ]; then
   fatal "Tests must run as root."
 fi
 
-ign_bin="target/release/ign"
-if [ ! -f "$ign_bin" ]; then
+vyoma_bin="target/release/vyoma"
+if [ ! -f "$vyoma_bin" ]; then
     warn "Release binary missing. Proceeding with cargo run..."
-    ign_bin="cargo run --bin ign --"
+    vyoma_bin="cargo run --bin vyoma --"
 fi
 
 IMAGES=(
@@ -39,7 +39,7 @@ for IMAGE in "${IMAGES[@]}"; do
     log "Evaluating mapping for: ${IMAGE}"
     
     # 1. Pull & Spin Up
-    OUTPUT=$($ign_bin run "$IMAGE" || true)
+    OUTPUT=$($vyoma_bin run "$IMAGE" || true)
     
     # Extract just the VM ID via bash regex or awk from the phrase "VM ID: <uuid>"
     VM_ID=$(echo "$OUTPUT" | grep -o "VM ID: [a-f0-9\-]*" | awk '{print $3}' || true)
@@ -56,8 +56,8 @@ for IMAGE in "${IMAGES[@]}"; do
     sleep 3
     
     # 2. Check Logs (Did it abort?)
-    # Wrap in timeout because if the VM enters an infinite loop, `ign logs` acts like `docker logs -f` and hangs the CI!
-    LOG_OUTPUT=$(timeout 2 $ign_bin logs "$VM_ID" || true)
+    # Wrap in timeout because if the VM enters an infinite loop, `vyoma logs` acts like `docker logs -f` and hangs the CI!
+    LOG_OUTPUT=$(timeout 2 $vyoma_bin logs "$VM_ID" || true)
     if [ -z "$LOG_OUTPUT" ]; then
         warn "Log stream empty or failed for ${IMAGE}. This might indicate a catastrophic startup abort!"
     else
@@ -66,7 +66,7 @@ for IMAGE in "${IMAGES[@]}"; do
     
     # 3. Cleanup securely
     log "Purging VM state..."
-    $ign_bin stop "$VM_ID" > /dev/null 2>&1 || warn "Cleanup failure for $VM_ID"
+    $vyoma_bin stop "$VM_ID" > /dev/null 2>&1 || warn "Cleanup failure for $VM_ID"
     
 done
 

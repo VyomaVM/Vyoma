@@ -2,7 +2,7 @@
 set -e
 source tests/e2e/common.sh
 
-echo "=== Test 04: Compose (ign up) ==="
+echo "=== Test 04: Compose (vyoma up) ==="
 
 check_root
 setup_env
@@ -32,7 +32,7 @@ services:
 EOF
 
 # 2. Up
-echo "Running ign up..."
+echo "Running vyoma up..."
 $VYOMA up -d
 assert_success "Compose Up"
 
@@ -52,7 +52,7 @@ fi
 
 # 3.5 Scale
 echo "Scaling web=2..."
-# Command: ign scale web=2
+# Command: vyoma scale web=2
 $VYOMA scale web=2
 assert_success "Scale Request"
 sleep 5
@@ -60,8 +60,8 @@ PS_SCALE=$($VYOMA ps)
 # grep -c "web" should be 2?
 # The service name might be "compose_test_web_1", "compose_test_web_2".
 # Labels will prevent collision?
-# Implementation of "scale" CLI was: "ign scale <service>=<count>".
-# It calls "ign run" repeatedly?
+# Implementation of "scale" CLI was: "vyoma scale <service>=<count>".
+# It calls "vyoma run" repeatedly?
 # Let's verify scaling took effect.
 if [ $(echo "$PS_SCALE" | grep -c "web") -ge 2 ]; then
      echo -e "${GREEN}Pass: Scaled to 2 instances${NC}"
@@ -70,7 +70,7 @@ else
 fi
 
 # 4. Down
-echo "Running ign down..."
+echo "Running vyoma down..."
 $VYOMA down
 assert_success "Compose Down"
 

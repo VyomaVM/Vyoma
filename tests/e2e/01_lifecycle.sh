@@ -76,7 +76,7 @@ assert_success "Logs Retrieval"
 
 
 # Verify Restart (New PID or VM ID might change? Logic says Restart replaces VM)
-# IGN restart command replaces VM. ID might stay same?
+# VYOMA restart command replaces VM. ID might stay same?
 # Check PS again.
 # if $VYOMA ps | grep -q "test-vm"; then
 #      echo -e "${GREEN}Pass: VM Restarted${NC}"

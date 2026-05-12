@@ -18,8 +18,8 @@ echo "Killing Daemon..."
 pkill -f "vyomad" || echo "No Daemon running."
 
 # 4. Remove Device Mapper devices
-echo "Removing DM devices (ign-*)..."
-dmsetup ls | grep "^ign-" | awk '{print $1}' | while read -r dev; do
+echo "Removing DM devices (vyoma-*)..."
+dmsetup ls | grep "^vyoma-" | awk '{print $1}' | while read -r dev; do
     echo "Removing $dev..."
     dmsetup remove -f "$dev"
 done

@@ -6,7 +6,7 @@ A comprehensive tooling suite that makes creating, running, and managing Micro-V
 
 ## Technology Stack: Rust 🦀
 *   **Daemon (`vyomad`)**: Rust + Tokio + Hyper.
-*   **CLI (`ign`)**: Rust + Clap.
+*   **CLI (`vyoma`)**: Rust + Clap.
 *   **Core Logic**: `rtnetlink` (Networking), `devicemapper-rs` (Storage).
 
 ## Technical Deep Dive: The Internals
@@ -40,7 +40,7 @@ We cannot copy a 500MB disk for every container start.
     *   Firecracker supports `snapshot`. It dumps the entire RAM + CPU Registers to a file.
     *   To "Teleport": Pause VM -> Snapshot -> `scp` the snapshot file & the COW file -> Load Snapshot on remote.
 *   **Time Travel**:
-    *   Just a Git wrapper around the Firecracker Snapshot files. `git commit` = `ign snapshot`.
+    *   Just a Git wrapper around the Firecracker Snapshot files. `git commit` = `vyoma snapshot`.
 
 ## Ecosystem Architecture
 
