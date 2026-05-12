@@ -121,6 +121,8 @@ pub struct VmInstance {
     pub base_image_path: String,
     pub vcpu: u32,
     pub mem_size_mib: u32,
+
+    pub attestation_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -256,6 +258,12 @@ impl VmInstance {
             if let Err(e) = fs_mgr.kill() {
                 error!("Failed to kill virtiofsd: {}", e);
             }
+        }
+
+        // 8b. Abort attestation task before stopping vTPM to prevent use-after-free
+        if let Some(ref handle) = self.attestation_task {
+            handle.abort();
+            info!("Aborted attestation task for VM {}", self.id);
         }
 
         // 9. Stop vTPM if present

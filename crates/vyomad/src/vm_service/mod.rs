@@ -187,19 +187,24 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         policy.must_verify_on_boot()
     };
 
-    if needs_attestation {
+    let attestation_handle = if needs_attestation {
         info!("Measured boot attestation required for VM {}, TPM socket: {:?}", vm_id, tpm_socket_path);
-        tokio::spawn(async move {
-            if let Err(e) = policy::check_policy_and_perform_attestation(
+        let handle = tokio::spawn(async move {
+            // Run attestation - any panic will propagate and could crash the daemon
+            // The JoinHandle is stored so it can be aborted during VM cleanup
+            let vm_id_for_log = vm_id_clone.clone();
+            match policy::check_policy_and_perform_attestation(
                 state_clone,
                 vm_id_clone,
                 vm_dir_clone,
                 image_name,
                 tpm_socket_path,
             ).await {
-                error!("Attestation process failed: {}", e);
+                Ok(()) => info!("Attestation completed successfully for VM {}", vm_id_for_log),
+                Err(e) => error!("Attestation failed for VM {}: {}", vm_id_for_log, e),
             }
         });
+        Some(handle)
     } else {
         // No attestation required, mark as running immediately
         // But still stop the vTPM if one was started
@@ -208,7 +213,8 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         }
         update_vm_status(&state, &vm_id, VmStatus::Running).await
             .map_err(|e| anyhow::anyhow!("Failed to update VM status: {}", e))?;
-    }
+        None
+    };
 
     let instance = VmInstance {
         vmm,
@@ -234,6 +240,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         vcpu: request.vcpu,
         mem_size_mib: request.mem_size_mib,
         networks: request.networks.clone(),
+        attestation_task: attestation_handle,
     };
 
     instance.save_state().context("Failed to save state")?;

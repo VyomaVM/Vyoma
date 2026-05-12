@@ -411,6 +411,7 @@ pub async fn restore_vm(
         networks: vec![],
         vtpm_manager: None,
         attestation_status: None,
+        attestation_task: None,
     };
 
     {
@@ -838,6 +839,7 @@ pub async fn initialize_state(state: &AppState) {
                 mem_size_mib: vm_state.mem_size_mib,
                 networks: vm_state.networks.clone(),
                 vtpm_manager: None,
+                attestation_task: None,
             };
 
             state
@@ -875,6 +877,7 @@ pub async fn initialize_state(state: &AppState) {
                 mem_size_mib: vm_state.mem_size_mib,
                 networks: vm_state.networks,
                 vtpm_manager: None,
+                attestation_task: None,
             };
             // We await cleanup
             instance.cleanup(&state.cni_manager).await;
@@ -1341,6 +1344,7 @@ pub async fn adopt_teleported_vm(
         vcpu: 1,
         mem_size_mib: 512,
         vtpm_manager: None,
+        attestation_task: None,
     }));
 
     {

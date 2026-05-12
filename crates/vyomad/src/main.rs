@@ -217,6 +217,7 @@ async fn main() {
                 base_image_path: rvm.state.base_image_path.clone(),
                 vcpu: rvm.state.vcpu,
                 mem_size_mib: rvm.state.mem_size_mib,
+                attestation_task: None,
             };
             
             let mut vms = state.vms.lock().unwrap();
