@@ -1,11 +1,8 @@
 use std::path::{Path, PathBuf};
-use tracing::{info, error};
+use tracing::info;
 
 // Add devicemapper imports
-use devicemapper::{DM, DmName, DmOptions, DevId, Sectors, Device};
-use std::process::Command;
-use std::fs;
-
+use devicemapper::{DM, DmName, DmOptions, DmUuid, DevId};
 use crate::error::{StorageError, Result};
 
 #[derive(Debug, Clone)]
@@ -46,50 +43,75 @@ impl DmManager {
         Ok(bytes / 512)
     }
 
-    pub fn create_snapshot(
-        &self,
-        name: &str,
-        base_dev: &Path,
-        cow_dev: &Path,
-    ) -> Result<DmDevice> {
+pub fn create_snapshot(
+    &self,
+    name: &str,
+    base_dev: &Path,
+    cow_dev: &Path,
+) -> Result<DmDevice> {
         info!("Creating snapshot {}: base={:?}, cow={:?}", name, base_dev, cow_dev);
-        
+
         if !base_dev.exists() {
             return Err(StorageError::NotFound(format!("Base device not found: {:?}", base_dev)));
         }
         if !cow_dev.exists() {
             return Err(StorageError::NotFound(format!("COW device not found: {:?}", cow_dev)));
         }
-        
+
         let origin_name_str = format!("{}-origin", name);
         let sectors = Self::device_size_sectors(base_dev)?;
 
-        // 1. Create origin linear device via dmsetup (as LinearDev & SnapshotDev traits vary wildly between compiler versions)
-        // TODO(technical-debt): Migrate to devicemapper crate Rust API instead of CLI
-        // We use safe system Command building to ensure strict compliance without trait mismatch.
-        // Origin target wraps the read-only base
-        let table_origin = format!("0 {} linear {} 0", sectors, base_dev.display());
-        let mut dm_origin = Command::new("dmsetup");
-        dm_origin.arg("create").arg(&origin_name_str).arg("--table").arg(&table_origin);
-        
-        let origin_out = dm_origin.output().map_err(StorageError::Io)?;
-        if !origin_out.status.success() {
-            return Err(StorageError::Other(format!("Failed to create origin dev via dmsetup: {:?}", String::from_utf8_lossy(&origin_out.stderr))));
-        }
-            
-        // 2. Create snapshot device
+        // 1. Create origin linear device via devicemapper API
+        let origin_name = DmName::new(&origin_name_str)
+            .map_err(|e| StorageError::Other(format!("Invalid DM name {}: {}", origin_name_str, e)))?;
+        let origin_uuid_str = uuid::Uuid::new_v4().to_string();
+        let origin_uuid = DmUuid::new(&origin_uuid_str)
+            .map_err(|e| StorageError::Other(format!("Invalid UUID for origin: {}", e)))?;
+
+        let origin_table = vec![(
+            0u64,
+            sectors,
+            "linear".to_string(),
+            format!("{} 0", base_dev.display()),
+        )];
+
+        self.dm
+            .device_create(&origin_name, Some(&origin_uuid), DmOptions::default())
+            .map_err(|e| StorageError::Other(format!("Failed to create origin device via dm API: {}", e)))?;
+        self.dm
+            .table_load(&DevId::Name(&origin_name), &origin_table, DmOptions::default())
+            .map_err(|e| StorageError::Other(format!("Failed to load origin table via dm API: {}", e)))?;
+
+        // 2. Create snapshot device via devicemapper API
+        let snap_name = DmName::new(name)
+            .map_err(|e| StorageError::Other(format!("Invalid DM name {}: {}", name, e)))?;
+        let snap_uuid_str = uuid::Uuid::new_v4().to_string();
+        let snap_uuid = DmUuid::new(&snap_uuid_str)
+            .map_err(|e| StorageError::Other(format!("Invalid UUID for snapshot: {}", e)))?;
+
         let origin_dev_path = format!("/dev/mapper/{}", origin_name_str);
-        let table_snap = format!("0 {} snapshot {} {} P 8", sectors, origin_dev_path, cow_dev.display());
-        let mut dm_snap = Command::new("dmsetup");
-        dm_snap.arg("create").arg(name).arg("--table").arg(&table_snap);
-        
-        let snap_out = dm_snap.output().map_err(StorageError::Io)?;
-        if !snap_out.status.success() {
-            // cleanup origin
-            let _ = Command::new("dmsetup").arg("remove").arg(&origin_name_str).output();
-            return Err(StorageError::Other(format!("Failed to create snapshot dev via dmsetup: {:?}", String::from_utf8_lossy(&snap_out.stderr))));
-        }
-            
+        let snap_table = vec![(
+            0u64,
+            sectors,
+            "snapshot".to_string(),
+            format!("{} {} P 8", origin_dev_path, cow_dev.display()),
+        )];
+
+        self.dm
+            .device_create(&snap_name, Some(&snap_uuid), DmOptions::default())
+            .map_err(|e| StorageError::Other(format!("Failed to create snapshot device via dm API: {}", e)))?;
+        self.dm
+            .table_load(&DevId::Name(&snap_name), &snap_table, DmOptions::default())
+            .map_err(|e| StorageError::Other(format!("Failed to load snapshot table via dm API: {}", e)))?;
+
+        // Activate both devices (resume without DM_SUSPEND flag)
+        self.dm
+            .device_suspend(&DevId::Name(&origin_name), DmOptions::default())
+            .map_err(|e| StorageError::Other(format!("Failed to activate origin device: {}", e)))?;
+        self.dm
+            .device_suspend(&DevId::Name(&snap_name), DmOptions::default())
+            .map_err(|e| StorageError::Other(format!("Failed to activate snapshot device: {}", e)))?;
+
         let path = PathBuf::from(format!("/dev/mapper/{}", name));
         Ok(DmDevice::new(name.to_string(), path))
     }
