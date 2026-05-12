@@ -90,7 +90,7 @@ impl VmService for GrpcVmService {
 
         // Check if VM exists - since run_vm already boots, just verify it exists
         let exists = {
-            let vms = self.state.vms.lock().unwrap();
+            let vms = self.state.vms.lock().await;
             vms.contains_key(&vm_id)
         };
 
@@ -113,7 +113,7 @@ impl VmService for GrpcVmService {
         info!("gRPC: Request to stop VM: {}", id);
 
         let vm_arc = {
-            let mut vms = self.state.vms.lock().unwrap();
+            let mut vms = self.state.vms.lock().await;
             vms.remove(&id)
         };
 
@@ -165,7 +165,7 @@ impl VmService for GrpcVmService {
         _request: Request<ListVmsRequest>,
     ) -> Result<Response<ListVmsResponse>, Status> {
         let instances: Vec<std::sync::Arc<tokio::sync::Mutex<crate::state::VmInstance>>> = {
-            let vms_map = self.state.vms.lock().unwrap();
+            let vms_map = self.state.vms.lock().await;
             vms_map.values().cloned().collect()
         };
 
@@ -193,7 +193,7 @@ impl VmService for GrpcVmService {
     ) -> Result<Response<ProtoVmInfo>, Status> {
         let req = request.into_inner();
         let vm_arc = {
-            let vms = self.state.vms.lock().unwrap();
+            let vms = self.state.vms.lock().await;
             vms.get(&req.vm_id).cloned()
         };
 

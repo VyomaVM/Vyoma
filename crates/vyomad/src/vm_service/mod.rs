@@ -253,7 +253,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
     };
 
     {
-        let mut vms = state.vms.lock().unwrap();
+        let mut vms = state.vms.lock().await;
         vms.insert(vm_id.clone(), Arc::new(tokio::sync::Mutex::new(instance)));
     }
 

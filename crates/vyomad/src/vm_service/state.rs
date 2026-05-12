@@ -15,7 +15,7 @@ pub async fn save_vm_state(
     instance.save_state().context("Failed to save state")?;
 
     {
-        let mut vms = state.vms.lock().unwrap();
+        let mut vms = state.vms.lock().await;
         vms.insert(vm_id.clone(), Arc::new(TokioMutex::new(instance)));
     }
     Ok(())
@@ -59,7 +59,7 @@ pub async fn stop_vm(
     info!("VmService: Stopping VM {}", vm_id);
 
     let vm_arc = {
-        let mut vms = state.vms.lock().unwrap();
+        let mut vms = state.vms.lock().await;
         vms.remove(vm_id)
     };
 
@@ -89,7 +89,7 @@ pub async fn pause_vm(
     info!("VmService: Pausing VM {}", vm_id);
 
     let vm_arc = {
-        let vms = state.vms.lock().unwrap();
+        let vms = state.vms.lock().await;
         vms.get(vm_id).cloned()
     };
 
@@ -112,7 +112,7 @@ pub async fn resume_vm(
     info!("VmService: Resuming VM {}", vm_id);
 
     let vm_arc = {
-        let vms = state.vms.lock().unwrap();
+        let vms = state.vms.lock().await;
         vms.get(vm_id).cloned()
     };
 
@@ -141,7 +141,7 @@ pub async fn snapshot_vm(
     info!("VmService: Creating snapshot for VM {}", vm_id);
 
     let vm_arc = {
-        let vms = state.vms.lock().unwrap();
+        let vms = state.vms.lock().await;
         vms.get(vm_id).cloned()
     };
 
@@ -184,7 +184,7 @@ pub async fn commit_vm(
 
     let dm_name = {
         let vm_arc = {
-            let vms = state.vms.lock().unwrap();
+            let vms = state.vms.lock().await;
             vms.get(vm_id).cloned()
         };
 
@@ -238,7 +238,7 @@ pub async fn get_vm_state(
     vm_id: &str,
 ) -> Result<Option<VmInstance>> {
     let vm_arc = {
-        let vms = state.vms.lock().unwrap();
+        let vms = state.vms.lock().await;
         vms.get(vm_id).cloned()
     };
 

@@ -93,7 +93,7 @@ pub async fn shutdown_signal(state: AppState) {
     info!("Signal received, starting graceful shutdown...");
 
     let ids: Vec<String> = {
-        let map = state.vms.lock().unwrap();
+        let map = state.vms.lock().await;
         map.keys().cloned().collect()
     };
 
@@ -101,7 +101,7 @@ pub async fn shutdown_signal(state: AppState) {
         info!("Cleaning up {} active VMs...", ids.len());
         for id in ids {
             let vm_arc = {
-                let mut map = state.vms.lock().unwrap();
+                let mut map = state.vms.lock().await;
                 map.remove(&id)
             };
             if let Some(vm_mutex) = vm_arc {
@@ -415,7 +415,7 @@ pub async fn restore_vm(
     };
 
     {
-        let mut vms = state.vms.lock().unwrap();
+        let mut vms = state.vms.lock().await;
         vms.insert(vm_id.clone(), Arc::new(TokioMutex::new(instance)));
 
     // WAL: Log VM creation and start
@@ -529,7 +529,7 @@ pub async fn pull_image_handler(
 
 pub async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {
     let instances: Vec<Arc<TokioMutex<VmInstance>>> = {
-        let vms_map = state.vms.lock().unwrap();
+        let vms_map = state.vms.lock().await;
         vms_map.values().cloned().collect()
     };
 
@@ -559,7 +559,7 @@ pub async fn stream_logs(
     info!("Request to stream logs for VM: {}", id);
 
     let vm_arc = {
-        let vms = state.vms.lock().unwrap();
+        let vms = state.vms.lock().await;
         vms.get(&id).cloned()
     };
 
@@ -589,7 +589,7 @@ pub async fn inspect_vm_handler(
 ) -> Result<String, (StatusCode, String)> {
     // 1. Check running
     let vm_arc = {
-        let vms = state.vms.lock().unwrap();
+        let vms = state.vms.lock().await;
         vms.get(&id).cloned()
     };
 
@@ -846,7 +846,7 @@ pub async fn initialize_state(state: &AppState) {
             state
                 .vms
                 .lock()
-                .unwrap()
+                .await
                 .insert(vm_state.id, Arc::new(TokioMutex::new(instance)));
         } else {
             info!(
@@ -906,14 +906,14 @@ pub async fn start_process_monitor(state: AppState) {
             interval.tick().await;
 
             let ids: Vec<String> = {
-                let map = state.vms.lock().unwrap();
+                let map = state.vms.lock().await;
                 map.keys().cloned().collect()
             };
 
             for id in ids {
                 // Get VM Arc
                 let vm_arc = {
-                    let map = state.vms.lock().unwrap();
+                    let map = state.vms.lock().await;
                     map.get(&id).cloned()
                 };
 
@@ -1349,7 +1349,7 @@ pub async fn adopt_teleported_vm(
     }));
 
     {
-        let mut vms = state.vms.lock().unwrap();
+        let mut vms = state.vms.lock().await;
         vms.insert(payload.vm_id.clone(), instance);
     }
 
@@ -1392,7 +1392,7 @@ pub async fn teleport_handler(
     }
 
     let vm_arc = {
-        let vms = state.vms.lock().unwrap();
+        let vms = state.vms.lock().await;
         vms.get(&payload.vm_id).cloned()
     };
 
@@ -1482,12 +1482,12 @@ pub async fn teleport_handler(
             ).await;
 
             if result.is_ok() {
-                // Stop the source VM after successful migration
-                {
-                    let vm_arc_opt = {
-                        let vms = vms_for_cleanup.lock().unwrap();
-                        vms.get(&vm_id_for_cleanup).cloned()
-                    };
+                 // Stop the source VM after successful migration
+                 {
+                     let vm_arc_opt = {
+                         let vms = vms_for_cleanup.lock().await;
+                         vms.get(&vm_id_for_cleanup).cloned()
+                     };
 
                     if let Some(vm_arc) = vm_arc_opt {
                         let mut vm = vm_arc.lock().await;
@@ -1498,10 +1498,10 @@ pub async fn teleport_handler(
                     }
                 }
 
-                // Remove from registry
-                if let Some(_vm_arc) = vms_for_cleanup.lock().unwrap().remove(&vm_id_for_cleanup) {
-                    info!("Source VM {} removed from registry after migration", vm_id_for_cleanup);
-                }
+                 // Remove from registry
+                 if let Some(_vm_arc) = vms_for_cleanup.lock().await.remove(&vm_id_for_cleanup) {
+                     info!("Source VM {} removed from registry after migration", vm_id_for_cleanup);
+                 }
 
                 // Notify target node to adopt the VM
                 let adopt_resp = reqwest::Client::new()
@@ -1535,12 +1535,12 @@ pub async fn teleport_handler(
                     }
                 }
             } else {
-                // Resume source VM on migration failure
-                {
-                    let vm_arc_opt = {
-                        let vms = vms_for_cleanup.lock().unwrap();
-                        vms.get(&vm_id_for_cleanup).cloned()
-                    };
+                 // Resume source VM on migration failure
+                 {
+                     let vm_arc_opt = {
+                         let vms = vms_for_cleanup.lock().await;
+                         vms.get(&vm_id_for_cleanup).cloned()
+                     };
 
                     if let Some(vm_arc) = vm_arc_opt {
                         let mut vm = vm_arc.lock().await;
@@ -1712,7 +1712,7 @@ pub async fn attest_vm_handler(
     info!("Attestation request for VM {}", id);
 
     let vm_arc = {
-        let vms = state.vms.lock().unwrap();
+        let vms = state.vms.lock().await;
         vms.get(&id).cloned()
     };
 
