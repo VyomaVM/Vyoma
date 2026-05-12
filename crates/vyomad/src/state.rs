@@ -80,6 +80,17 @@ impl Default for VmStatus {
     }
 }
 
+impl std::fmt::Display for VmStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VmStatus::PendingAttestation => write!(f, "PendingAttestation"),
+            VmStatus::Running => write!(f, "Running"),
+            VmStatus::AttestationFailed { reason } => write!(f, "AttestationFailed: {}", reason),
+            VmStatus::Error { reason } => write!(f, "Error: {}", reason),
+        }
+    }
+}
+
 pub struct VmInstance {
     pub vmm: VmmManager,
     pub id: String,

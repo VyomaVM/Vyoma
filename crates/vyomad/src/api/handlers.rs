@@ -485,6 +485,7 @@ pub async fn history_vm(
 #[derive(Serialize)]
 struct VmSummary {
     id: String,
+    status: String,
     ip_address: String,
     hostname: Option<String>,
     labels: HashMap<String, String>,
@@ -536,6 +537,7 @@ pub async fn list_vms(State(state): State<AppState>) -> Json<ListResponse> {
         let inst = arc_inst.lock().await;
         summaries.push(VmSummary {
             id: inst.id.clone(),
+            status: inst.status.to_string(),
             ip_address: inst.ip_address.clone(),
             hostname: inst.hostname.clone(),
             labels: inst.labels.clone(),
