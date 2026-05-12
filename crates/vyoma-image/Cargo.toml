@@ -19,6 +19,7 @@ ed25519-dalek = { version = "2.0", features = ["rand_core", "serde"] }
 rand = "0.8"
 reqwest = { version = "0.12", features = ["json"] }
 tar = "0.4"
+vyoma-core = { path = "../vyoma-core" }
 
 [dev-dependencies]
 tokio-test = "0.4"
