@@ -47,7 +47,7 @@ export function MicroVMsView() {
                 </div>
                 <div className="col-span-4">
                   <div className="font-semibold text-white text-sm">
-                    {vm.labels['ignite.service'] || 'MicroVM'}
+                    {vm.labels['vyoma.service'] || 'MicroVM'}
                   </div>
                   <div className="text-xs text-slate-500 font-mono mt-0.5 truncate" title={vm.id}>
                     {vm.id.substring(0, 12)}

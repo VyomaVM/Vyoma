@@ -1,6 +1,6 @@
 # Testing Guide 🧪
 
-This document outlines how to test the Ignite ecosystem to ensure robustness and stability.
+This document outlines how to test the Vyoma ecosystem to ensure robustness and stability.
 
 ## 1. Unit Tests (Core Logic)
 We use standard Rust testing for individual components.
@@ -10,11 +10,11 @@ We use standard Rust testing for individual components.
 cargo test
 
 # Run tests for specific crate
-cargo test -p ignite-core
+cargo test -p vyoma-core
 ```
 
 ## 2. Integration Tests (End-to-End)
-Integration tests require a running `ignited` daemon.
+Integration tests require a running `vyomad` daemon.
 
 ### Automated Test Script
 We provide a script to run a full lifecycle test:
@@ -23,20 +23,20 @@ We provide a script to run a full lifecycle test:
 ```
 This script will:
 1.  Build release binaries.
-2.  Start `ignited` in the background (using a temporary home dir).
-3.  Run `ign` commands (pull, run, stop, network).
+2.  Start `vyomad` in the background (using a temporary home dir).
+3.  Run `vyoma` commands (pull, run, stop, network).
 4.  Verify outcomes.
 5.  Cleanup.
 
 ### Manual Testing
 1.  Start Daemon:
     ```bash
-    sudo ./target/release/ignited
+    sudo ./target/release/vyomad
     ```
 2.  Run Commands:
     ```bash
-    ./target/release/ign doctor
-    ./target/release/ign run alpine:latest
+    ./target/release/vyoma doctor
+    ./target/release/vyoma run alpine:latest
     ```
 
 ## 3. Environment Variables
@@ -45,8 +45,8 @@ Configure behavior using `.env` or shell variables:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `RUST_LOG` | Logging level (`info`, `debug`, `trace`) | `info` |
-| `IGNITE_HOME` | Custom root directory (overrides `~/.ignite`) | `~/.ignite` |
-| `IGNITE_SOCK` | Path to daemon socket (if applicable) | `/tmp/ignite.sock` |
+| `VYOMA_HOME` | Custom root directory (overrides `~/.vyoma`) | `~/.vyoma` |
+| `VYOMA_SOCK` | Path to daemon socket (if applicable) | `/tmp/vyoma.sock` |
 
 ## 4. Contributing
 *   Ensure `cargo fmt` and `cargo clippy` pass before pushing.
