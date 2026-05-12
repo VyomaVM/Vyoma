@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex};
-use tokio::sync::{broadcast, Mutex as TokioMutex};
+use std::sync::Arc;
+use tokio::sync::{broadcast, Mutex as TokioMutex, RwLock};
 use tokio::task::JoinHandle;
 use serde::{Deserialize, Serialize};
 
@@ -18,16 +18,16 @@ pub mod recovery;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub vms: Arc<StdMutex<HashMap<String, Arc<TokioMutex<VmInstance>>>>>,
+    pub vms: Arc<TokioMutex<HashMap<String, Arc<TokioMutex<VmInstance>>>>>,
     pub cgroups: Arc<CgroupManager>,
     pub cni_manager: Arc<vyoma_core::cni::CniManager>,
     pub events_tx: broadcast::Sender<String>,
     pub wal: Arc<wal::Wal>,
     pub data_dir: String,
-    pub swarm_raft: Arc<StdMutex<SwarmRaft>>,
-    pub network_integration: Arc<StdMutex<Option<NetworkIntegration>>>,
+    pub swarm_raft: Arc<std::sync::Mutex<SwarmRaft>>,
+    pub network_integration: Arc<std::sync::Mutex<Option<NetworkIntegration>>>,
     pub timemachine: Arc<tokio::sync::RwLock<crate::timemachine::TimeMachine>>,
-    pub policy_manager: Arc<StdMutex<PolicyManager>>,
+    pub policy_manager: Arc<std::sync::Mutex<PolicyManager>>,
     pub api_token: Option<String>,
 }
 
@@ -35,7 +35,7 @@ impl AppState {
     pub fn new_test() -> Self {
         let (events_tx, _) = broadcast::channel(100);
         Self {
-            vms: Arc::new(StdMutex::new(HashMap::new())),
+            vms: Arc::new(TokioMutex::new(HashMap::new())),
             cgroups: Arc::new(CgroupManager::new()),
             cni_manager: Arc::new(vyoma_core::cni::CniManager::new(
                 std::path::PathBuf::from("/tmp/test-cni-plugins"),
@@ -44,10 +44,10 @@ impl AppState {
             events_tx,
             wal: Arc::new(wal::Wal::new_test()),
             data_dir: "/tmp/test".to_string(),
-            swarm_raft: Arc::new(StdMutex::new(SwarmRaft::new(1))),
-            network_integration: Arc::new(StdMutex::new(None)),
+            swarm_raft: Arc::new(std::sync::Mutex::new(SwarmRaft::new(1))),
+            network_integration: Arc::new(std::sync::Mutex::new(None)),
             timemachine: Arc::new(tokio::sync::RwLock::new(crate::timemachine::TimeMachine::new_test())),
-            policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
+            policy_manager: Arc::new(std::sync::Mutex::new(PolicyManager::new())),
             api_token: None,
         }
     }
