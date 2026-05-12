@@ -30,6 +30,7 @@ mod auto_snapshot;
 mod hibernation;
 mod grpc;
 mod vm_service;
+mod privdrop;
 #[cfg(feature = "chaos")]
 mod chaos;
 #[cfg(feature = "chaos")]
@@ -65,6 +66,9 @@ struct Args {
     /// Enable chaos mode for crash injection testing
     #[arg(long)]
     chaos_mode: bool,
+    /// Do not drop privileges (keep running as root). For development only.
+    #[arg(long)]
+    keep_root: bool,
 }
 
 #[tokio::main]
@@ -329,8 +333,21 @@ async fn main() {
     if let Err(e) = std::fs::set_permissions(&actual_socket_path, permissions) {
         warn!("Could not set 0660 permissions on socket: {}", e);
     }
-    
+
     info!("Daemon listening on Unix Socket {}", actual_socket_path);
+
+    // Drop privileges to vyoma user (unless --keep-root is specified)
+    if !args.keep_root {
+        match privdrop::drop_privileges() {
+            Ok(()) => info!("Privileges dropped successfully, running as user 'vyoma'"),
+            Err(e) => {
+                error!("Failed to drop privileges: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        info!("Running as root (--keep-root specified)");
+    }
 
     // Start HTTP server for dashboard if port is not 0
     if args.http_port > 0 {

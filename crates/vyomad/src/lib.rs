@@ -3,6 +3,7 @@ pub mod dns;
 pub mod grpc;
 pub mod hibernation;
 pub mod metrics;
+pub mod privdrop;
 pub mod state;
 pub mod swarm;
 pub mod timemachine;

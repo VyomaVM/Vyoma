@@ -45,6 +45,8 @@ libc = "0.2.180"
 reqwest = { version = "0.13.1", features = ["json"] }
 clap = { version = "4.4", features = ["derive"] }
 nix = { version = "0.28", features = ["signal", "process", "fs", "sched"] }
+caps = "0.5"
+thiserror = "1.0"
 
 sled = "0.34"
 hyper-util = { version = "0.1.20", features = ["server-auto", "tokio"] }
