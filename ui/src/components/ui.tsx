@@ -80,7 +80,7 @@ export function Card({ children, className, hover }: CardProps) {
 }
 
 interface StatusBadgeProps {
-  status: 'running' | 'stopped' | 'error' | 'paused';
+  status: 'running' | 'stopped' | 'error' | 'paused' | 'pending_attestation' | 'attestation_failed';
 }
 
 export function StatusBadge({ status }: StatusBadgeProps) {
@@ -89,6 +89,8 @@ export function StatusBadge({ status }: StatusBadgeProps) {
     stopped: 'bg-slate-500',
     error: 'bg-red-500',
     paused: 'bg-yellow-500',
+    pending_attestation: 'bg-yellow-400 animate-pulse',
+    attestation_failed: 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]',
   };
 
   return (

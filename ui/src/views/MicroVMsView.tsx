@@ -40,7 +40,10 @@ export function MicroVMsView() {
                 className="grid grid-cols-12 gap-4 p-4 items-center group hover:bg-slate-800/30 transition"
               >
                 <div className="col-span-1 flex justify-center">
-                  <StatusBadge status={vm.status === 'Running' ? 'running' : 'stopped'} />
+                  <StatusBadge status={vm.status?.startsWith('Running') ? 'running' :
+                                      vm.status?.startsWith('AttestationFailed') ? 'attestation_failed' :
+                                      vm.status?.startsWith('PendingAttestation') ? 'pending_attestation' :
+                                      vm.status?.startsWith('Error') ? 'error' : 'stopped'} />
                 </div>
                 <div className="col-span-4">
                   <div className="font-semibold text-white text-sm">
