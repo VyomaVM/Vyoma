@@ -106,9 +106,9 @@ micro-vm-ecosystem/
     ```
 4.  **Manage**:
     ```bash
-    ./target/release/ign ps
-    ./target/release/ign snapshot <vm-id>
-    ./target/release/ign export <vm-id> backup.tar.gz
+    ./target/release/vyoma ps
+    ./target/release/vyoma snapshot <vm-id>
+    ./target/release/vyoma export <vm-id> backup.tar.gz
     ```
 
 ## Future Work (Post v0.1.0)

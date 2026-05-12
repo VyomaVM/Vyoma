@@ -71,7 +71,7 @@ mkdir -p "$PACKAGE_DIR/usr/share/doc/vyoma"
 mkdir -p "$PACKAGE_DIR/DEBIAN"
 
 # Copy binaries
-cp "$PROJECT_ROOT/target/release/ign" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
+cp "$PROJECT_ROOT/target/release/vyoma" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 cp "$PROJECT_ROOT/target/release/vyomad" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
 
 # Copy vyoma binaries
