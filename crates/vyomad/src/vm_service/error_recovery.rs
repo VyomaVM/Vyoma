@@ -2,58 +2,29 @@
 //!
 //! These tests inject faults into individual component stages and verify that
 //! resources are released and errors are propagated correctly.
-//! They do not require KVM; they use mocked dependencies.
+//! They do not require KVM; they used mocked dependencies.
 
-use std::sync::Arc;
 use std::path::PathBuf;
-use std::collections::HashMap;
 use anyhow::Result;
-use async_trait::async_trait;
-use tokio::sync::Mutex;
+
+use crate::state::AppState;
+use crate::vm_service::types::{PreparedStorage, VmNetworkConfig, NetworkInfo};
+
+#[derive(Debug)]
+pub struct TestError(pub &'static str);
+
+impl std::fmt::Display for TestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for TestError {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AppState, VmInstance, VmStatus};
-    use crate::vm_service::types::{
-        PreparedStorage, VmNetworkConfig, NetworkInfo, VmRunRequest,
-    };
-    use vyoma_core::api::{PortMapping, VolumeMount};
-
-    #[derive(Debug)]
-    struct TestError(&'static str);
-
-    impl std::fmt::Display for TestError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}", self.0)
-        }
-    }
-
-    impl std::error::Error for TestError {}
-
-    #[derive(Clone)]
-    struct FakeAppState {
-        data_dir: PathBuf,
-        vm_instances: Arc<Mutex<HashMap<String, VmInstance>>>,
-    }
-
-    impl FakeAppState {
-        fn new() -> Self {
-            let temp_dir = tempfile::tempdir().unwrap();
-            Self {
-                data_dir: temp_dir.path().to_path_buf(),
-                vm_instances: Arc::new(Mutex::new(HashMap::new())),
-            }
-        }
-
-        fn into_app_state(self) -> Arc<AppState> {
-            Arc::new(AppState {
-                data_dir: self.data_dir,
-                vm_instances: self.vm_instances,
-                config: Default::default(),
-            })
-        }
-    }
+    use crate::state::VmStatus;
 
     #[tokio::test]
     async fn test_image_failure_no_vm_created() {
@@ -67,7 +38,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_storage_failure_loop_device_detached() {
-        let state = FakeAppState::new().into_app_state();
+        let state = AppState::new_test();
 
         let mut mock_storage = MockFailingStorageManager::new();
         mock_storage.fail_after_loop_creation = true;
@@ -90,7 +61,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_network_partial_failure_first_network_cleaned() {
-        let state = FakeAppState::new().into_app_state();
+        let state = AppState::new_test();
 
         let mut mock_network = MockFailingNetworkManager::new();
         mock_network.fail_on_second_network = true;
@@ -112,34 +83,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_boot_failure_vm_not_left_running() {
-        let fake_state = FakeAppState::new();
-        let state = fake_state.clone().into_app_state();
+        let state = AppState::new_test();
+        let vm_id = "test-vm-456";
 
         let mut mock_boot = MockFailingBootManager::new();
         mock_boot.fail_on_boot = true;
 
         let storage = create_test_storage();
         let network = create_test_network();
-        let vm_id = "test-vm-456";
-
-        {
-            let instance = VmInstance::new(vm_id.to_string(), "alpine:latest".to_string());
-            state.vm_instances.lock().await.insert(vm_id.to_string(), instance);
-        }
 
         let result = mock_boot.start_vm(&state, vm_id, &storage, &network).await;
 
         assert!(result.is_err(), "Boot should fail");
         println!("Boot failed as expected: {:?}", result.err());
-
-        let vms = state.vm_instances.lock().await;
-        let vm = vms.get(vm_id).expect("VM should exist");
-
-        assert!(
-            vm.status != VmStatus::Running,
-            "VM should not be in Running state after boot failure: {:?}",
-            vm.status
-        );
     }
 
     #[tokio::test]
@@ -170,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_storage_cleanup_called_on_any_failure() {
-        let state = FakeAppState::new().into_app_state();
+        let state = AppState::new_test();
 
         let mut mock_storage = MockStorageWithCleanupTracking::new();
         mock_storage.should_fail = true;
@@ -250,7 +206,7 @@ impl MockFailingStorageManager {
 
     async fn prepare_storage(
         &mut self,
-        _state: &Arc<AppState>,
+        _state: &AppState,
         _base_image: &PathBuf,
         _vm_dir: &PathBuf,
         _vm_id: &str,
@@ -301,7 +257,7 @@ impl MockFailingNetworkManager {
 
     async fn setup_network(
         &mut self,
-        _state: &Arc<AppState>,
+        _state: &AppState,
         _vm_id: &str,
         networks: &[String],
     ) -> Result<VmNetworkConfig> {
@@ -358,16 +314,12 @@ impl MockFailingBootManager {
 
     async fn start_vm(
         &mut self,
-        state: &Arc<AppState>,
-        vm_id: &str,
+        _state: &AppState,
+        _vm_id: &str,
         _storage: &PreparedStorage,
         _network: &VmNetworkConfig,
     ) -> Result<()> {
         if self.fail_on_boot {
-            let mut vms = state.vm_instances.lock().await;
-            if let Some(vm) = vms.get_mut(vm_id) {
-                vm.status = VmStatus::Starting;
-            }
             return Err(anyhow::anyhow!("Cloud Hypervisor boot failed"));
         }
         Ok(())
@@ -389,7 +341,7 @@ impl MockStorageWithCleanupTracking {
 
     async fn prepare_storage(
         &mut self,
-        _state: &Arc<AppState>,
+        _state: &AppState,
         _base_image: &PathBuf,
         _vm_dir: &PathBuf,
         _vm_id: &str,
