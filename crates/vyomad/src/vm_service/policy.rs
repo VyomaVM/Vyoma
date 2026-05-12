@@ -116,7 +116,7 @@ pub async fn check_policy_and_perform_attestation(
                 // Update attestation_status to verified
                 {
                     let vm_arc = {
-                        let mut vms = state.vms.lock().unwrap();
+                        let mut vms = state.vms.lock().await;
                         vms.get(&vm_id).cloned()
                     };
                     if let Some(vm_arc) = vm_arc {
@@ -456,7 +456,7 @@ async fn handle_attestation_failure(state: &Arc<AppState>, vm_id: &str, reason: 
     // Update attestation_status field
     {
         let vm_arc = {
-            let mut vms = state.vms.lock().unwrap();
+            let mut vms = state.vms.lock().await;
             vms.get(vm_id).cloned()
         };
         if let Some(vm_arc) = vm_arc {
@@ -490,7 +490,7 @@ async fn handle_attestation_failure(state: &Arc<AppState>, vm_id: &str, reason: 
 /// Force-stop a VM by removing it from the active VM map and cleaning up resources.
 async fn kill_vm(state: &Arc<AppState>, vm_id: &str) -> Result<(), String> {
     let vm_arc = {
-        let mut vms = state.vms.lock().unwrap();
+        let mut vms = state.vms.lock().await;
         vms.remove(vm_id)
     };
 
@@ -545,7 +545,7 @@ const TPM_QUOTE_PCRS: &[u32] = &[0, 1, 4, 5, 7, 9, 10, 14];
 /// Update the status of a VM in the shared state.
 pub async fn update_vm_status(state: &AppState, vm_id: &str, new_status: VmStatus) -> Result<(), String> {
     let vm_arc = {
-        let vms = state.vms.lock().unwrap();
+        let vms = state.vms.lock().await;
         vms.get(vm_id).cloned()
     };
 

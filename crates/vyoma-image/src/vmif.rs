@@ -5,7 +5,7 @@ use thiserror::Error;
 
 pub use vyoma_core::oci::OciImageConfig;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VmifManifest {
     pub schema_version: u32,
     pub created: String,
@@ -24,7 +24,7 @@ pub struct VmifManifest {
     pub confidential_computing: ConfidentialComputingInfo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct FirmwareInfo {
     #[serde(default)]
     pub firmware_type: String,
@@ -36,7 +36,7 @@ pub struct FirmwareInfo {
     pub signature: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct MeasuredBootInfo {
     #[serde(default)]
     pub pcr_policy: Option<HashMap<u32, String>>,
@@ -50,19 +50,7 @@ pub struct MeasuredBootInfo {
     pub trust_policy_key: Option<Vec<u8>>,
 }
 
-impl Default for MeasuredBootInfo {
-    fn default() -> Self {
-        Self {
-            pcr_policy: None,
-            kernel_signature: None,
-            initrd_signature: None,
-            rootfs_hash: None,
-            trust_policy_key: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ConfidentialComputingInfo {
     #[serde(default)]
     pub enabled: bool,
@@ -74,7 +62,7 @@ pub struct ConfidentialComputingInfo {
     pub intel_tdx: Option<TdxInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SevSnpInfo {
     #[serde(default)]
     pub enabled: bool,
@@ -90,7 +78,7 @@ pub struct SevSnpInfo {
     pub amd_author_key: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TdxInfo {
     #[serde(default)]
     pub enabled: bool,

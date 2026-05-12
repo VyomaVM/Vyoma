@@ -61,7 +61,7 @@ pub struct LayerDescriptor {
     pub digest: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub struct OciImageConfig {
     pub entrypoint: Option<Vec<String>>,
