@@ -2,6 +2,12 @@ import { useState, useEffect } from 'react';
 
 const API_BASE = 'http://localhost:3000';
 
+function getApiToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const meta = document.querySelector('meta[name="vyoma-api-token"]');
+  return meta?.getAttribute('content') ?? null;
+}
+
 export function useApi<T>(endpoint: string, options?: { autoFetch?: boolean }) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
@@ -12,7 +18,12 @@ export function useApi<T>(endpoint: string, options?: { autoFetch?: boolean }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await globalThis.fetch(`${API_BASE}${endpoint}`);
+      const headers: HeadersInit = {};
+      const token = getApiToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const res = await globalThis.fetch(`${API_BASE}${endpoint}`, { headers });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setData(json);
