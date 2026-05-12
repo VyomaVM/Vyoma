@@ -4,7 +4,7 @@ use axum::{
 };
 use tracing::{info, error, warn};
 use tokio::net::UnixListener;
-use tokio::sync::{broadcast, Mutex as TokioMutex};
+use tokio::sync::broadcast;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
@@ -116,7 +116,7 @@ async fn main() {
 
     // Initialize WAL (ADR-023)
     let state_dir = home.join(".vyoma").join("state");
-    let (_db, wal) = match Wal::open_or_create(&state_dir) {
+    let (db, wal) = match Wal::open_or_create(&state_dir) {
         Ok((db, wal)) => {
             info!("WAL initialized successfully");
             (db, Arc::new(wal))
@@ -141,32 +141,11 @@ async fn main() {
 
     let (events_tx, _rx) = broadcast::channel(100);
 
-    // Initialize Raft Swarm
-    let node_id = 1; // Default to node 1 for now
-    let raft_config = std::sync::Arc::new(openraft::Config {
-        heartbeat_interval: 500,
-        election_timeout_min: 1500,
-        election_timeout_max: 3000,
-        ..Default::default()
-    }.validate().unwrap_or_default());
-    let raft_network = crate::swarm::raft_network::SwarmNetwork::new();
-    let db_path = std::path::Path::new(&args.data_dir).join("raft_db");
-    let sled_db = sled::open(&db_path).expect("Failed to open Sled DB for Raft");
-    let raft_store = crate::swarm::raft_store::SwarmStore::new(wal.clone(), sled_db.clone());
-    let (log_store, state_machine) = openraft::storage::Adaptor::new(raft_store);
-    let raft = openraft::Raft::new(node_id, raft_config.clone(), raft_network, log_store, state_machine).await;
-    
-    let raft = match raft {
-        Ok(r) => Some(r),
-        Err(e) => {
-            error!("Failed to initialize Raft: {}", e);
-            None
-        }
-    };
-
-    let timemachine = Arc::new(tokio::sync::RwLock::new(timemachine::TimeMachine::new(&sled_db)));
+    let timemachine = Arc::new(tokio::sync::RwLock::new(timemachine::TimeMachine::new(&db)));
 
     let data_dir_path = std::path::PathBuf::from(&args.data_dir);
+
+    let node_id = 1u64;
 
     let network_integration = std::sync::Arc::new(std::sync::Mutex::new(Some(
         crate::swarm::NetworkIntegration::new(data_dir_path.clone())
@@ -188,7 +167,6 @@ async fn main() {
         events_tx,
         wal,
         data_dir: args.data_dir.clone(),
-        raft,
         swarm_raft,
         network_integration,
         timemachine,
@@ -233,11 +211,7 @@ async fn main() {
         .route("/vms/:id", get(handlers::inspect_vm_handler))
         .route("/swarm/init", post(handlers::swarm_init_handler))
         .route("/swarm/join", post(handlers::swarm_join_handler))
-        .route("/swarm/register", post(handlers::swarm_register_handler))
         .route("/swarm/nodes", get(handlers::swarm_nodes_handler))
-        .route("/raft/append", post(handlers::raft_append_handler))
-        .route("/raft/snapshot", post(handlers::raft_snapshot_handler))
-        .route("/raft/vote", post(handlers::raft_vote_handler))
         .route("/teleport", post(handlers::teleport_handler))
         .route("/teleport/status/:session_id", get(handlers::teleport_status_handler))
         .route("/receive-teleport", post(handlers::receive_teleport_handler))
