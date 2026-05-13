@@ -17,6 +17,7 @@ use hyper_util::server::conn::auto;
 
 use vyoma_core::cgroups::CgroupManager;
 use vyoma_core::policy::PolicyManager;
+use vyoma_core::proxy::ProxyManager;
 
 use clap::Parser;
 
@@ -248,12 +249,26 @@ async fn main() {
     for rvm in recovered_vms {
         if matches!(rvm.status, crate::state::recovery::VmRecoveryStatus::Running) {
             info!("Adopting recovered VM: {}", rvm.vm_id);
-            
+
             let vm_dir = home.join(".vyoma").join("vms").join(&rvm.vm_id);
             let ch_socket = vm_dir.join("ch.sock").to_string_lossy().to_string();
-            
+
             let vmm = vyoma_core::vmm::VmmManager::new(&ch_socket);
-            
+
+            let mut proxy_tasks = Vec::new();
+            for port in &rvm.state.ports {
+                let task = ProxyManager::start_proxy(
+                    port.host_port,
+                    rvm.state.ip_address.clone(),
+                    port.vm_port,
+                );
+                proxy_tasks.push(task);
+            }
+
+            if !rvm.state.volumes.is_empty() {
+                warn!("VM {} has volumes but virtiofsd cannot be restarted after daemon restart - manual remount may be required", rvm.vm_id);
+            }
+
             let vm_instance = crate::state::VmInstance {
                 vmm,
                 id: rvm.vm_id.clone(),
@@ -265,7 +280,7 @@ async fn main() {
                 loop_devices: rvm.state.loop_devices.clone(),
                 cow_file_path: rvm.state.cow_file_path.clone(),
                 ip_address: rvm.state.ip_address.clone(),
-                proxy_tasks: vec![],
+                proxy_tasks,
                 fs_managers: vec![],
                 vtpm_manager: None,
                 cgroup_path: rvm.state.cgroup_path.clone(),
