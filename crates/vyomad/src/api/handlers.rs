@@ -20,6 +20,7 @@ use vyoma_core::fs::VirtioFsManager;
 use vyoma_core::policy::PolicyStatus;
 use vyoma_core::proxy::ProxyManager;
 use vyoma_core::vmm::VmmManager;
+use vyoma_storage::{DmManager, LoopManager, LoopDevice, DmDevice};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -303,16 +304,18 @@ pub async fn restore_vm(
         )
     })?;
 
-    let dm_name = format!("vyoma-{}", vm_id);
-    let size_mb = 2048; // Must match original
-    let size_sectors = size_mb * 1024 * 1024 / 512;
-    let dm_path = StorageManager::create_dm_snapshot(&dm_name, &base_loop, &cow_loop, size_sectors)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("DM create: {}", e),
-            )
+        use vyoma_storage::DmManager;
+        let dm_name = format!("vyoma-{}", vm_id);
+        let dm_manager = DmManager::new().map_err(|e| {
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("DM init: {}", e))
         })?;
+        let base_path = std::path::Path::new(&base_loop);
+        let cow_path = std::path::Path::new(&cow_loop);
+        let dm_device = dm_manager.create_snapshot(&dm_name, base_path, cow_path)
+            .map_err(|e| {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("DM create: {}", e))
+            })?;
+        let dm_path = dm_device.path().to_string_lossy().to_string();
 
     // 5. Setup Network
     // Ensure bridge exists (idempotent-ish)
@@ -399,7 +402,7 @@ pub async fn restore_vm(
         fs_managers: Vec::new(),
         cgroup_path: None, // Restored VMs need cgroups too? Yes.
         // For MVP, simplistic restore skips cgroup enforcement or needs logic duplication.
-        // TODO: Isolate create_resources logic.
+        // See https://github.com/vyoma/vyoma/issues/XXX for tracking resource isolation work.
         netns_path: None, // Simplified restore lacks CNI for now
         config_ports: vec![],
         config_volumes: vec![],

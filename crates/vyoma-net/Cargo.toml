@@ -15,6 +15,8 @@ rtnetlink = "0.14"
 netlink-packet-route = "0.19"
 futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util", "net"] }
+nix = { version = "0.27", features = ["ioctl"] }
+libc = "0.2"
 boringtun = { version = "0.7", features = ["device"] }
 base64 = "0.22"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
