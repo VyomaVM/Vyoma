@@ -951,7 +951,7 @@ pub async fn swarm_init_handler(State(state): State<AppState>) -> Result<Json<In
     let node_id = 1u64;
     let addr = format!("{}:7946", get_outbound_ip());
     
-    let mut swarm_raft = state.swarm_raft.lock().unwrap();
+    let mut swarm_raft = state.swarm_raft.lock().await;
     swarm_raft.bootstrap(addr, format!("init_key_{}", node_id), None, None)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SwarmRaft Error: {}", e)))?;
     
@@ -998,7 +998,7 @@ pub async fn swarm_join_handler(
     let subnet_id = ((payload.node_id % 254) + 1) as u8;
     
     {
-        let mut swarm_raft = state.swarm_raft.lock().unwrap();
+        let mut swarm_raft = state.swarm_raft.lock().await;
         if !swarm_raft.is_initialized() {
             let addr = format!("{}:7946", get_outbound_ip());
             swarm_raft.bootstrap(addr, format!("init_key_{}", payload.node_id), None, None)
@@ -1014,7 +1014,7 @@ pub async fn swarm_join_handler(
     }
     
     let peers: Vec<swarm::NodeInfo> = {
-        let swarm_raft = state.swarm_raft.lock().unwrap();
+        let swarm_raft = state.swarm_raft.lock().await;
         swarm_raft.get_nodes().iter().map(|n| (*n).clone()).collect()
     };
     
@@ -1039,7 +1039,7 @@ pub struct SwarmNodeInfo {
 }
 
 pub async fn swarm_nodes_handler(State(state): State<AppState>) -> Json<Vec<SwarmNodeInfo>> {
-    let swarm_raft = state.swarm_raft.lock().unwrap();
+    let swarm_raft = state.swarm_raft.lock().await;
     
     let nodes: Vec<SwarmNodeInfo> = swarm_raft.get_nodes().iter().map(|n| {
         SwarmNodeInfo {
