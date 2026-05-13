@@ -56,25 +56,40 @@ impl Recovery {
                 continue;
             }
 
-            let state_file = vm_dir.join("state.json");
-            if !state_file.exists() {
-                warn!("No state.json for VM {}, cannot recover", vm_id);
-                continue;
-            }
-
-            let state_content = match std::fs::read_to_string(&state_file) {
-                Ok(c) => c,
-                Err(e) => {
-                    error!("Failed to read state for {}: {}", vm_id, e);
-                    continue;
+let state_file = vm_dir.join("state.json");
+            let vm_state = if !state_file.exists() {
+                warn!("No state.json for VM {}, attempting to reconstruct from directory", vm_id);
+                match Self::reconstruct_vm_state(&vm_id, &vm_dir).await {
+                    Ok(state) => {
+                        info!("Successfully reconstructed state for VM {}", vm_id);
+                        state
+                    }
+                    Err(e) => {
+                        error!("Failed to reconstruct state for VM {}: {}", vm_id, e);
+                        let ch_socket = vm_dir.join("ch.sock");
+                        if ch_socket.exists() {
+                            warn!("VM {} CH socket still present, skipping cleanup to preserve for manual inspection", vm_id);
+                            continue;
+                        }
+                        error!("Catastrophic: VM {} has no state.json and CH socket is gone, manual intervention required", vm_id);
+                        continue;
+                    }
                 }
-            };
-            
-            let vm_state: VmState = match serde_json::from_str(&state_content) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("Failed to parse state for {}: {}", vm_id, e);
-                    continue;
+            } else {
+                let state_content = match std::fs::read_to_string(&state_file) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!("Failed to read state for {}: {}", vm_id, e);
+                        continue;
+                    }
+                };
+
+                match serde_json::from_str::<super::VmState>(&state_content) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!("Failed to parse state for {}: {}", vm_id, e);
+                        continue;
+                    }
                 }
             };
 
@@ -170,5 +185,37 @@ impl Recovery {
 
         info!("Orphaned resource cleanup complete for {}", state.id);
         Ok(())
+    }
+
+    async fn reconstruct_vm_state(vm_id: &str, vm_dir: &Path) -> Result<super::VmState> {
+        let ch_socket = vm_dir.join("ch.sock");
+        if !ch_socket.exists() {
+            return Err(anyhow!("CH socket not found, cannot reconstruct state"));
+        }
+
+        let status = Self::check_vm_status(vm_id, vm_dir).await;
+        if !matches!(status, VmRecoveryStatus::Running) {
+            return Err(anyhow!("VM is not running, cannot reconstruct state"));
+        }
+
+        Ok(super::VmState {
+            id: vm_id.to_string(),
+            tap_name: String::new(),
+            dm_name: String::new(),
+            loop_devices: Vec::new(),
+            cow_file_path: String::new(),
+            ip_address: "10.0.0.2".to_string(),
+            cgroup_path: None,
+            netns_path: None,
+            ports: Vec::new(),
+            volumes: Vec::new(),
+            hostname: None,
+            labels: std::collections::HashMap::new(),
+            base_image_path: String::new(),
+            vcpu: 0,
+            mem_size_mib: 0,
+            networks: Vec::new(),
+            status: super::VmStatus::Running,
+        })
     }
 }
