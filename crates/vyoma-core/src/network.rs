@@ -60,6 +60,11 @@ impl NetworkManager {
     pub fn setup_nat(bridge_cidr: &str) -> Result<()> {
         info!("Enabling NAT/Masquerade for source {}", bridge_cidr);
         
+        // Enable IP forwarding by writing to procfs (native approach)
+        if let Err(e) = std::fs::write("/proc/sys/net/ipv4/ip_forward", "1\n") {
+            warn!("Failed to enable ip_forward via procfs: {}", e);
+        }
+
         let check_status = Command::new("iptables")
             .args(&[
                 "-t", "nat", "-C", "POSTROUTING",
@@ -92,15 +97,6 @@ impl NetworkManager {
             }
         } else {
             info!("NAT rule for {} already exists.", bridge_cidr);
-        }
-
-        let output = Command::new("sysctl")
-            .args(&["-w", "net.ipv4.ip_forward=1"])
-            .output()?;
-
-        if !output.status.success() {
-             let stderr = String::from_utf8_lossy(&output.stderr);
-             warn!("Failed to enable ip_forward: {}", stderr);
         }
 
         Ok(())
