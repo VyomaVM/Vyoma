@@ -17,7 +17,9 @@ mod measured_boot_tests;
 mod error_recovery;
 
 use std::sync::Arc;
+use std::panic::AssertUnwindSafe;
 use anyhow::{Context, Result};
+use futures::FutureExt;
 use tracing::{error, info, warn};
 
 use crate::state::{AppState, VmInstance, VmStatus, wal::WalEntry};
@@ -191,15 +193,21 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         info!("Measured boot attestation required for VM {}, TPM socket: {:?}", vm_id, tpm_socket_path);
         let handle = tokio::spawn(async move {
             let vm_id_for_log = vm_id_clone.clone();
-            match policy::check_policy_and_perform_attestation(
-                state_clone,
-                vm_id_clone,
-                vm_dir_clone,
-                image_name,
-                tpm_socket_path,
-            ).await {
-                Ok(()) => info!("Attestation completed successfully for VM {}", vm_id_for_log),
-                Err(e) => error!("Attestation failed for VM {}: {}", vm_id_for_log, e),
+            let inner = AssertUnwindSafe(async {
+                policy::check_policy_and_perform_attestation(
+                    state_clone,
+                    vm_id_clone,
+                    vm_dir_clone,
+                    image_name,
+                    tpm_socket_path,
+                ).await
+            });
+            let result = inner.catch_unwind().await;
+
+            match result {
+                Ok(Ok(())) => info!("Attestation completed successfully for VM {}", vm_id_for_log),
+                Ok(Err(e)) => error!("Attestation failed for VM {}: {}", vm_id_for_log, e),
+                Err(panic_info) => error!("Attestation task panicked for VM {}: {:?}", vm_id_for_log, panic_info),
             }
         });
         Some(handle)
