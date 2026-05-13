@@ -4,6 +4,10 @@ use netlink_packet_route::link::State;
 use netlink_packet_route::link::LinkAttribute;
 use futures::stream::TryStreamExt;
 use std::process::Command;
+use std::os::unix::io::{AsRawFd, RawFd};
+use libc;
+use std::mem;
+use std::ffi::CString;
 
 use crate::error::{NetworkError, Result};
 
@@ -33,21 +37,45 @@ impl TapManager {
         if name.is_empty() {
             return Err(NetworkError::InvalidInput("TAP name cannot be empty".to_string()));
         }
-        
-        // Use ip tuntap natively-ish via fallback, because rust rtnetlink does not fully map the tuntap TUNSETIFF ioctls cleanly yet without nix/libc crates.
-        let output = Command::new("ip")
-            .args(&["tuntap", "add", name, "mode", "tap"])
-            .output()
+
+        // Create TAP device using native approach with TUNSETIFF ioctl
+        let tun_tap_fd = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/net/tun")
             .map_err(|e| NetworkError::Io(e))?;
-        
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("File exists") {
-                return Ok(name.to_string()); // Already exists, that's fine
-            }
-            return Err(NetworkError::Netlink(stderr.to_string()));
+
+        let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
+        // Set interface name (null-terminated, max IFNAMSIZ-1 chars)
+        let name_bytes = name.as_bytes();
+        if name_bytes.len() >= libc::IFNAMSIZ as usize {
+            let _ = unsafe { libc::close(tun_tap_fd.as_raw_fd()) };
+            return Err(NetworkError::InvalidInput(
+                format!("TAP name too long (max {} bytes)", libc::IFNAMSIZ as usize - 1)
+            ));
         }
-        
+        // Initialize the ifr_name array with zeros (for null termination)
+        let mut ifr_name: [i8; libc::IFNAMSIZ as usize] = [0; libc::IFNAMSIZ as usize];
+        for (i, &byte) in name_bytes.iter().enumerate() {
+            ifr_name[i] = byte as i8;
+        }
+        ifr.ifr_name = ifr_name;
+
+        // Set flags: IFF_TAP | IFF_NO_PI
+        // IFF_TAP: TAP device (as opposed to TUN)
+        // IFF_NO_PI: Don't provide packet information
+        ifr.ifr_ifru.ifru_flags = (libc::IFF_TAP | libc::IFF_NO_PI) as i16;
+
+        // ioctl(fd, TUNSETIFF, &ifr)
+        let res = unsafe {
+            libc::ioctl(tun_tap_fd.as_raw_fd(), libc::TUNSETIFF, &mut ifr as *mut _ as *mut libc::c_void)
+        };
+        let _ = unsafe { libc::close(tun_tap_fd.as_raw_fd()) };
+
+        if res == -1 {
+            return Err(NetworkError::Io(std::io::Error::last_os_error()));
+        }
+
         Ok(name.to_string())
     }
     
