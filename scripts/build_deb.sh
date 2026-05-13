@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="2.1.2"
+VERSION="2.7.0"
 ARCH="amd64"
 PKG_NAME="vyoma"
 WORK_DIR="target/debian/${PKG_NAME}_${VERSION}_${ARCH}"

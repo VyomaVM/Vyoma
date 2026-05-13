@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="2.1.2"
+VERSION="2.7.0"
 WORK_DIR="target/rpm"
 SOURCES_DIR="${WORK_DIR}/SOURCES/vyoma-${VERSION}"
 
