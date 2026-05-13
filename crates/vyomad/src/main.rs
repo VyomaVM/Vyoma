@@ -107,7 +107,7 @@ struct Args {
     /// Can also be set via VYOMA_API_TOKEN environment variable
     #[arg(long)]
     api_token: Option<String>,
-    /// Data directory containing kernel and firecracker binaries
+    /// Data directory containing kernel and cloud-hypervisor binaries
     #[arg(short, long, default_value = "/var/lib/vyoma")]
     data_dir: String,
     /// Enable chaos mode for crash injection testing

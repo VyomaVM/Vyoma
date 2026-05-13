@@ -1298,7 +1298,7 @@ async fn run_doctor() -> Result<()> {
     }
 
     // 3. Binaries
-    if !check("Firecracker Binary", check_binary("firecracker"), true) {
+    if !check("Cloud Hypervisor Binary", check_binary("cloud-hypervisor"), true) {
         all_passed = false;
     }
     if !check("Virtiofsd Binary", check_binary("virtiofsd"), true) {
@@ -1306,7 +1306,7 @@ async fn run_doctor() -> Result<()> {
     }
 
     // 4. Networking
-    if !check("Vyoma Bridge (ign0)", check_bridge(), false) {} // Warn only
+    if !check("Vyoma Bridge (vyoma0)", check_bridge("vyoma0"), false) {} // Warn only
 
     // 5. Rootless Tools
     if !check("debugfs (e2fsprogs)", check_binary("debugfs"), false) {} // Needed for rootless build
@@ -1381,11 +1381,11 @@ fn command_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn check_bridge() -> Result<bool> {
+fn check_bridge(bridge_name: &str) -> Result<bool> {
     let output = std::process::Command::new("ip")
         .arg("link")
         .arg("show")
-        .arg("ign0")
+        .arg(bridge_name)
         .output()?;
     Ok(output.status.success())
 }
