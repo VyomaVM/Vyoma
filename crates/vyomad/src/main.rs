@@ -217,7 +217,7 @@ async fn main() {
     let callback = crate::swarm::create_network_callback(net_integration);
     swarm_raft.set_side_effect_callback(callback);
     
-    let swarm_raft = Arc::new(std::sync::Mutex::new(swarm_raft));
+    let swarm_raft = Arc::new(tokio::sync::Mutex::new(swarm_raft));
     
     // Get API token from CLI arg or environment variable
     let api_token = args.api_token.clone().or_else(|| std::env::var("VYOMA_API_TOKEN").ok());
