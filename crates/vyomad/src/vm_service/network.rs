@@ -2,25 +2,20 @@
 //!
 //! # Network Namespace Handling
 //!
-//! Network namespace creation currently uses the `ip` command rather than native Rust.
-//! This is a known limitation and could be improved by:
-//! - Using the `netlink-packet-route` crate for direct netlink operations
-//! - Implementing a `NetNsManager` trait in `vyoma-net` crate
-//! - Using the `rtnetlink` crate for network namespace management
+//! Network namespace creation now uses vyoma-net's NetNsManager module.
+//! This provides a cleaner API while still using ip netns under the hood
+//! for persistent namespace management.
 //!
-//! The current implementation:
+//! The implementation:
 //! - Does NOT use sudo - relies on CAP_NET_ADMIN capability instead
-//! - Uses subprocess for ip netns add/delete
-//! - Will be replaced with native Rust when vyoma-net has netns support
+//! - Uses vyoma-net's netns module for consistent API
 
 use anyhow::{Context, Result};
-use std::process::Command;
 use tracing::{info, warn};
+use vyoma_net::{create_netns, delete_netns};
 
 use super::types::{VmNetworkConfig, NetworkInfo};
 use crate::state::AppState;
-
-const NETNS_BINARY: &str = "ip";
 
 pub async fn setup_network(
     state: &AppState,
@@ -41,14 +36,9 @@ async fn setup_privileged_network(
     std::fs::create_dir_all("/var/run/netns")
         .context("Failed to create /var/run/netns")?;
 
-    let output = Command::new(NETNS_BINARY)
-        .args(&["netns", "add", &netns_name])
-        .output()
-        .context("Failed to create netns")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        warn!("netns creation warning: {}", stderr);
+    // Use vyoma-net's netns module instead of direct ip command
+    if let Err(e) = create_netns(&netns_name) {
+        warn!("netns creation warning: {}", e);
     }
 
     let networks_to_attach: Vec<String> = if networks.is_empty() {
@@ -120,9 +110,8 @@ pub async fn cleanup_network(
             let _ = state.cni_manager.del(None, vm_id, ns, "eth0");
         }
 
-        let _ = Command::new(NETNS_BINARY)
-            .args(&["netns", "delete", &netns_name])
-            .output();
+        // Use vyoma-net's netns module for cleanup
+        let _ = delete_netns(&netns_name);
     }
     Ok(())
 }
