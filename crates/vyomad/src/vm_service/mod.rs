@@ -190,8 +190,6 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
     let attestation_handle = if needs_attestation {
         info!("Measured boot attestation required for VM {}, TPM socket: {:?}", vm_id, tpm_socket_path);
         let handle = tokio::spawn(async move {
-            // Run attestation - any panic will propagate and could crash the daemon
-            // The JoinHandle is stored so it can be aborted during VM cleanup
             let vm_id_for_log = vm_id_clone.clone();
             match policy::check_policy_and_perform_attestation(
                 state_clone,
@@ -270,7 +268,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
     })
 }
 
-fn setup_cgroups(
+pub fn setup_cgroups(
     state: &AppState,
     vm_id: &str,
     vcpu: u32,

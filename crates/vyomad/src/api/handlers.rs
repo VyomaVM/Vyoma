@@ -400,9 +400,17 @@ pub async fn restore_vm(
         proxy_tasks,
 
         fs_managers: Vec::new(),
-        cgroup_path: None, // Restored VMs need cgroups too? Yes.
-        // For MVP, simplistic restore skips cgroup enforcement or needs logic duplication.
-        // See https://github.com/vyoma/vyoma/issues/XXX for tracking resource isolation work.
+        cgroup_path: {
+            let default_vcpu = 2u32;
+            let default_mem_mib = 1024u32;
+            match crate::vm_service::setup_cgroups(&state, &vm_id, default_vcpu, default_mem_mib) {
+                Ok(path) => path,
+                Err(e) => {
+                    warn!("Failed to setup cgroups for restored VM: {}", e);
+                    None
+                }
+            }
+        },
         netns_path: None, // Simplified restore lacks CNI for now
         config_ports: vec![],
         config_volumes: vec![],
