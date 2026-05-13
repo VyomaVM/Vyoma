@@ -191,11 +191,12 @@ Description: Vyoma - MicroVM Ecosystem
 EOF
 
 # 6. Create Post-Install Script
+# $2 = previous version (empty if fresh install)
 cat <<'POSTINST' > "${WORK_DIR}/DEBIAN/postinst"
 #!/bin/bash
 set -e
 
-# Create vyoma user (for socket ownership)
+# Create vyoma user (for socket ownership) - idempotent
 if ! id vyoma >/dev/null 2>&1; then
     useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Vyoma MicroVM Daemon" vyoma 2>/dev/null || true
 fi
@@ -225,10 +226,19 @@ chmod 0775 /run/vyoma 2>/dev/null || true
 rm -rf /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
 ln -sf /usr/lib/vyoma/cni/bin /var/lib/vyoma/.vyoma/cni/bin
 
-# Enable and start service
+# Enable service (idempotent - won't fail if already enabled)
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable vyomad.service 2>/dev/null || true
-systemctl start vyomad.service 2>/dev/null || true
+
+# Only start on fresh install ($2 = previous version, empty if first install)
+# On upgrade, use try-restart to restart only if already running
+if [ -z "$2" ]; then
+    # Fresh install - start the service
+    systemctl start vyomad.service 2>/dev/null || true
+else
+    # Upgrade - restart only if already running (won't disrupt if stopped)
+    systemctl try-restart vyomad.service 2>/dev/null || true
+fi
 
 echo "Vyoma v${VERSION} installed successfully!"
 echo "Open http://localhost:3000 for the dashboard"
