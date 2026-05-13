@@ -232,6 +232,7 @@ chown root:vyoma /run/vyoma 2>/dev/null || true
 chmod 0775 /run/vyoma 2>/dev/null || true
 
 # Setup CNI plugins directory (symlink from system data dir to package location)
+mkdir -p /var/lib/vyoma/.vyoma/cni 2>/dev/null || true
 rm -rf /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
 ln -sf /usr/lib/vyoma/cni/bin /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
 
