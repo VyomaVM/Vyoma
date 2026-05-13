@@ -20,6 +20,50 @@ use vyoma_core::policy::PolicyManager;
 
 use clap::Parser;
 
+fn check_dependencies(data_dir: &str) -> Result<(), String> {
+    let mut missing = Vec::new();
+
+    // Check for iptables
+    if std::process::Command::new("which")
+        .arg("iptables")
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(true)
+    {
+        // Try alternative paths
+        if !std::path::Path::new("/sbin/iptables").exists()
+            && !std::path::Path::new("/usr/sbin/iptables").exists()
+        {
+            missing.push("iptables (required for NAT networking)");
+        }
+    }
+
+    // Check for KVM device
+    if !std::path::Path::new("/dev/kvm").exists() {
+        missing.push("/dev/kvm (KVM kernel module required for virtualization)");
+    }
+
+    // Check for bundled cloud-hypervisor
+    let ch_path = std::path::Path::new(data_dir).join("bin/cloud-hypervisor");
+    if !ch_path.exists() {
+        // Check in common fallback locations
+        let fallback_paths = vec![
+            "/usr/bin/cloud-hypervisor",
+            "/usr/local/bin/cloud-hypervisor",
+        ];
+        let found = fallback_paths.iter().any(|p| std::path::Path::new(p).exists());
+        if !found {
+            missing.push("cloud-hypervisor (not found in data_dir/bin or /usr/bin)");
+        }
+    }
+
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(missing.join("\n  - "))
+    }
+}
+
 mod dns;
 mod ui;
 mod state;
@@ -83,6 +127,13 @@ async fn main() {
 
     // Parse Args (Handles --help / --version)
     let args = Args::parse();
+
+    // Check critical dependencies before starting
+    if let Err(e) = check_dependencies(&args.data_dir) {
+        error!("Missing dependencies: {}", e);
+        error!("Please install the required dependencies and try again.");
+        std::process::exit(1);
+    }
 
     // Root requirement stripped in favor of AmbientCapabilities (ADR-022)
 

@@ -17,6 +17,8 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 #[cfg(feature = "chaos")]
 use serde::{Serialize, Deserialize};
+#[cfg(feature = "chaos")]
+use vyoma_storage::{DmManager, LoopManager, LoopDevice};
 
 #[cfg(feature = "chaos")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,24 +195,27 @@ fn cleanup_tap_interfaces() {
 
 #[cfg(feature = "chaos")]
 fn cleanup_dm_devices() {
-    if let Ok(entries) = fs::read_dir("/dev/mapper") {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("vyoma-") || name.contains("vm-") {
-                let _ = Command::new("dmsetup").args(["remove", &name]).output();
+    // Use native DmManager instead of dmsetup CLI
+    if let Ok(dm_manager) = vyoma_storage::DmManager::new() {
+        if let Ok(entries) = fs::read_dir("/dev/mapper") {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("vyoma-") || name.contains("vm-") {
+                    let _ = dm_manager.remove_snapshot(&name);
+                }
             }
         }
     }
 
+    // Cleanup loop devices using losetup command (chaos test cleanup - simplified approach)
+    // Note: Production code uses native LoopManager; this is for test cleanup only
     if let Ok(entries) = fs::read_dir("/dev") {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("loop") {
-                if let Ok(metadata) = entry.metadata() {
-                    if metadata.is_block_device() {
-                        let _ = Command::new("losetup").args(["-d", &format!("/dev/{}", name)]).output();
-                    }
-                }
+            if name.starts_with("loop") && name.len() > 4 {
+                // Try to detach if it looks like a loop device (loop0, loop1, etc.)
+                let device = format!("/dev/{}", name);
+                let _ = Command::new("losetup").args(["-d", &device]).output();
             }
         }
     }
@@ -218,17 +223,14 @@ fn cleanup_dm_devices() {
 
 #[cfg(feature = "chaos")]
 fn cleanup_loop_devices() {
-    let output = Command::new("losetup").args(["-a"]).output();
-    if let Ok(output) = output {
-        let output_str = String::from_utf8_lossy(&output.stdout);
-        for line in output_str.lines() {
-            if line.contains("vyoma") || line.contains("vm-") {
-                if let Some(device) = line.split(':').next() {
-                    let device = device.trim();
-                    if !device.is_empty() {
-                        let _ = Command::new("losetup").args(["-d", device]).output();
-                    }
-                }
+    // Cleanup loop devices using losetup command (chaos test cleanup - simplified approach)
+    // Note: Production code uses native LoopManager; this is for test cleanup only
+    if let Ok(entries) = fs::read_dir("/dev") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("loop") && name.len() > 4 {
+                let device = format!("/dev/{}", name);
+                let _ = Command::new("losetup").args(["-d", &device]).output();
             }
         }
     }
