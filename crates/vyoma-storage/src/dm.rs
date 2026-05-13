@@ -104,15 +104,8 @@ pub fn create_snapshot(
             .table_load(&DevId::Name(&snap_name), &snap_table, DmOptions::default())
             .map_err(|e| StorageError::Other(format!("Failed to load snapshot table via dm API: {}", e)))?;
 
-        // Activate both devices by calling device_suspend without DM_SUSPEND flag.
-        // device_suspend() with no flags = RESUMES/activates the device for I/O.
-        // device_suspend() with DM_SUSPEND flag = SUSPENDS/freezes I/O.
-        self.dm
-            .device_suspend(&DevId::Name(&origin_name), DmOptions::default())
-            .map_err(|e| StorageError::Other(format!("Failed to activate origin device: {}", e)))?;
-        self.dm
-            .device_suspend(&DevId::Name(&snap_name), DmOptions::default())
-            .map_err(|e| StorageError::Other(format!("Failed to activate snapshot device: {}", e)))?;
+        self.activate_device(&origin_name)?;
+        self.activate_device(&snap_name)?;
 
         let path = PathBuf::from(format!("/dev/mapper/{}", name));
         Ok(DmDevice::new(name.to_string(), path))
@@ -156,6 +149,14 @@ pub fn create_snapshot(
             Ok(_) => Ok(true),
             Err(_) => Ok(false),
         }
+    }
+
+    fn activate_device(&self, name: &DmName) -> Result<()> {
+        let _ = self
+            .dm
+            .device_suspend(&DevId::Name(name), DmOptions::default())
+            .map_err(|e| StorageError::Other(format!("Failed to activate device {}: {}", name, e)))?;
+        Ok(())
     }
 }
 
