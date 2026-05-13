@@ -224,7 +224,10 @@ impl VmInstance {
         }
 
         // 3. Remove DM Device
-        if let Err(e) = StorageManager::remove_dm_device(&self.dm_name) {
+        if let Err(e) = (|| -> Result<(), vyoma_storage::StorageError> {
+            let dm_manager = vyoma_storage::DmManager::new()?;
+            dm_manager.remove_snapshot(&self.dm_name)
+        })() {
             error!("Failed to remove DM {}: {}", self.dm_name, e);
         }
 
