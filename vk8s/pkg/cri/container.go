@@ -40,7 +40,7 @@ func (s *VyomaCriServer) CreateContainer(ctx context.Context, req *pb.CreateCont
 
 	containerID := fmt.Sprintf("%s-%s", pod.VMID, metadata.GetName())
 
-	agentCli := agent.NewTCPClient(s.getVMIP(pod.VMID))
+	agentCli := agent.NewTCPClient(s.getVMIP(ctx, pod.VMID))
 	if err := agentCli.Connect(ctx); err != nil {
 		s.logError(ctx, "CreateContainer.agentConnect", err)
 	}
@@ -94,7 +94,7 @@ func (s *VyomaCriServer) StartContainer(ctx context.Context, req *pb.StartContai
 		return nil, errorf(codes.NotFound, "pod not found for container: %s", containerID)
 	}
 
-	agentCli := agent.NewTCPClient(s.getVMIP(pod.VMID))
+	agentCli := agent.NewTCPClient(s.getVMIP(ctx, pod.VMID))
 	if err := agentCli.Connect(ctx); err != nil {
 		return nil, errorf(codes.Internal, "connect to VM agent: %v", err)
 	}
@@ -153,7 +153,7 @@ func (s *VyomaCriServer) StopContainer(ctx context.Context, req *pb.StopContaine
 	s.mu.RUnlock()
 
 	if ok {
-		agentCli := agent.NewTCPClient(s.getVMIP(pod.VMID))
+		agentCli := agent.NewTCPClient(s.getVMIP(ctx, pod.VMID))
 		if err := agentCli.Connect(ctx); err == nil {
 			defer agentCli.Close()
 
@@ -187,7 +187,7 @@ func (s *VyomaCriServer) RemoveContainer(ctx context.Context, req *pb.RemoveCont
 		s.mu.RUnlock()
 
 		if podOk {
-			agentCli := agent.NewTCPClient(s.getVMIP(pod.VMID))
+			agentCli := agent.NewTCPClient(s.getVMIP(ctx, pod.VMID))
 			if err := agentCli.Connect(ctx); err == nil {
 				defer agentCli.Close()
 
@@ -241,7 +241,7 @@ func (s *VyomaCriServer) ContainerStatus(ctx context.Context, req *pb.ContainerS
 		s.mu.RUnlock()
 
 		if ok {
-			agentCli := agent.NewTCPClient(s.getVMIP(pod.VMID))
+			agentCli := agent.NewTCPClient(s.getVMIP(ctx, pod.VMID))
 			if err := agentCli.Connect(ctx); err == nil {
 				defer agentCli.Close()
 
@@ -355,8 +355,8 @@ func (s *VyomaCriServer) ReopenContainerLog(ctx context.Context, req *pb.ReopenC
 	return &pb.ReopenContainerLogResponse{}, nil
 }
 
-func (s *VyomaCriServer) getVMIP(vmID string) string {
-	return "10.0.0.2"
+func (s *VyomaCriServer) getVMIP(ctx context.Context, vmID string) string {
+	return s.getVMIPWithLookup(ctx, vmID)
 }
 
 func (s *VyomaCriServer) getVMIPWithLookup(ctx context.Context, vmID string) string {
