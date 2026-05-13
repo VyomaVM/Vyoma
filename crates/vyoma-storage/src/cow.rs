@@ -63,27 +63,34 @@ impl LoopManager {
                     return Ok(());
                 }
             };
-            let path = std::path::Path::new(path_str);
-            let metadata = match std::fs::metadata(path) {
-                Ok(m) => m,
-                Err(_) => {
-                    info!("Loop device {} already removed; nothing to detach", path_str);
+            #[cfg(unix)]
+            {
+                let path = std::path::Path::new(path_str);
+                let metadata = match std::fs::metadata(path) {
+                    Ok(m) => m,
+                    Err(_) => {
+                        info!("Loop device {} already removed; nothing to detach", path_str);
+                        return Ok(());
+                    }
+                };
+                if !metadata.file_type().is_block_device() {
+                    warn!("Path {} is not a block device; skipping detach", path_str);
                     return Ok(());
                 }
-            };
-            if !metadata.file_type().is_block_device() {
-                warn!("Path {} is not a block device; skipping detach", path_str);
-                return Ok(());
-            }
-            match loopdev::LoopDevice::open(path_str) {
-                Ok(ld) => {
-                    if let Err(e) = ld.detach() {
-                        warn!("Failed to detach loop device {} via fallback: {}; assuming it is already freed", path_str, e);
+                match loopdev::LoopDevice::open(path_str) {
+                    Ok(ld) => {
+                        if let Err(e) = ld.detach() {
+                            warn!("Failed to detach loop device {} via fallback: {}; assuming it is already freed", path_str, e);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to open loop device {} via fallback: {}; assuming already detached", path_str, e);
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to open loop device {} via fallback: {}; assuming already detached", path_str, e);
-                }
+            }
+            #[cfg(not(unix))]
+            {
+                warn!("Loop device detachment not supported on non-Unix platforms");
             }
         }
         
