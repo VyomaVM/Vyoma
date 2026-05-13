@@ -1261,7 +1261,7 @@ pub async fn teleport_handler(
         // Get local WireGuard IP for trusted source restriction
         let local_wg_ip = state.network_integration
             .lock()
-            .unwrap()
+            .await
             .as_ref()
             .and_then(|ni| ni.get_local_wireguard_ip());
         

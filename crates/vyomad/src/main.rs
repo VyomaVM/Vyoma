@@ -206,13 +206,13 @@ async fn main() {
 
     let node_id = 1u64;
 
-    let network_integration = std::sync::Arc::new(std::sync::Mutex::new(Some(
+    let network_integration = Arc::new(tokio::sync::Mutex::new(Some(
         crate::swarm::NetworkIntegration::new(data_dir_path.clone())
     )));
 
     let mut swarm_raft = crate::swarm::SwarmRaft::new(node_id);
-    
-    let net_integration = network_integration.lock().unwrap().as_ref().unwrap().clone();
+
+    let net_integration = network_integration.blocking_lock().as_ref().unwrap().clone();
     let callback = crate::swarm::create_network_callback(net_integration);
     swarm_raft.set_side_effect_callback(callback);
     
