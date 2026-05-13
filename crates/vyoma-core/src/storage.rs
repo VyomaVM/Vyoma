@@ -109,51 +109,21 @@ Ok(())
         Ok(())
     }
 
-    pub fn create_dm_snapshot(name: &str, base_dev: &str, cow_dev: &str, size_sectors: u64) -> Result<String> {
-        // TODO(technical-debt): Migrate to devicemapper crate Rust API instead of dmsetup CLI
-        info!("Creating Device Mapper snapshot '{}'", name);
-        
-        let table = format!("0 {} snapshot {} {} N 8", size_sectors, base_dev, cow_dev);
-        
-        let mut child = Command::new("dmsetup")
-            .arg("create")
-            .arg(name)
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| anyhow!("Failed to spawn dmsetup: {}", e))?;
+    pub fn create_dm_snapshot(name: &str, base_dev: &str, cow_dev: &str, _size_sectors: u64) -> Result<String> {
+        use vyoma_storage::DmManager;
 
-        if let Some(mut stdin) = child.stdin.take() {
-            use std::io::Write;
-            stdin.write_all(table.as_bytes())?;
-        }
-
-        let status = child.wait()?;
-
-        if !status.success() {
-             return Err(anyhow!("dmsetup create failed for {}", name));
-        }
-
-        let device_path = format!("/dev/mapper/{}", name);
-        info!("Created DM device: {}", device_path);
-        
-        Ok(device_path)
+        let dm_manager = DmManager::new()?;
+        let base_path = std::path::Path::new(base_dev);
+        let cow_path = std::path::Path::new(cow_dev);
+        let dm_device = dm_manager.create_snapshot(&name, base_path, cow_path)?;
+        Ok(dm_device.path().to_string_lossy().to_string())
     }
 
     pub fn remove_dm_device(name: &str) -> Result<()> {
-        // TODO(technical-debt): Migrate to devicemapper crate Rust API instead of dmsetup CLI
-        info!("Removing DM device '{}'", name);
-        
-        let status = Command::new("dmsetup")
-            .arg("remove")
-            .arg("--retry")
-            .arg(name)
-            .status()
-            .map_err(|e| anyhow!("Failed to execute dmsetup remove: {}", e))?;
-            
-        if !status.success() {
-            return Err(anyhow!("dmsetup remove failed for {}", name));
-        }
-        
+        use vyoma_storage::DmManager;
+
+        let dm_manager = DmManager::new()?;
+        dm_manager.remove_snapshot(name)?;
         Ok(())
     }
 
