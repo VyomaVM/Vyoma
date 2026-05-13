@@ -1737,6 +1737,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "iptables"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f30c9a636a0a728c67d1d420471c99b215708a17c222bb9afb16d0821e2d80d8"
+dependencies = [
+ "lazy_static",
+ "regex",
+]
+
+[[package]]
 name = "iri-string"
 version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4191,6 +4201,7 @@ dependencies = [
  "flate2",
  "futures",
  "hex",
+ "iptables",
  "libc",
  "reqwest 0.12.28",
  "serde",

@@ -21,6 +21,7 @@ ui/public/vite.svg
 ui/src/assets/react.svg
 openspec/
 .kilo/
+.vscode/
 dist/
 docs/
 openspec/

@@ -184,8 +184,6 @@ Section: admin
 Priority: optional
 Architecture: ${ARCH}
 Depends: libc6, openssl, ca-certificates, iptables, kmod
-# Note: dmsetup (device-mapper) previously required but now uses native devicemapper crate
-# See: https://github.com/vyoma/vyoma/issues/XXX
 Maintainer: Subeshrock <subesh.rock.3@gmail.com>
 Description: Vyoma - MicroVM Ecosystem
  Docker-like experience for Cloud Hypervisor MicroVMs.

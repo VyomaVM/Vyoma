@@ -150,9 +150,6 @@ Vyoma is a lightweight MicroVM runtime for running containers
 as lightweight virtual machines. Combines Cloud Hypervisor speed with Docker UX.
 Includes CLI, Daemon, Web UI, CNI plugins, and virtiofsd for volume mounts.
 
-# Note: dmsetup (device-mapper) previously required but now uses native devicemapper crate
-# See: https://github.com/vyoma/vyoma/issues/XXX
-
 %prep
 %setup -q
 
@@ -215,22 +212,9 @@ if [ \$1 -eq 0 ]; then
 fi
 
 %post
-# \$1 = 1: fresh install, \$1 = 2: upgrade
-
-# Create vyoma user (for socket ownership) - idempotent
+# $1 = 1: fresh install, $1 = 2: upgrade
 if ! getent passwd vyoma > /dev/null 2>&1; then
-    useradd -r -s /sbin/nologin -c \"Vyoma MicroVM Daemon\" -d /var/lib/vyoma vyoma 2>/dev/null || true
-fi
-
-# Add installing user to vyoma and kvm groups
-if [ -n \"\$SUDO_USER\" ]; then
-    usermod -aG vyoma \$SUDO_USER 2>/dev/null || true
-    usermod -aG kvm \$SUDO_USER 2>/dev/null || true
-    echo "Added \$SUDO_USER to vyoma and kvm groups. Log out and back in to use CLI."
-elif [ -n \"\$USER\" ]; then
-    usermod -aG vyoma \$USER 2>/dev/null || true
-    usermod -aG kvm \$USER 2>/dev/null || true
-    echo "Added \$USER to vyoma and kvm groups. Log out and back in to use CLI."
+    useradd -r -s /sbin/nologin -c 'Vyoma daemon' -d /var/lib/vyoma vyoma 2>/dev/null || true
 fi
 
 # Add vyoma daemon user to kvm group (for /dev/kvm access)
@@ -261,10 +245,6 @@ if [ \$1 -eq 1 ]; then
 else
     systemctl try-restart vyomad.service 2>/dev/null || true
 fi
-
-echo "Vyoma v${VERSION} installed successfully!"
-echo "Open http://localhost:3000 for the dashboard"
-echo "Run 'vyoma run nginx:latest' to start your first VM"
 
 %postun
 # \$1 = 0: package removal, \$1 = 1: upgrade
