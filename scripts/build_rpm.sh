@@ -262,7 +262,7 @@ else
     systemctl try-restart vyomad.service 2>/dev/null || true
 fi
 
-echo "Vyoma v\${VERSION} installed successfully!"
+echo "Vyoma v${VERSION} installed successfully!"
 echo "Open http://localhost:3000 for the dashboard"
 echo "Run 'vyoma run nginx:latest' to start your first VM"
 
@@ -276,7 +276,7 @@ if [ \$1 -eq 0 ]; then
 fi
 
 %changelog
-* Wed Apr 01 2026 Subeshrock <subesh.rock.3@gmail.com> - \${VERSION}-1
+* Wed Apr 01 2026 Subeshrock <subesh.rock.3@gmail.com> - ${VERSION}-1
 - Run daemon as root with capabilities (no sudo needed)
 - Remove sudoers configuration
 - Fix socket and KVM permissions
