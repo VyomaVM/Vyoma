@@ -24,6 +24,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Build UI
         run: |
             cd ui
@@ -36,6 +41,12 @@ jobs:
 
       - name: Build RPM Package
         run: ./scripts/build_rpm.sh
+
+      - name: Verify Packages
+        run: |
+          ls -la dist/
+          echo "DEB files:" && ls -la dist/*.deb || echo "No DEB files found"
+          echo "RPM files:" && ls -la dist/*.rpm || echo "No RPM files found"
 
       - name: Create Release & Upload Assets
         uses: softprops/action-gh-release@v1
