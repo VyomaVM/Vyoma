@@ -142,11 +142,16 @@ Summary:    MicroVM Ecosystem
 License:    MIT
 URL:        https://github.com/Subeshrock/micro-vm-ecosystem
 Source0:    vyoma-${VERSION}.tar.gz
+Requires:   iptables
+Requires:   kmod
 
 %description
 Vyoma is a lightweight MicroVM runtime for running containers
 as lightweight virtual machines. Combines Cloud Hypervisor speed with Docker UX.
 Includes CLI, Daemon, Web UI, CNI plugins, and virtiofsd for volume mounts.
+
+# Note: dmsetup (device-mapper) previously required but now uses native devicemapper crate
+# See: https://github.com/vyoma/vyoma/issues/XXX
 
 %prep
 %setup -q
