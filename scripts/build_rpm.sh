@@ -5,6 +5,41 @@ VERSION="2.1.2"
 WORK_DIR="target/rpm"
 SOURCES_DIR="${WORK_DIR}/SOURCES/vyoma-${VERSION}"
 
+# Hardcoded checksums for binary verification
+# Computed from official release sources
+CLOUD_HYPERVISOR_CHECKSUM="8a013003ae29f59da7b2d7ac67f19eea3ea535166dac00ff5e8c2c27ac643f8a"
+CNI_PLUGINS_CHECKSUM="77baa2f669980a82255ffa2f2717de823992480271ee778aa51a9c60ae89ff9b"
+
+# Verify checksum of a downloaded file
+# Usage: verify_checksum <file> <expected_sha256>
+verify_checksum() {
+    local file="$1"
+    local expected="$2"
+
+    if [ "$VYOMA_SKIP_CHECKSUM" = "1" ]; then
+        echo "Skipping checksum verification (VYOMA_SKIP_CHECKSUM=1)"
+        return 0
+    fi
+
+    if [ ! -f "$file" ]; then
+        echo "Error: file $file not found for checksum verification"
+        return 1
+    fi
+
+    local actual
+    actual=$(sha256sum "$file" | awk '{print $1}')
+
+    if [ "$actual" != "$expected" ]; then
+        echo "CHECKSUM MISMATCH for $file"
+        echo "Expected: $expected"
+        echo "Actual:   $actual"
+        return 1
+    fi
+
+    echo "Checksum OK: $file"
+    return 0
+}
+
 # Clean up any previous build
 rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
@@ -17,23 +52,43 @@ cargo build --release --bin vyomad --bin vyoma
 cp target/release/vyomad "${SOURCES_DIR}/"
 cp target/release/vyoma "${SOURCES_DIR}/"
 
-# 3. Fetch Dependencies
+# 3. Fetch Dependencies with checksum verification
 echo "Fetching dependencies..."
+
+# Fetch Cloud Hypervisor with checksum verification
 if [ ! -f "cloud-hypervisor" ]; then
+    echo "Downloading cloud-hypervisor v41.0..."
     wget -q -O cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v41.0/cloud-hypervisor
     chmod +x cloud-hypervisor
 fi
+
+echo "Verifying cloud-hypervisor checksum..."
+if ! verify_checksum "cloud-hypervisor" "$CLOUD_HYPERVISOR_CHECKSUM"; then
+    echo "ERROR: cloud-hypervisor checksum verification failed!"
+    rm -f cloud-hypervisor
+    exit 1
+fi
+
 cp cloud-hypervisor "${SOURCES_DIR}/"
 cp packaging/systemd/vyomad.service "${SOURCES_DIR}/"
 
-# Fetch CNI plugins
+# Fetch CNI plugins with checksum verification
 CNI_VERSION="v1.5.1"
 CNI_DIR="${SOURCES_DIR}/cni/bin"
 echo "Fetching CNI plugins..."
 mkdir -p "${CNI_DIR}"
 if [ ! -f "cni-plugins.tgz" ]; then
+    echo "Downloading CNI plugins ${CNI_VERSION}..."
     wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz"
 fi
+
+echo "Verifying CNI plugins checksum..."
+if ! verify_checksum "cni-plugins.tgz" "$CNI_PLUGINS_CHECKSUM"; then
+    echo "ERROR: CNI plugins checksum verification failed!"
+    rm -f cni-plugins.tgz
+    exit 1
+fi
+
 tar -xzf cni-plugins.tgz -C "${CNI_DIR}/"
 
 # Copy UI (built by workflow step or locally)
@@ -156,11 +211,11 @@ fi
 if [ -n \"\$SUDO_USER\" ]; then
     usermod -aG vyoma \$SUDO_USER 2>/dev/null || true
     usermod -aG kvm \$SUDO_USER 2>/dev/null || true
-    echo \"Added \$SUDO_USER to vyoma and kvm groups. Log out and back in to use CLI.\"
+    echo "Added \$SUDO_USER to vyoma and kvm groups. Log out and back in to use CLI."
 elif [ -n \"\$USER\" ]; then
     usermod -aG vyoma \$USER 2>/dev/null || true
     usermod -aG kvm \$USER 2>/dev/null || true
-    echo \"Added \$USER to vyoma and kvm groups. Log out and back in to use CLI.\"
+    echo "Added \$USER to vyoma and kvm groups. Log out and back in to use CLI."
 fi
 
 # Add vyoma daemon user to kvm group (for /dev/kvm access)
@@ -185,9 +240,9 @@ systemctl daemon-reload 2>/dev/null || true
 systemctl enable vyomad.service 2>/dev/null || true
 systemctl start vyomad.service 2>/dev/null || true
 
-echo \"Vyoma v\${VERSION} installed successfully!\"
-echo \"Open http://localhost:3000 for the dashboard\"
-echo \"Run 'vyoma run nginx:latest' to start your first VM\"
+echo "Vyoma v\${VERSION} installed successfully!"
+echo "Open http://localhost:3000 for the dashboard"
+echo "Run 'vyoma run nginx:latest' to start your first VM"
 
 %postun
 if [ \$1 -eq 0 ]; then

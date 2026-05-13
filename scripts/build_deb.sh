@@ -6,6 +6,41 @@ ARCH="amd64"
 PKG_NAME="vyoma"
 WORK_DIR="target/debian/${PKG_NAME}_${VERSION}_${ARCH}"
 
+# Hardcoded checksums for binary verification
+# Computed from official release sources
+CLOUD_HYPERVISOR_CHECKSUM="8a013003ae29f59da7b2d7ac67f19eea3ea535166dac00ff5e8c2c27ac643f8a"
+CNI_PLUGINS_CHECKSUM="77baa2f669980a82255ffa2f2717de823992480271ee778aa51a9c60ae89ff9b"
+
+# Verify checksum of a downloaded file
+# Usage: verify_checksum <file> <expected_sha256>
+verify_checksum() {
+    local file="$1"
+    local expected="$2"
+
+    if [ "$VYOMA_SKIP_CHECKSUM" = "1" ]; then
+        echo "Skipping checksum verification (VYOMA_SKIP_CHECKSUM=1)"
+        return 0
+    fi
+
+    if [ ! -f "$file" ]; then
+        echo "Error: file $file not found for checksum verification"
+        return 1
+    fi
+
+    local actual
+    actual=$(sha256sum "$file" | awk '{print $1}')
+
+    if [ "$actual" != "$expected" ]; then
+        echo "CHECKSUM MISMATCH for $file"
+        echo "Expected: $expected"
+        echo "Actual:   $actual"
+        return 1
+    fi
+
+    echo "Checksum OK: $file"
+    return 0
+}
+
 echo "Building Vyoma v${VERSION} for Debian..."
 
 # 1. Build Binaries
@@ -19,22 +54,41 @@ mkdir -p "${WORK_DIR}/DEBIAN"
 
 # 3. Fetch & Copy Dependencies (Cloud Hypervisor, Virtiofsd, CNI plugins)
 echo "Fetching dependencies..."
+
+# Fetch Cloud Hypervisor with checksum verification
 if [ ! -f "cloud-hypervisor" ]; then
+    echo "Downloading cloud-hypervisor v41.0..."
     wget -q -O cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v41.0/cloud-hypervisor
     chmod +x cloud-hypervisor
 fi
 
-# Fetch CNI plugins
+echo "Verifying cloud-hypervisor checksum..."
+if ! verify_checksum "cloud-hypervisor" "$CLOUD_HYPERVISOR_CHECKSUM"; then
+    echo "ERROR: cloud-hypervisor checksum verification failed!"
+    rm -f cloud-hypervisor
+    exit 1
+fi
+
+# Fetch CNI plugins with checksum verification
 CNI_VERSION="v1.5.1"
 CNI_DIR="${WORK_DIR}/usr/lib/vyoma/cni"
 echo "Fetching CNI plugins..."
 mkdir -p "${CNI_DIR}/bin"
 if [ ! -f "cni-plugins.tgz" ]; then
+    echo "Downloading CNI plugins ${CNI_VERSION}..."
     wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz"
 fi
+
+echo "Verifying CNI plugins checksum..."
+if ! verify_checksum "cni-plugins.tgz" "$CNI_PLUGINS_CHECKSUM"; then
+    echo "ERROR: CNI plugins checksum verification failed!"
+    rm -f cni-plugins.tgz
+    exit 1
+fi
+
 tar -xzf cni-plugins.tgz -C "${CNI_DIR}/bin/"
 
-# Fetch virtiofsd with fallback URLs
+# Fetch virtiofsd with fallback URLs (no checksum - sources unreliable)
 VIRTIOFSD_VERSION="1.11.1"
 VIRTIOFSD_DIR="${WORK_DIR}/usr/lib/vyoma"
 
