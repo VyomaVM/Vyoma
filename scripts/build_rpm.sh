@@ -201,8 +201,18 @@ fi
 
 SPEC_CONTENT="$SPEC_CONTENT
 
+%preun
+# Stop service before package removal (not on upgrade)
+# \$1 = 0 means removal, \$1 = 1 means upgrade
+if [ \$1 -eq 0 ]; then
+    systemctl stop vyomad.service 2>/dev/null || true
+    systemctl disable vyomad.service 2>/dev/null || true
+fi
+
 %post
-# Create vyoma user (for socket ownership)
+# \$1 = 1: fresh install, \$1 = 2: upgrade
+
+# Create vyoma user (for socket ownership) - idempotent
 if ! getent passwd vyoma > /dev/null 2>&1; then
     useradd -r -s /sbin/nologin -c \"Vyoma MicroVM Daemon\" -d /var/lib/vyoma vyoma 2>/dev/null || true
 fi
@@ -236,17 +246,25 @@ chmod 0775 /run/vyoma 2>/dev/null || true
 rm -rf /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
 ln -sf /usr/lib/vyoma/cni/bin /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
 
+# Reload systemd and enable service (idempotent)
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable vyomad.service 2>/dev/null || true
-systemctl start vyomad.service 2>/dev/null || true
+
+# Only start on fresh install (\$1 = 1); on upgrade (\$1 = 2), try-restart if running
+if [ \$1 -eq 1 ]; then
+    systemctl start vyomad.service 2>/dev/null || true
+else
+    systemctl try-restart vyomad.service 2>/dev/null || true
+fi
 
 echo "Vyoma v\${VERSION} installed successfully!"
 echo "Open http://localhost:3000 for the dashboard"
 echo "Run 'vyoma run nginx:latest' to start your first VM"
 
 %postun
+# \$1 = 0: package removal, \$1 = 1: upgrade
 if [ \$1 -eq 0 ]; then
-    # Package removal - cleanup
+    # Package removal - cleanup (not on upgrade)
     userdel vyoma 2>/dev/null || true
     rm -rf /var/lib/vyoma /run/vyoma 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
