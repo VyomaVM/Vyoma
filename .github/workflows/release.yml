@@ -37,10 +37,10 @@ jobs:
             cd ..
 
       - name: Build Debian Package
-        run: ./scripts/build_deb.sh
+        run: cd packaging/deb && ./build.sh
 
       - name: Build RPM Package
-        run: ./scripts/build_rpm.sh
+        run: cd packaging/rpm && ./build.sh
 
       - name: Verify Packages
         run: |

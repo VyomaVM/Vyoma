@@ -1,4 +1,4 @@
-# Vyoma 🔥: The Micro-VM Ecosystem
+# Vyoma: The Micro-VM Ecosystem
 
 [![Release Badge](https://img.shields.io/github/v/release/Subeshrock/vyoma?style=flat-square)](https://github.com/Subeshrock/vyoma/releases)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/Subeshrock/vyoma/release.yml?style=flat-square)](https://github.com/Subeshrock/vyoma/actions)
@@ -25,6 +25,10 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 
 ## 📦 Installation
 
+### Prerequisites
+- Linux kernel 5.10+ with KVM, cgroups v2, and TUN/TAP enabled.
+- A user with `sudo` access.
+
 ### 1. Download Package
 Go to the [Releases Page](https://github.com/Subeshrock/vyoma/releases) and download the latest package for your distro.
 
@@ -32,25 +36,34 @@ Go to the [Releases Page](https://github.com/Subeshrock/vyoma/releases) and down
 
 **Debian/Ubuntu:**
 ```bash
-sudo dpkg -i vyoma_2.1.2_amd64.deb
+sudo apt install ./vyoma_2.7.0_amd64.deb
 ```
 
 **Fedora/RHEL/CentOS:**
 ```bash
-sudo rpm -i vyoma-2.1.2-1.x86_64.rpm
+sudo rpm -i vyoma-2.7.0-1.x86_64.rpm
 ```
 
-**Important:** After installation, **log out and log back in** once for your user to be added to the `vyoma` group. This is required for the CLI to connect to the daemon.
+### 3. Post-Install Group Setup
+
+After installation, your user needs to be added to the `vyoma` group to access the daemon socket:
+
+```bash
+# Log out and log back in, or run:
+newgrp vyoma
+```
+
+**Why is this needed?** The CLI connects to the daemon via Unix socket at `/run/vyoma/vyoma.sock` with permissions `0660` (owned by `vyoma:vyoma`). Without being in the `vyoma` group, the socket access is denied.
 
 **What's Installed:**
 *   `/usr/bin/vyomad`: The Daemon (Run via Systemd).
 *   `/usr/bin/vyoma`: The CLI Tool.
 *   `/usr/bin/cloud-hypervisor`: Bundled VMM binary.
 *   `/usr/lib/vyoma/cni/bin/`: CNI plugins for networking.
-*   `/usr/lib/vyoma/ui/`: Web dashboard (served at `http://localhost:3000`).
+*   `/usr/lib/vyoma/ui/`: Web dashboard (served at `http://localhost:8080`).
 *   `/etc/systemd/system/vyomad.service`: Service definition.
 
-### 3. Verify Installation
+### 4. Verify Installation
 ```bash
 vyoma doctor
 ```
@@ -194,4 +207,4 @@ We welcome contributions! Please feel free to open issues or PRs.
 
 ## 📄 License
 
-MIT License.
+Apache 2.0 License.

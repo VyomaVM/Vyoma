@@ -1881,9 +1881,9 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libc"
-version = "0.2.183"
+version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
+checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libloading"
@@ -4111,7 +4111,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "clap 4.6.0",
@@ -4143,7 +4143,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-agent-vm"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "clap 4.6.0",
@@ -4159,7 +4159,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-build"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -4180,7 +4180,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-compose"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -4191,7 +4191,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-core"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4216,7 +4216,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-image"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4239,7 +4239,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-integration-tests"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "cpio",
  "flate2",
@@ -4250,7 +4250,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-net"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4275,7 +4275,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-proto"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4293,7 +4293,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-sdk"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4309,10 +4309,11 @@ dependencies = [
 
 [[package]]
 name = "vyoma-storage"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "devicemapper",
+ "libc",
  "loopdev-3",
  "serde",
  "serde_json",
@@ -4325,7 +4326,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-teleport"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -4347,7 +4348,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-vk8s"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "tokio",
@@ -4360,7 +4361,7 @@ dependencies = [
 
 [[package]]
 name = "vyomad"
-version = "2.1.2"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "async-trait",

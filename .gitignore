@@ -6,12 +6,19 @@ Cargo.lock
 # Build outputs
 build/
 dist/
+packaging/deb/target/
+packaging/deb/could-hypervisor
+packaging/deb/cni-plugins.tgz
+packaging/systemd/
 
 # IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
+
+# Kilo
+.kilo/
 
 # MacOS
 .DS_Store
@@ -27,4 +34,4 @@ ui/dist/
 #repomix
 .repomixignore
 repomix.config.json
-repomix-output.txt
+# repomix-output.txt
