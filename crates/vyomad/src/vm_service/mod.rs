@@ -212,20 +212,21 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         });
         Some(handle)
     } else {
-        // No attestation required, mark as running immediately
-        // But still stop the vTPM if one was started
-        if let Some(vtpm) = &mut vtpm_manager {
-            let _ = vtpm.stop();
-        }
-        update_vm_status(&state, &vm_id, VmStatus::Running).await
-            .map_err(|e| anyhow::anyhow!("Failed to update VM status: {}", e))?;
+        // No attestation required — nothing to do here; the VM instance
+        // will be created with VmStatus::Running below.
         None
     };
+
+    if !needs_attestation {
+        if let Some(ref mut vtpm) = vtpm_manager {
+            let _ = vtpm.stop();
+        }
+    }
 
     let instance = VmInstance {
         vmm,
         id: vm_id.clone(),
-        status: VmStatus::PendingAttestation,
+        status: if needs_attestation { VmStatus::PendingAttestation } else { VmStatus::Running },
         attestation_status: None,
         ch_socket_path: ch_config.socket_path.clone(),
         tap_name: network_config.primary_tap.clone(),

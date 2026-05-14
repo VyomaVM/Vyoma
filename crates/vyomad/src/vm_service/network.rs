@@ -26,72 +26,59 @@ pub async fn setup_network(
 }
 
 async fn setup_privileged_network(
-    state: &AppState,
+    _state: &AppState,
     vm_id: &str,
-    networks: &[String],
+    _networks: &[String],
 ) -> Result<VmNetworkConfig> {
-    let netns_name = format!("vm-{}", vm_id);
-    let netns_path = format!("/var/run/netns/{}", netns_name);
+    let tap_name = format!("tap{}", &vm_id[..8]);
+    let bridge_name = "vyoma0";
 
-    std::fs::create_dir_all("/var/run/netns")
-        .context("Failed to create /var/run/netns")?;
-
-    // Use vyoma-net's netns module instead of direct ip command
-    if let Err(e) = create_netns(&netns_name) {
-        warn!("netns creation warning: {}", e);
+    // 1. Create TAP and attach to bridge (atomic via ip command)
+    let output = std::process::Command::new("ip")
+        .args(&["tuntap", "add", "dev", &tap_name, "mode", "tap", "user", "vyoma"])
+        .output()
+        .context("Failed to create TAP device")?;
+    if !output.status.success() {
+        anyhow::bail!("ip tuntap add failed: {}", String::from_utf8_lossy(&output.stderr));
     }
 
-    let networks_to_attach: Vec<String> = if networks.is_empty() {
-        vec!["default".to_string()]
-    } else {
-        networks.to_vec()
-    };
-
-    let attachments = state
-        .cni_manager
-        .add_multiple(&networks_to_attach, vm_id, &netns_path)
-        .context("CNI ADD failed")?;
-
-    let mut network_infos = Vec::new();
-    for (idx, attachment) in attachments.iter().enumerate() {
-        info!(
-            "CNI: Attached {} to network '{}' with IP {}",
-            attachment.interface_name, attachment.network_name, attachment.result.ip_address
-        );
-
-        let tap_name = if idx == 0 {
-            format!("tap{}", &vm_id[0..8])
-        } else {
-            format!("tap{}-{}", &vm_id[0..8], idx)
-        };
-
-        network_infos.push(NetworkInfo {
-            ip: attachment.result.ip_address.clone(),
-            tap_name,
-            gateway: attachment.result.gateway.clone(),
-            interface_name: attachment.interface_name.clone(),
-            network_name: attachment.network_name.clone(),
-        });
+    // 2. Set TAP up
+    let output = std::process::Command::new("ip")
+        .args(&["link", "set", &tap_name, "up"])
+        .output()
+        .context("Failed to set TAP up")?;
+    if !output.status.success() {
+        anyhow::bail!("ip link set up failed: {}", String::from_utf8_lossy(&output.stderr));
     }
 
-    if network_infos.is_empty() {
-        anyhow::bail!("No networks could be attached to VM");
+    // 3. Attach TAP to bridge
+    let output = std::process::Command::new("ip")
+        .args(&["link", "set", &tap_name, "master", bridge_name])
+        .output()
+        .context("Failed to attach TAP to bridge")?;
+    if !output.status.success() {
+        anyhow::bail!("ip link set master failed: {}", String::from_utf8_lossy(&output.stderr));
     }
 
-    let ip_address = network_infos.first().map(|n| n.ip.clone())
-        .unwrap_or_else(|| "10.0.2.15".to_string());
-    let primary_tap = network_infos.first().map(|n| n.tap_name.clone())
-        .unwrap_or_else(|| "tap0".to_string());
-    let gateway = network_infos.first()
-        .and_then(|n| n.gateway.clone())
-        .unwrap_or_else(|| "172.16.0.1".to_string());
+    // 4. Assign IP address to VM
+    let random_octet = 2 + (rand::random::<u8>() % 252);
+    let ip_address = format!("172.16.0.{}", random_octet);
+    let gateway = "172.16.0.1".to_string();
+
+    let network_infos = vec![NetworkInfo {
+        ip: ip_address.clone(),
+        tap_name: tap_name.clone(),
+        gateway: Some(gateway.clone()),
+        interface_name: "eth0".to_string(),
+        network_name: "default".to_string(),
+    }];
 
     Ok(VmNetworkConfig {
         ip_address,
-        primary_tap,
+        primary_tap: tap_name,
         gateway,
         network_infos,
-        netns_path: Some(netns_path),
+        netns_path: None,
     })
 }
 
