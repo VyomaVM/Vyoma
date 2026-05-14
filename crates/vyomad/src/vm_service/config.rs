@@ -15,7 +15,14 @@ pub fn build_ch_config(
     kernel_path: &PathBuf,
 ) -> ChConfig {
     let socket_path = vm_dir.join("ch.sock").to_string_lossy().to_string();
-    let ch_path = format!("{}/bin/cloud-hypervisor", state.data_dir);
+    let ch_path = {
+        let bundled = format!("{}/bin/cloud-hypervisor", state.data_dir);
+        if std::path::Path::new(&bundled).exists() {
+            bundled
+        } else {
+            "/usr/bin/cloud-hypervisor".to_string()
+        }
+    };
     let vsock_path = vm_dir.join("vsock.sock");
 
     let boot_args = format!(
