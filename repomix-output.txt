@@ -203,7 +203,6 @@ packaging/
   deb/
     build.sh
     cloud-hypervisor
-    cni-plugins.tgz
   rpm/
     build.sh
   build.sh
@@ -19474,6 +19473,239 @@ File: crates/vyomad/src/swarm/raft.rs
 456: }
 
 ================
+File: crates/vyomad/src/vm_service/agent.rs
+================
+  1: use anyhow::{Context, Result};
+  2: use std::path::Path;
+  3: use std::path::PathBuf;
+  4: use std::sync::Arc;
+  5: use tracing::info;
+  6: use super::types::AgentConfig;
+  7: use crate::state::AppState;
+  8: pub async fn prepare_agent(
+  9:     _state: &AppState,
+ 10:     _dm_path: &str,
+ 11:     vm_dir: &Path,
+ 12:     _config: &vyoma_core::oci::OciImageConfig,
+ 13: ) -> Result<AgentConfig> {
+ 14:     let initramfs_path = vm_dir.join("initramfs.cpio.gz");
+ 15:     let init_script = generate_init_script(_config);
+ 16:     let agent_binary = PathBuf::from("/usr/bin/vyoma-agent-vm");
+ 17:     let agent_path = if agent_binary.exists() {
+ 18:         Some(&agent_binary as &Path)
+ 19:     } else {
+ 20:         None
+ 21:     };
+ 22:     vyoma_core::initramfs::create_initramfs(&init_script, agent_path, &initramfs_path)
+ 23:         .context("Failed to create initramfs")?;
+ 24:     info!("Agent prepared with initramfs at {:?}", initramfs_path);
+ 25:     Ok(AgentConfig {
+ 26:         initramfs_path: Some(initramfs_path),
+ 27:         cmd: vec!["/sbin/init".to_string()],
+ 28:         workdir: "/".to_string(),
+ 29:         envs: vec![],
+ 30:     })
+ 31: }
+ 32: /// Escapes a string for safe use in shell scripts.
+ 33: ///
+ 34: /// This function ensures that strings can be safely used in:
+ 35: /// - `export KEY=value` statements
+ 36: /// - Command arguments after `exec`
+ 37: ///
+ 38: /// - If the string contains only "safe" characters (alphanumeric, _, -, ., /, :),
+ 39: ///   it is returned unquoted.
+ 40: /// - Otherwise, it is wrapped in single quotes with embedded single quotes
+ 41: ///   escaped as '\'' (standard POSIX shell escaping).
+ 42: ///
+ 43: /// The safe character set is conservative and excludes shell metacharacters
+ 44: /// like `$`, `` ` ``, `;`, `|`, `&`, etc.
+ 45: fn shell_escape(s: &str) -> String {
+ 46:     if s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/' || c == ':') {
+ 47:         s.to_string()
+ 48:     } else {
+ 49:         format!("'{}'", s.replace('\'', "'\\''"))
+ 50:     }
+ 51: }
+ 52: /// Generates the init script that runs as PID 1 inside the VM.
+ 53: ///
+ 54: /// # Security Considerations
+ 55: ///
+ 56: /// This script is part of the initramfs and is measured into PCR 10 during
+ 57: /// measured boot. If a signed manifest is required by policy, the entire OCI
+ 58: /// config (including these values) is signed, so tampering is detected.
+ 59: ///
+ 60: /// If unsigned images are allowed, the attacker already has arbitrary code
+ 61: /// execution inside the VM, so there is no additional security boundary being
+ 62: /// breached.
+ 63: ///
+ 64: /// The script uses defensive shell options:
+ 65: /// - `set -e`: Exit on any error
+ 66: /// - `set -u`: Treat unset variables as errors
+ 67: /// - `trap ERR`: Power off on any error to prevent continuing with broken state
+ 68: fn generate_init_script(config: &vyoma_core::oci::OciImageConfig) -> String {
+ 69:     let mut script = String::new();
+ 70:     script.push_str("#!/bin/sh\n");
+ 71:     // Defensive shell options: fail fast on errors and unset variables
+ 72:     script.push_str("set -e\n");
+ 73:     script.push_str("set -u\n");
+ 74:     // Power off on any error to prevent continuing with broken state
+ 75:     script.push_str("trap 'echo Init error at line $LINENO; poweroff -f' ERR\n");
+ 76:     script.push_str("\n");
+ 77:     script.push_str("mount -t proc proc /proc 2>/dev/null || true\n");
+ 78:     script.push_str("mount -t sysfs sys /sys 2>/dev/null || true\n");
+ 79:     script.push_str("mount -t devtmpfs dev /dev 2>/dev/null || true\n");
+ 80:     script.push_str("ip link set lo up 2>/dev/null || true\n");
+ 81:     if let Some(envs) = &config.env {
+ 82:         for env in envs {
+ 83:             if let Some((key, value)) = env.split_once('=') {
+ 84:                 script.push_str(&format!("export {}={}\n", shell_escape(key), shell_escape(value)));
+ 85:             }
+ 86:         }
+ 87:     }
+ 88:     if let Some(workdir) = &config.working_dir {
+ 89:         script.push_str(&format!("cd {}\n", shell_escape(workdir)));
+ 90:     }
+ 91:     let full_cmd = config.full_command();
+ 92:     // Start the agent in the background before executing the workload.
+ 93:     // The agent is forked (&) so it continues running after exec replaces
+ 94:     // this shell. The orphaned agent process gets reparented to the VM's init.
+ 95:     script.push_str("/sbin/vyoma-agent-vm &\n");
+ 96:     if !full_cmd.is_empty() {
+ 97:         let cmd_args: Vec<String> = full_cmd.iter().map(|s| shell_escape(s)).collect();
+ 98:         script.push_str(&format!("exec {}\n", cmd_args.join(" ")));
+ 99:     } else {
+100:         script.push_str("exec /bin/sh\n");
+101:     }
+102:     script
+103: }
+104: pub async fn cleanup_agent(_agent_config: &AgentConfig) -> Result<()> {
+105:     Ok(())
+106: }
+107: #[cfg(test)]
+108: mod tests {
+109:     use super::*;
+110:     use tempfile::TempDir;
+111:     #[test]
+112:     fn test_generate_init_script_default() {
+113:         let config = vyoma_core::oci::OciImageConfig::default();
+114:         let script = generate_init_script(&config);
+115:         assert!(script.contains("#!/bin/sh"));
+116:         assert!(script.contains("vyoma-agent-vm"));
+117:         assert!(script.contains("mount"));
+118:     }
+119:     #[test]
+120:     fn test_generate_init_script_with_config() {
+121:         let mut config = vyoma_core::oci::OciImageConfig::default();
+122:         config.entrypoint = Some(vec!["/bin/nginx".to_string()]);
+123:         config.cmd = Some(vec!["-g".to_string(), "daemon off;".to_string()]);
+124:         config.env = Some(vec!["NGINX_HOST=localhost".to_string(), "NGINX_PORT=80".to_string()]);
+125:         config.working_dir = Some("/usr/share/nginx/html".to_string());
+126:         let script = generate_init_script(&config);
+127:         assert!(script.contains("export NGINX_HOST=localhost"));
+128:         assert!(script.contains("export NGINX_PORT=80"));
+129:         assert!(script.contains("cd /usr/share/nginx/html"));
+130:         assert!(script.contains("exec /bin/nginx -g 'daemon off;'"));
+131:     }
+132:     #[test]
+133:     fn test_shell_escape() {
+134:         assert_eq!(shell_escape("simple"), "simple");
+135:         assert_eq!(shell_escape("with-dash"), "with-dash");
+136:         assert_eq!(shell_escape("with_underscore"), "with_underscore");
+137:         assert_eq!(shell_escape("with'quote"), "'with'\\''quote'");
+138:     }
+139:     #[test]
+140:     fn test_shell_escape_fuzz() {
+141:         use rand::Rng;
+142:         let mut rng = rand::thread_rng();
+143:         for _ in 0..10000 {
+144:             let len = rng.gen_range(0..50);
+145:             let mut s = String::new();
+146:             for _ in 0..len {
+147:                 s.push(rng.gen_range(0u8..=127) as char);
+148:             }
+149:             let escaped = shell_escape(&s);
+150:             let line = format!("export X={}", escaped);
+151:             // Check for dangerous characters outside of quoted context
+152:             let mut in_single = false;
+153:             for (i, c) in line.char_indices() {
+154:                 if c == '\'' && (i == 0 || line.as_bytes()[i-1] != b'\\') {
+155:                     in_single = !in_single;
+156:                     continue;
+157:                 }
+158:                 if !in_single {
+159:                     if matches!(c, '`' | '$' | ';' | '|' | '&' | '(' | ')' | '{' | '}' | '#' | '!' | '~' | '\n' | '\r') {
+160:                         panic!("Unsafe character '{}' found outside single quotes in: {}", c, line);
+161:                     }
+162:                 }
+163:             }
+164:             // Verify round-trip: unescape should yield original string
+165:             let unescaped = unescape(&escaped);
+166:             assert_eq!(unescaped, s, "Round-trip failed for {:?} -> {:?}", s, escaped);
+167:         }
+168:     }
+169:     fn unescape(escaped: &str) -> String {
+170:         if escaped.starts_with('\'') && escaped.ends_with('\'') {
+171:             let inner = &escaped[1..escaped.len()-1];
+172:             inner.replace("'\\''", "'")
+173:         } else {
+174:             escaped.to_string()
+175:         }
+176:     }
+177:     #[test]
+178:     fn test_generate_init_script_has_defensive_options() {
+179:         let config = vyoma_core::oci::OciImageConfig::default();
+180:         let script = generate_init_script(&config);
+181:         assert!(script.contains("set -e"), "Script should contain 'set -e'");
+182:         assert!(script.contains("set -u"), "Script should contain 'set -u'");
+183:         assert!(script.contains("trap"), "Script should contain 'trap ERR'");
+184:     }
+185:     #[test]
+186:     fn test_shell_escape_injection_attempts() {
+187:         // Test various injection attempts are properly escaped
+188:         let injection_attempts = vec![
+189:             "$(whoami)",
+190:             "`whoami`",
+191:             "${whoami}",
+192:             "; rm -rf /",
+193:             "| cat /etc/passwd",
+194:             "& sleep 10",
+195:             "$(echo pwned)",
+196:             "`echo pwned`",
+197:             "newline\ncommand",
+198:             "newline\rcommand",
+199:             "dollar$HOME",
+200:             "backtick`id`",
+201:         ];
+202:         for attempt in injection_attempts {
+203:             let escaped = shell_escape(attempt);
+204:             // Escaped string should either be quoted or not contain dangerous chars
+205:             if !escaped.starts_with('\'') {
+206:                 // Unquoted - check no dangerous chars
+207:                 assert!(!escaped.contains('$'), "Unquoted string contains $: {} -> {}", attempt, escaped);
+208:                 assert!(!escaped.contains('`'), "Unquoted string contains backtick: {} -> {}", attempt, escaped);
+209:                 assert!(!escaped.contains(';'), "Unquoted string contains ;: {} -> {}", attempt, escaped);
+210:             }
+211:         }
+212:     }
+213:     #[tokio::test]
+214:     async fn test_prepare_agent_without_agent() {
+215:         let temp_dir = TempDir::new().unwrap();
+216:         let config = vyoma_core::oci::OciImageConfig::default();
+217:         let state = Arc::new(crate::state::AppState::new_test());
+218:         let result = prepare_agent(
+219:             &crate::state::AppState::with_vm_service(state),
+220:             "/dev/null",
+221:             temp_dir.path(),
+222:             &config,
+223:         ).await;
+224:         assert!(result.is_ok());
+225:         let agent_config = result.unwrap();
+226:         assert!(agent_config.initramfs_path.is_some());
+227:         assert!(agent_config.initramfs_path.unwrap().exists());
+228:     }
+229: }
+
+================
 File: crates/vyomad/src/vm_service/boot.rs
 ================
   1: use anyhow::{Context, Result};
@@ -24645,239 +24877,6 @@ File: crates/vyomad/src/state/recovery.rs
 187:         })
 188:     }
 189: }
-
-================
-File: crates/vyomad/src/vm_service/agent.rs
-================
-  1: use anyhow::{Context, Result};
-  2: use std::path::Path;
-  3: use std::path::PathBuf;
-  4: use std::sync::Arc;
-  5: use tracing::info;
-  6: use super::types::AgentConfig;
-  7: use crate::state::AppState;
-  8: pub async fn prepare_agent(
-  9:     _state: &AppState,
- 10:     _dm_path: &str,
- 11:     vm_dir: &Path,
- 12:     _config: &vyoma_core::oci::OciImageConfig,
- 13: ) -> Result<AgentConfig> {
- 14:     let initramfs_path = vm_dir.join("initramfs.cpio.gz");
- 15:     let init_script = generate_init_script(_config);
- 16:     let agent_binary = PathBuf::from("/usr/bin/vyoma-agent-vm");
- 17:     let agent_path = if agent_binary.exists() {
- 18:         Some(&agent_binary as &Path)
- 19:     } else {
- 20:         None
- 21:     };
- 22:     vyoma_core::initramfs::create_initramfs(&init_script, agent_path, &initramfs_path)
- 23:         .context("Failed to create initramfs")?;
- 24:     info!("Agent prepared with initramfs at {:?}", initramfs_path);
- 25:     Ok(AgentConfig {
- 26:         initramfs_path: Some(initramfs_path),
- 27:         cmd: vec!["/sbin/init".to_string()],
- 28:         workdir: "/".to_string(),
- 29:         envs: vec![],
- 30:     })
- 31: }
- 32: /// Escapes a string for safe use in shell scripts.
- 33: ///
- 34: /// This function ensures that strings can be safely used in:
- 35: /// - `export KEY=value` statements
- 36: /// - Command arguments after `exec`
- 37: ///
- 38: /// - If the string contains only "safe" characters (alphanumeric, _, -, ., /, :),
- 39: ///   it is returned unquoted.
- 40: /// - Otherwise, it is wrapped in single quotes with embedded single quotes
- 41: ///   escaped as '\'' (standard POSIX shell escaping).
- 42: ///
- 43: /// The safe character set is conservative and excludes shell metacharacters
- 44: /// like `$`, `` ` ``, `;`, `|`, `&`, etc.
- 45: fn shell_escape(s: &str) -> String {
- 46:     if s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/' || c == ':') {
- 47:         s.to_string()
- 48:     } else {
- 49:         format!("'{}'", s.replace('\'', "'\\''"))
- 50:     }
- 51: }
- 52: /// Generates the init script that runs as PID 1 inside the VM.
- 53: ///
- 54: /// # Security Considerations
- 55: ///
- 56: /// This script is part of the initramfs and is measured into PCR 10 during
- 57: /// measured boot. If a signed manifest is required by policy, the entire OCI
- 58: /// config (including these values) is signed, so tampering is detected.
- 59: ///
- 60: /// If unsigned images are allowed, the attacker already has arbitrary code
- 61: /// execution inside the VM, so there is no additional security boundary being
- 62: /// breached.
- 63: ///
- 64: /// The script uses defensive shell options:
- 65: /// - `set -e`: Exit on any error
- 66: /// - `set -u`: Treat unset variables as errors
- 67: /// - `trap ERR`: Power off on any error to prevent continuing with broken state
- 68: fn generate_init_script(config: &vyoma_core::oci::OciImageConfig) -> String {
- 69:     let mut script = String::new();
- 70:     script.push_str("#!/bin/sh\n");
- 71:     // Defensive shell options: fail fast on errors and unset variables
- 72:     script.push_str("set -e\n");
- 73:     script.push_str("set -u\n");
- 74:     // Power off on any error to prevent continuing with broken state
- 75:     script.push_str("trap 'echo Init error at line $LINENO; poweroff -f' ERR\n");
- 76:     script.push_str("\n");
- 77:     script.push_str("mount -t proc proc /proc 2>/dev/null || true\n");
- 78:     script.push_str("mount -t sysfs sys /sys 2>/dev/null || true\n");
- 79:     script.push_str("mount -t devtmpfs dev /dev 2>/dev/null || true\n");
- 80:     script.push_str("ip link set lo up 2>/dev/null || true\n");
- 81:     if let Some(envs) = &config.env {
- 82:         for env in envs {
- 83:             if let Some((key, value)) = env.split_once('=') {
- 84:                 script.push_str(&format!("export {}={}\n", shell_escape(key), shell_escape(value)));
- 85:             }
- 86:         }
- 87:     }
- 88:     if let Some(workdir) = &config.working_dir {
- 89:         script.push_str(&format!("cd {}\n", shell_escape(workdir)));
- 90:     }
- 91:     let full_cmd = config.full_command();
- 92:     // Start the agent in the background before executing the workload.
- 93:     // The agent is forked (&) so it continues running after exec replaces
- 94:     // this shell. The orphaned agent process gets reparented to the VM's init.
- 95:     script.push_str("/sbin/vyoma-agent-vm &\n");
- 96:     if !full_cmd.is_empty() {
- 97:         let cmd_args: Vec<String> = full_cmd.iter().map(|s| shell_escape(s)).collect();
- 98:         script.push_str(&format!("exec {}\n", cmd_args.join(" ")));
- 99:     } else {
-100:         script.push_str("exec /bin/sh\n");
-101:     }
-102:     script
-103: }
-104: pub async fn cleanup_agent(_agent_config: &AgentConfig) -> Result<()> {
-105:     Ok(())
-106: }
-107: #[cfg(test)]
-108: mod tests {
-109:     use super::*;
-110:     use tempfile::TempDir;
-111:     #[test]
-112:     fn test_generate_init_script_default() {
-113:         let config = vyoma_core::oci::OciImageConfig::default();
-114:         let script = generate_init_script(&config);
-115:         assert!(script.contains("#!/bin/sh"));
-116:         assert!(script.contains("vyoma-agent-vm"));
-117:         assert!(script.contains("mount"));
-118:     }
-119:     #[test]
-120:     fn test_generate_init_script_with_config() {
-121:         let mut config = vyoma_core::oci::OciImageConfig::default();
-122:         config.entrypoint = Some(vec!["/bin/nginx".to_string()]);
-123:         config.cmd = Some(vec!["-g".to_string(), "daemon off;".to_string()]);
-124:         config.env = Some(vec!["NGINX_HOST=localhost".to_string(), "NGINX_PORT=80".to_string()]);
-125:         config.working_dir = Some("/usr/share/nginx/html".to_string());
-126:         let script = generate_init_script(&config);
-127:         assert!(script.contains("export NGINX_HOST=localhost"));
-128:         assert!(script.contains("export NGINX_PORT=80"));
-129:         assert!(script.contains("cd /usr/share/nginx/html"));
-130:         assert!(script.contains("exec /bin/nginx -g 'daemon off;'"));
-131:     }
-132:     #[test]
-133:     fn test_shell_escape() {
-134:         assert_eq!(shell_escape("simple"), "simple");
-135:         assert_eq!(shell_escape("with-dash"), "with-dash");
-136:         assert_eq!(shell_escape("with_underscore"), "with_underscore");
-137:         assert_eq!(shell_escape("with'quote"), "'with'\\''quote'");
-138:     }
-139:     #[test]
-140:     fn test_shell_escape_fuzz() {
-141:         use rand::Rng;
-142:         let mut rng = rand::thread_rng();
-143:         for _ in 0..10000 {
-144:             let len = rng.gen_range(0..50);
-145:             let mut s = String::new();
-146:             for _ in 0..len {
-147:                 s.push(rng.gen_range(0u8..=127) as char);
-148:             }
-149:             let escaped = shell_escape(&s);
-150:             let line = format!("export X={}", escaped);
-151:             // Check for dangerous characters outside of quoted context
-152:             let mut in_single = false;
-153:             for (i, c) in line.char_indices() {
-154:                 if c == '\'' && (i == 0 || line.as_bytes()[i-1] != b'\\') {
-155:                     in_single = !in_single;
-156:                     continue;
-157:                 }
-158:                 if !in_single {
-159:                     if matches!(c, '`' | '$' | ';' | '|' | '&' | '(' | ')' | '{' | '}' | '#' | '!' | '~' | '\n' | '\r') {
-160:                         panic!("Unsafe character '{}' found outside single quotes in: {}", c, line);
-161:                     }
-162:                 }
-163:             }
-164:             // Verify round-trip: unescape should yield original string
-165:             let unescaped = unescape(&escaped);
-166:             assert_eq!(unescaped, s, "Round-trip failed for {:?} -> {:?}", s, escaped);
-167:         }
-168:     }
-169:     fn unescape(escaped: &str) -> String {
-170:         if escaped.starts_with('\'') && escaped.ends_with('\'') {
-171:             let inner = &escaped[1..escaped.len()-1];
-172:             inner.replace("'\\''", "'")
-173:         } else {
-174:             escaped.to_string()
-175:         }
-176:     }
-177:     #[test]
-178:     fn test_generate_init_script_has_defensive_options() {
-179:         let config = vyoma_core::oci::OciImageConfig::default();
-180:         let script = generate_init_script(&config);
-181:         assert!(script.contains("set -e"), "Script should contain 'set -e'");
-182:         assert!(script.contains("set -u"), "Script should contain 'set -u'");
-183:         assert!(script.contains("trap"), "Script should contain 'trap ERR'");
-184:     }
-185:     #[test]
-186:     fn test_shell_escape_injection_attempts() {
-187:         // Test various injection attempts are properly escaped
-188:         let injection_attempts = vec![
-189:             "$(whoami)",
-190:             "`whoami`",
-191:             "${whoami}",
-192:             "; rm -rf /",
-193:             "| cat /etc/passwd",
-194:             "& sleep 10",
-195:             "$(echo pwned)",
-196:             "`echo pwned`",
-197:             "newline\ncommand",
-198:             "newline\rcommand",
-199:             "dollar$HOME",
-200:             "backtick`id`",
-201:         ];
-202:         for attempt in injection_attempts {
-203:             let escaped = shell_escape(attempt);
-204:             // Escaped string should either be quoted or not contain dangerous chars
-205:             if !escaped.starts_with('\'') {
-206:                 // Unquoted - check no dangerous chars
-207:                 assert!(!escaped.contains('$'), "Unquoted string contains $: {} -> {}", attempt, escaped);
-208:                 assert!(!escaped.contains('`'), "Unquoted string contains backtick: {} -> {}", attempt, escaped);
-209:                 assert!(!escaped.contains(';'), "Unquoted string contains ;: {} -> {}", attempt, escaped);
-210:             }
-211:         }
-212:     }
-213:     #[tokio::test]
-214:     async fn test_prepare_agent_without_agent() {
-215:         let temp_dir = TempDir::new().unwrap();
-216:         let config = vyoma_core::oci::OciImageConfig::default();
-217:         let state = Arc::new(crate::state::AppState::new_test());
-218:         let result = prepare_agent(
-219:             &crate::state::AppState::with_vm_service(state),
-220:             "/dev/null",
-221:             temp_dir.path(),
-222:             &config,
-223:         ).await;
-224:         assert!(result.is_ok());
-225:         let agent_config = result.unwrap();
-226:         assert!(agent_config.initramfs_path.is_some());
-227:         assert!(agent_config.initramfs_path.unwrap().exists());
-228:     }
-229: }
 
 ================
 File: crates/vyomad/src/vm_service/network.rs
