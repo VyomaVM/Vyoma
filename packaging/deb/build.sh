@@ -1,39 +1,113 @@
 #!/bin/bash
-# Vyoma Debian Package Build Script
-
 set -e
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_DIR="$PROJECT_ROOT/build"
-PACKAGE_DIR="$BUILD_DIR/vyoma_2.1.1_amd64"
-VERSION="2.1.2"
+VERSION="2.7.0"
+ARCH="amd64"
+PKG_NAME="vyoma"
+WORK_DIR="target/debian/${PKG_NAME}_${VERSION}_${ARCH}"
 
-echo "Building Vyoma Debian package..."
-echo "Project root: $PROJECT_ROOT"
+# Hardcoded checksums for binary verification
+# Computed from official release sources
+CLOUD_HYPERVISOR_CHECKSUM="8a013003ae29f59da7b2d7ac67f19eea3ea535166dac00ff5e8c2c27ac643f8a"
+CNI_PLUGINS_CHECKSUM="77baa2f669980a82255ffa2f2717de823992480271ee778aa51a9c60ae89ff9b"
 
-# Clean previous build
-rm -rf "$BUILD_DIR"
-mkdir -p "$PACKAGE_DIR"
+# Verify checksum of a downloaded file
+# Usage: verify_checksum <file> <expected_sha256>
+verify_checksum() {
+    local file="$1"
+    local expected="$2"
 
-# Build Rust binaries
-echo "Building Rust binaries..."
-cd "$PROJECT_ROOT"
-cargo build --release
+    if [ "$VYOMA_SKIP_CHECKSUM" = "1" ]; then
+        echo "Skipping checksum verification (VYOMA_SKIP_CHECKSUM=1)"
+        return 0
+    fi
+
+    if [ ! -f "$file" ]; then
+        echo "Error: file $file not found for checksum verification"
+        return 1
+    fi
+
+    local actual
+    actual=$(sha256sum "$file" | awk '{print $1}')
+
+    if [ "$actual" != "$expected" ]; then
+        echo "CHECKSUM MISMATCH for $file"
+        echo "Expected: $expected"
+        echo "Actual:   $actual"
+        return 1
+    fi
+
+    echo "Checksum OK: $file"
+    return 0
+}
+
+echo "Building Vyoma v${VERSION} for Debian..."
+
+# 1. Build Binaries
+cargo build --release --bin vyomad --bin vyoma
+
+# 2. Prepare Directory Structure
+mkdir -p "${WORK_DIR}/usr/bin"
+mkdir -p "${WORK_DIR}/usr/lib/vyoma"
+mkdir -p "${WORK_DIR}/etc/systemd/system"
+mkdir -p "${WORK_DIR}/DEBIAN"
+
+# 3. Fetch & Copy Dependencies (Cloud Hypervisor, Virtiofsd, CNI plugins)
+echo "Fetching dependencies..."
+
+# Fetch Cloud Hypervisor with checksum verification
+if [ ! -f "cloud-hypervisor" ]; then
+    echo "Downloading cloud-hypervisor v41.0..."
+    wget -q -O cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v41.0/cloud-hypervisor
+    chmod +x cloud-hypervisor
+fi
+
+echo "Verifying cloud-hypervisor checksum..."
+if ! verify_checksum "cloud-hypervisor" "$CLOUD_HYPERVISOR_CHECKSUM"; then
+    echo "ERROR: cloud-hypervisor checksum verification failed!"
+    rm -f cloud-hypervisor
+    exit 1
+fi
+
+# Fetch CNI plugins with checksum verification
+CNI_VERSION="v1.5.1"
+CNI_DIR="${WORK_DIR}/usr/lib/vyoma/cni"
+echo "Fetching CNI plugins..."
+mkdir -p "${CNI_DIR}/bin"
+if [ ! -f "cni-plugins.tgz" ]; then
+    echo "Downloading CNI plugins ${CNI_VERSION}..."
+    wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz"
+fi
+
+echo "Verifying CNI plugins checksum..."
+if ! verify_checksum "cni-plugins.tgz" "$CNI_PLUGINS_CHECKSUM"; then
+    echo "ERROR: CNI plugins checksum verification failed!"
+    rm -f cni-plugins.tgz
+    exit 1
+fi
+
+tar -xzf cni-plugins.tgz -C "${CNI_DIR}/bin/"
+
+# Fetch virtiofsd with fallback URLs (no checksum - sources unreliable)
+VIRTIOFSD_VERSION="1.11.1"
+VIRTIOFSD_DIR="${WORK_DIR}/usr/lib/vyoma"
+
+echo "Fetching virtiofsd..."
 
 # Build UI (optional - requires Node.js)
 echo "Building UI..."
 if command -v npm &> /dev/null; then
-    cd "$PROJECT_ROOT/ui"
+    cd ui
     npm install
     npm run build
+    cd ..
+    mkdir -p "${WORK_DIR}/usr/lib/vyoma"
+    cp -r ui/dist "${WORK_DIR}/usr/lib/vyoma/ui"
+    echo "UI bundled successfully"
 else
     echo "Skipping UI build (npm not found)"
 fi
-
-# Fetch virtiofsd with fallback URLs
-VIRTIOFSD_VERSION="1.11.1"
-echo "Fetching virtiofsd..."
-if [ ! -f "virtiofsd_bin" ]; then
+if [ ! -f "virtiofsd" ]; then
     # Primary: GitLab releases
     PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-x86_64-musl.zip"
     if wget -q -O virtiofsd.zip "$PRIMARY_URL" 2>/dev/null; then
@@ -43,7 +117,7 @@ if [ ! -f "virtiofsd_bin" ]; then
     fi
 fi
 
-# Fallback 1
+# Fallback 1: Try QEMU GitHub raw
 if [ ! -f "virtiofsd_bin" ]; then
     FALLBACK_URL1="https://github.com/qemu/qemu/raw/main/contrib/virtiofsd/virtiofsd-x86_64"
     if wget -q -O virtiofsd "$FALLBACK_URL1" 2>/dev/null; then
@@ -52,7 +126,7 @@ if [ ! -f "virtiofsd_bin" ]; then
     fi
 fi
 
-# Fallback 2
+# Fallback 2: Try another mirror
 if [ ! -f "virtiofsd_bin" ]; then
     FALLBACK_URL2="https://raw.githubusercontent.com/qemu/qemu/master/contrib/virtiofsd/virtiofsd-x86_64"
     if wget -q -O virtiofsd "$FALLBACK_URL2" 2>/dev/null; then
@@ -61,145 +135,157 @@ if [ ! -f "virtiofsd_bin" ]; then
     fi
 fi
 
-# Create package structure
-echo "Creating package structure..."
-mkdir -p "$PACKAGE_DIR/usr/bin"
-mkdir -p "$PACKAGE_DIR/usr/lib/vyoma"
-mkdir -p "$PACKAGE_DIR/usr/share/applications"
-mkdir -p "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps"
-mkdir -p "$PACKAGE_DIR/usr/share/doc/vyoma"
-mkdir -p "$PACKAGE_DIR/DEBIAN"
-
-# Copy binaries
-cp "$PROJECT_ROOT/target/release/vyoma" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
-cp "$PROJECT_ROOT/target/release/vyomad" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
-
-# Copy vyoma binaries
-cp "$PROJECT_ROOT/target/release/vyoma-agent" "$PACKAGE_DIR/usr/bin/" 2>/dev/null || true
-
-# Copy UI dist
-if [ -d "$PROJECT_ROOT/ui/dist" ]; then
-    cp -r "$PROJECT_ROOT/ui/dist" "$PACKAGE_DIR/usr/lib/vyoma/ui"
-fi
-
-# Copy firecracker (if exists)
-if [ -d "$PROJECT_ROOT/bin" ]; then
-    cp -r "$PROJECT_ROOT/bin" "$PACKAGE_DIR/usr/lib/vyoma/"
-fi
-
-# Copy virtiofsd if available
+# Check if we got virtiofsd
 if [ -f "virtiofsd_bin" ]; then
-    cp virtiofsd_bin "$PACKAGE_DIR/usr/lib/vyoma/virtiofsd"
-    chmod +x "$PACKAGE_DIR/usr/lib/vyoma/virtiofsd"
-    echo "virtiofsd bundled successfully"
+    echo "virtiofsd fetched successfully"
+    cp virtiofsd_bin "${VIRTIOFSD_DIR}/virtiofsd"
+    chmod +x "${VIRTIOFSD_DIR}/virtiofsd"
 else
-    echo "Warning: virtiofsd not bundled - volume mounts may not work"
+    echo "Warning: virtiofsd not available - volume mounts may not work"
 fi
 
-# Copy favicon as icon
-cp "$PROJECT_ROOT/ui/public/favicon.svg" "$PACKAGE_DIR/usr/share/icons/hicolor/64x64/apps/vyoma.svg" 2>/dev/null || true
+# 4. Copy Assets
+cp target/release/vyomad "${WORK_DIR}/usr/bin/"
+cp target/release/vyoma "${WORK_DIR}/usr/bin/"
+cp cloud-hypervisor "${WORK_DIR}/usr/bin/cloud-hypervisor"
+cp packaging/systemd/vyomad.service "${WORK_DIR}/etc/systemd/system/"
+cp packaging/systemd/vyoma-net.service "${WORK_DIR}/etc/systemd/system/"
 
-# Create desktop file
-cat > "$PACKAGE_DIR/usr/share/applications/vyoma.desktop" << 'EOF'
-[Desktop Entry]
-Name=Vyoma
-Comment=MicroVM Management Dashboard
-Exec=/usr/bin/vyomad
-Icon=vyoma
-Terminal=false
-Type=Application
-Categories=System;Virtualization;
-Keywords=microvm;virtualization;docker;
+# Copy kernel and cloud-hypervisor to data directory
+mkdir -p "${WORK_DIR}/var/lib/vyoma/bin"
+KERNEL_URL="https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/bzImage-x86_64"
+KERNEL_DEST="${WORK_DIR}/var/lib/vyoma/bin/vmlinux"
+if [ ! -f "kernel.bzimage" ]; then
+    echo "Downloading Cloud Hypervisor kernel..."
+    wget -q -O kernel.bzimage "$KERNEL_URL" || curl -L -o kernel.bzimage "$KERNEL_URL"
+fi
+cp kernel.bzimage "$KERNEL_DEST"
+chmod 644 "$KERNEL_DEST"
+echo "Kernel binary bundled"
+
+# Bundle virtiofsd (from system or project bin)
+if [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
+    cp bin/virtiofsd "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
+    chmod +x "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
+    echo "virtiofsd bundled from project bin"
+elif [ -f "/usr/libexec/virtiofsd" ]; then
+    cp /usr/libexec/virtiofsd "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
+    chmod +x "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
+    echo "virtiofsd bundled from system"
+elif [ -f "/usr/bin/virtiofsd" ]; then
+    cp /usr/bin/virtiofsd "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
+    chmod +x "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
+    echo "virtiofsd bundled from /usr/bin"
+else
+    echo "Warning: virtiofsd not found - volume mounts may not work"
+fi
+
+# 5. Create Control File
+cat <<EOF > "${WORK_DIR}/DEBIAN/control"
+Package: ${PKG_NAME}
+Version: ${VERSION}
+Section: admin
+Priority: optional
+Architecture: ${ARCH}
+Depends: libc6, openssl, ca-certificates, iptables, kmod
+Maintainer: Subeshrock <subesh.rock.3@gmail.com>
+Description: Vyoma - MicroVM Ecosystem
+ Docker-like experience for Cloud Hypervisor MicroVMs.
+ Includes Daemon, CLI, Web UI, and virtiofsd for volume mounts.
 EOF
 
-# Copy systemd service
-mkdir -p "$PACKAGE_DIR/lib/systemd/system"
-cp "$PROJECT_ROOT/packaging/systemd/vyomad.service" "$PACKAGE_DIR/lib/systemd/system/"
-
-# Create postinst script
-cat <<'POSTINST' > "$PACKAGE_DIR/DEBIAN/postinst"
+# 6. Create Post-Install Script
+# $2 = previous version (empty if fresh install)
+cat <<'POSTINST' > "${WORK_DIR}/DEBIAN/postinst"
 #!/bin/bash
 set -e
 
-# Update icons cache
-gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
-
-# Create vyoma user (for socket ownership)
+# Create vyoma user (for socket ownership) - idempotent
 if ! id vyoma >/dev/null 2>&1; then
     useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Vyoma MicroVM Daemon" vyoma 2>/dev/null || true
 fi
 
-# Add vyoma daemon user to kvm group (for /dev/kvm access)
-if getent group kvm > /dev/null 2>&1; then
-    usermod vyoma 2>/dev/null || true
+# Add installing user to vyoma, kvm and disk groups
+if [ -n "$SUDO_USER" ]; then
+    usermod -aG vyoma "$SUDO_USER" 2>/dev/null || true
+    usermod -aG kvm "$SUDO_USER" 2>/dev/null || true
+    usermod -aG disk "$SUDO_USER" 2>/dev/null || true
+    echo "Added $SUDO_USER to vyoma, kvm and disk groups. Log out and back in to use CLI."
 fi
+
+# Add vyoma daemon user to kvm and disk groups (for /dev/kvm and /dev/mapper/control access)
+if getent group kvm > /dev/null 2>&1; then
+    usermod -aG kvm vyoma 2>/dev/null || true
+fi
+if getent group disk > /dev/null 2>&1; then
+    usermod -aG disk vyoma 2>/dev/null || true
+fi
+
+# Fix /dev/mapper/control permissions (for device mapper/DM)
+chmod 0660 /dev/mapper/control 2>/dev/null || true
+chown root:disk /dev/mapper/control 2>/dev/null || true
 
 # Fix /dev/kvm permissions
 chmod 0660 /dev/kvm 2>/dev/null || true
 chown root:kvm /dev/kvm 2>/dev/null || true
 
-# Create data directory
-mkdir -p /var/lib/vyoma
-chown vyoma:vyoma /var/lib/vyoma 2>/dev/null || true
-
-# Create runtime directory
+# Create runtime directory - owned by root:vyoma, group writable (0775)
 mkdir -p /run/vyoma
 chown root:vyoma /run/vyoma 2>/dev/null || true
-chmod 0755 /run/vyoma 2>/dev/null || true
+chmod 0775 /run/vyoma 2>/dev/null || true
 
-# Add installing user to vyoma and kvm groups
-if [ -n "$SUDO_USER" ]; then
-    usermod vyoma "$SUDO_USER" 2>/dev/null || true
-    usermod -aG kvm "$SUDO_USER" 2>/dev/null || true
-    echo "Added $SUDO_USER to vyoma and kvm groups. Log out and back in to use CLI."
+# Setup CNI plugins directory (symlink from system data dir to package location)
+mkdir -p /var/lib/vyoma/.vyoma/cni
+rm -rf /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
+ln -sf /usr/lib/vyoma/cni/bin /var/lib/vyoma/.vyoma/cni/bin
+
+# Setup Vyoma network bridge (for VM networking)
+if ! ip link show vyoma0 >/dev/null 2>&1; then
+    ip link add vyoma0 type bridge
+    ip addr add 172.16.0.1/24 dev vyoma0
+    ip link set vyoma0 up
 fi
 
-# Enable and start systemd service automatically
-if command -v systemctl &> /dev/null; then
-    systemctl daemon-reload 2>/dev/null || true
-    systemctl enable vyomad.service 2>/dev/null || true
+# Enable service (idempotent - won't fail if already enabled)
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable vyomad.service 2>/dev/null || true
+
+# Only start on fresh install ($2 = previous version, empty if first install)
+# On upgrade, use try-restart to restart only if already running
+if [ -z "$2" ]; then
+    # Fresh install - start the service
     systemctl start vyomad.service 2>/dev/null || true
-    echo "Vyoma daemon auto-started"
+else
+    # Upgrade - restart only if already running (won't disrupt if stopped)
+    systemctl try-restart vyomad.service 2>/dev/null || true
 fi
 
-echo "Vyoma v2.1.1 installed successfully!"
-echo "Open http://localhost:3000 for the dashboard"
+echo "Vyoma v${VERSION} installed successfully!"
+echo "Open http://localhost:8080 for the dashboard"
 echo "Run 'vyoma run nginx:latest' to start your first VM"
 POSTINST
-chmod +x "$PACKAGE_DIR/DEBIAN/postinst"
+chmod 755 "${WORK_DIR}/DEBIAN/postinst"
 
-# Create postrm script
-cat <<'POSTRM' > "$PACKAGE_DIR/DEBIAN/postrm"
+# 7. Create Post-Remove Script
+cat <<'POSTRM' > "${WORK_DIR}/DEBIAN/postrm"
 #!/bin/bash
 set -e
-gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+systemctl daemon-reload 2>/dev/null || true
 if [ "$1" = "purge" ]; then
     userdel vyoma 2>/dev/null || true
     rm -rf /var/lib/vyoma /run/vyoma 2>/dev/null || true
+    ip link del vyoma0 2>/dev/null || true
 fi
 POSTRM
-chmod +x "$PACKAGE_DIR/DEBIAN/postrm"
+chmod 755 "${WORK_DIR}/DEBIAN/postrm"
 
-# Create control file
-cat > "$PACKAGE_DIR/DEBIAN/control" << EOF
-Package: vyoma
-Version: ${VERSION}
-Section: utils
-Priority: optional
-Architecture: amd64
-Depends: libc6 (>= 2.34), libstdc++6 (>= 6)
-Maintainer: Subeshrock <subesh.rock.3@gmail.com>
-Description: Lightweight MicroVM runtime
- Vyoma is a lightweight MicroVM runtime for running containers
- as lightweight virtual machines. Combines Firecracker speed with Docker UX.
- Includes CLI, Daemon, Web UI, and virtiofsd for volume mounts.
-EOF
+# 8. Build Package
+mkdir -p dist
+dpkg-deb --build "${WORK_DIR}" "dist/${PKG_NAME}_${VERSION}_${ARCH}.deb"
 
-# Build package
-echo "Building .deb package..."
-dpkg-deb --build "$PACKAGE_DIR" "$BUILD_DIR/vyoma_${VERSION}_amd64.deb"
+# 9. Cleanup
+rm -f cloud-hypervisor cloud-hypervisor.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
+rm -rf release-v1.7.0-x86_64
+rm -rf "${WORK_DIR}"
 
-# Cleanup virtiofsd temp files
-rm -f virtiofsd.zip virtiofsd virtiofsd_bin 2>/dev/null || true
-
-echo "Done! Package created at: $BUILD_DIR/vyoma_${VERSION}_amd64.deb"
+echo "Package created at dist/${PKG_NAME}_${VERSION}_${ARCH}.deb"
