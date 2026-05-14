@@ -159,7 +159,7 @@ let state_file = vm_dir.join("state.json");
         let state: VmState = serde_json::from_str(&state_content)?;
 
         if !state.tap_name.is_empty() {
-            if let Err(e) = NetworkManager::remove_interface(&state.tap_name) {
+            if let Err(e) = NetworkManager::remove_interface(&state.tap_name).await {
                 warn!("Failed to remove TAP {}: {}", state.tap_name, e);
             }
         }

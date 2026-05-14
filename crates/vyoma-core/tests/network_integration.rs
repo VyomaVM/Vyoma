@@ -1,50 +1,33 @@
 use anyhow::Result;
 use vyoma_core::network::NetworkManager;
 
-#[test]
+#[tokio::test]
 #[ignore]
-fn test_network_lifecycle() -> Result<()> {
-    // Requires SUDO.
-    // 1. Create Bridge
-    // 2. Create TAP
-    // 3. Cleanup
-    
+async fn test_network_lifecycle() -> Result<()> {
     let bridge_name = "vyoma-test-br";
-    let bridge_cidr = "172.16.200.1/24"; // Use a safe subnet
+    let bridge_cidr = "172.16.200.1/24";
     let tap_name = "vyoma-test-tap";
 
-    // 1. Setup Bridge
-    NetworkManager::setup_bridge(bridge_name, bridge_cidr)?;
+    NetworkManager::setup_bridge(bridge_name, bridge_cidr).await?;
     println!("Created bridge {}", bridge_name);
-    
-    // 2. Setup TAP
-    NetworkManager::setup_tap(tap_name, bridge_name)?;
+
+    NetworkManager::setup_tap(tap_name, bridge_name).await?;
     println!("Created TAP {}", tap_name);
-    
-    // 3. Validations (Manual check or shell check)
+
     let output = std::process::Command::new("ip")
         .args(&["link", "show", tap_name])
         .output()?;
     assert!(output.status.success());
-    
-    // 4. Cleanup
-    NetworkManager::remove_interface(tap_name)?;
-    NetworkManager::remove_interface(bridge_name)?;
-    
+
+    NetworkManager::remove_interface(tap_name).await?;
+    NetworkManager::remove_interface(bridge_name).await?;
+
     Ok(())
 }
 
-#[test]
+#[tokio::test]
 #[ignore]
-fn test_nat_setup() -> Result<()> {
-    // Requires SUDO
-    // This modifies global iptables, running it might span rules.
-    // We just test the function call.
-    
+async fn test_nat_setup() -> Result<()> {
     NetworkManager::setup_nat("172.16.200.0/24")?;
-    
-    // Cleanup rule manually? 
-    // iptables -t nat -D POSTROUTING ...
-    // For now, let's just assert it returned Ok.
     Ok(())
 }

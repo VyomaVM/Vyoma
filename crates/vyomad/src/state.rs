@@ -218,7 +218,7 @@ impl VmInstance {
         }
 
         if !self.tap_name.is_empty() {
-            if let Err(e) = NetworkManager::remove_interface(&self.tap_name) {
+            if let Err(e) = NetworkManager::remove_interface(&self.tap_name).await {
                 error!("Failed to remove TAP {}: {}", self.tap_name, e);
             }
         }

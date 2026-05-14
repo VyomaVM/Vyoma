@@ -5,56 +5,42 @@ use tracing::{info, warn};
 pub struct NetworkManager;
 
 impl NetworkManager {
-    pub fn setup_bridge(name: &str, ip_cidr: &str) -> Result<()> {
+    pub async fn setup_bridge(name: &str, ip_cidr: &str) -> Result<()> {
         info!("Delegating to vyoma-net BridgeManager for bridge {}", name);
-
-        let rt = tokio::runtime::Runtime::new()?;
-        rt.block_on(async {
-            let bm = vyoma_net::BridgeManager::new().await?;
-            let idx = bm.create_bridge(name).await?;
-            bm.set_up(name).await?;
-            bm.set_ip(name, ip_cidr).await?;
-            info!("Bridge {} created with index {}", name, idx);
-            Ok(())
-        })
+        let bm = vyoma_net::BridgeManager::new().await?;
+        let idx = bm.create_bridge(name).await?;
+        bm.set_up(name).await?;
+        bm.set_ip(name, ip_cidr).await?;
+        info!("Bridge {} created with index {}", name, idx);
+        Ok(())
     }
 
-    pub fn setup_tap(tap_name: &str, bridge_name: &str) -> Result<()> {
+    pub async fn setup_tap(tap_name: &str, bridge_name: &str) -> Result<()> {
         info!("Delegating to vyoma-net for TAP {}", tap_name);
-
-        let rt = tokio::runtime::Runtime::new()?;
-        rt.block_on(async {
-            let tm = vyoma_net::TapManager::new().await?;
-            tm.create_tap(tap_name).await?;
-            tm.set_up(tap_name).await?;
-
-            let bm = vyoma_net::BridgeManager::new().await?;
-            bm.add_tap_to_bridge(tap_name, bridge_name).await?;
-
-            info!("TAP {} attached to bridge {}", tap_name, bridge_name);
-            Ok(())
-        })
+        let tm = vyoma_net::TapManager::new().await?;
+        tm.create_tap(tap_name).await?;
+        tm.set_up(tap_name).await?;
+        let bm = vyoma_net::BridgeManager::new().await?;
+        bm.add_tap_to_bridge(tap_name, bridge_name).await?;
+        info!("TAP {} attached to bridge {}", tap_name, bridge_name);
+        Ok(())
     }
 
-    pub fn remove_interface(name: &str) -> Result<()> {
+    pub async fn remove_interface(name: &str) -> Result<()> {
         info!("Removing network interface '{}'", name);
-
-        let rt = tokio::runtime::Runtime::new()?;
-        rt.block_on(async {
-            let bm = vyoma_net::BridgeManager::new().await?;
-            match bm.delete_bridge(name).await {
-                Ok(_) => {
-                    info!("Bridge {} deleted", name);
-                    Ok(())
-                }
-                Err(_) => {
-                    let tm = vyoma_net::TapManager::new().await?;
-                    tm.delete_tap(name).await?;
-                    info!("Interface {} deleted", name);
-                    Ok(())
-                }
+        let bm = vyoma_net::BridgeManager::new().await?;
+        match bm.delete_bridge(name).await {
+            Ok(_) => {
+                info!("Bridge {} deleted", name);
+                Ok(())
             }
-        })
+            Err(_) => {
+                let tm = vyoma_net::TapManager::new().await?;
+                tm.delete_tap(name).await?;
+                info!("Interface {} deleted", name);
+                Ok(())
+            }
+        }
     }
 
     pub fn setup_nat(bridge_cidr: &str) -> Result<()> {

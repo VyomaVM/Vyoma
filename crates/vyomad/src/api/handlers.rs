@@ -325,7 +325,7 @@ pub async fn restore_vm(
     // NetworkManager::setup_bridge(bridge_name, bridge_cidr)...
 
     let tap_name = format!("tap{}", &vm_id[0..8]);
-    NetworkManager::setup_tap(&tap_name, bridge_name).map_err(|e| {
+    NetworkManager::setup_tap(&tap_name, bridge_name).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("TAP setup: {}", e),
