@@ -36,19 +36,32 @@ impl DmManager {
         Ok(Self { dm })
     }
     
+    // fn device_size_sectors(path: &Path) -> Result<u64> {
+    //     use std::os::unix::fs::MetadataExt;
+    //     let meta = std::fs::metadata(path).map_err(StorageError::Io)?;
+    //     let bytes = meta.size();
+    //     Ok(bytes / 512)
+    // }
+
     fn device_size_sectors(path: &Path) -> Result<u64> {
-        use std::os::unix::fs::MetadataExt;
-        let meta = std::fs::metadata(path).map_err(StorageError::Io)?;
-        let bytes = meta.size();
-        Ok(bytes / 512)
+        use std::os::unix::io::AsRawFd;
+        let file = std::fs::File::open(path)
+            .map_err(StorageError::Io)?;
+        let mut size: u64 = 0;
+        unsafe {
+            if libc::ioctl(file.as_raw_fd(), 0x80081272 /* BLKGETSIZE64 */, &mut size as *mut u64) != 0 {
+                return Err(StorageError::Io(std::io::Error::last_os_error()));
+            }
+        }
+        Ok(size / 512)
     }
 
-pub fn create_snapshot(
-    &self,
-    name: &str,
-    base_dev: &Path,
-    cow_dev: &Path,
-) -> Result<DmDevice> {
+    pub fn create_snapshot(
+        &self,
+        name: &str,
+        base_dev: &Path,
+        cow_dev: &Path,
+    ) -> Result<DmDevice> {
         info!("Creating snapshot {}: base={:?}, cow={:?}", name, base_dev, cow_dev);
 
         if !base_dev.exists() {
@@ -82,6 +95,26 @@ pub fn create_snapshot(
             .table_load(&DevId::Name(&origin_name), &origin_table, DmOptions::default())
             .map_err(|e| StorageError::Other(format!("Failed to load origin table via dm API: {}", e)))?;
 
+        // Ensure the origin device node appears (dmsetup resume triggers udev)
+        let _ = std::process::Command::new("dmsetup")
+            .args(&["resume", &origin_name_str])
+            .output();
+
+        // Wait for the origin device node to appear
+        let origin_dev_path = format!("/dev/mapper/{}", origin_name_str);
+        for _ in 0..50 {
+            if std::path::Path::new(&origin_dev_path).exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        if !std::path::Path::new(&origin_dev_path).exists() {
+            return Err(StorageError::Other(format!(
+                "Origin device {} did not appear after waiting",
+                origin_dev_path
+            )));
+        }
+
         // 2. Create snapshot device via devicemapper API
         let snap_name = DmName::new(name)
             .map_err(|e| StorageError::Other(format!("Invalid DM name {}: {}", name, e)))?;
@@ -89,7 +122,6 @@ pub fn create_snapshot(
         let snap_uuid = DmUuid::new(&snap_uuid_str)
             .map_err(|e| StorageError::Other(format!("Invalid UUID for snapshot: {}", e)))?;
 
-        let origin_dev_path = format!("/dev/mapper/{}", origin_name_str);
         let snap_table = vec![(
             0u64,
             sectors,
@@ -104,8 +136,10 @@ pub fn create_snapshot(
             .table_load(&DevId::Name(&snap_name), &snap_table, DmOptions::default())
             .map_err(|e| StorageError::Other(format!("Failed to load snapshot table via dm API: {}", e)))?;
 
-        self.activate_device(&origin_name)?;
-        self.activate_device(&snap_name)?;
+        // Ensure the snapshot device node appears
+        let _ = std::process::Command::new("dmsetup")
+            .args(&["resume", name])
+            .output();
 
         let path = PathBuf::from(format!("/dev/mapper/{}", name));
         Ok(DmDevice::new(name.to_string(), path))
