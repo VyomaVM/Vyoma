@@ -1,6 +1,16 @@
 #!/bin/bash
 set -e
 
+# Locate cargo (works with rustup and system installs)
+if command -v cargo >/dev/null 2>&1; then
+    CARGO=$(command -v cargo)
+elif [ -f "$HOME/.cargo/bin/cargo" ]; then
+    CARGO="$HOME/.cargo/bin/cargo"
+else
+    echo "Error: cargo not found. Install Rust from https://rustup.rs"
+    exit 1
+fi
+
 VERSION="2.7.0"
 WORK_DIR="target/rpm"
 SOURCES_DIR="${WORK_DIR}/SOURCES/vyoma-${VERSION}"
@@ -46,7 +56,7 @@ mkdir -p "${WORK_DIR}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 mkdir -p "${SOURCES_DIR}"
 
 # 1. Build Binaries
-cargo build --release --bin vyomad --bin vyoma
+"$CARGO" build --release --bin vyomad --bin vyoma
 
 # 2. Copy binaries to source dir
 cp target/release/vyomad "${SOURCES_DIR}/"

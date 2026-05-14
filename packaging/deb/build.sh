@@ -1,6 +1,16 @@
 #!/bin/bash
 set -e
 
+# Locate cargo (works with rustup and system installs)
+if command -v cargo >/dev/null 2>&1; then
+    CARGO=$(command -v cargo)
+elif [ -f "$HOME/.cargo/bin/cargo" ]; then
+    CARGO="$HOME/.cargo/bin/cargo"
+else
+    echo "Error: cargo not found. Install Rust from https://rustup.rs"
+    exit 1
+fi
+
 VERSION="2.7.0"
 ARCH="amd64"
 PKG_NAME="vyoma"
@@ -44,7 +54,7 @@ verify_checksum() {
 echo "Building Vyoma v${VERSION} for Debian..."
 
 # 1. Build Binaries
-cargo build --release --bin vyomad --bin vyoma
+"$CARGO" build --release --bin vyomad --bin vyoma
 
 # 2. Prepare Directory Structure
 mkdir -p "${WORK_DIR}/usr/bin"

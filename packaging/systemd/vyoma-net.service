@@ -1,0 +1,23 @@
+[Unit]
+Description=Vyoma Network Bridge
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=vyomad.service
+Wants=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '
+    # Create bridge if not exists
+    if ! ip link show vyoma-br0 >/dev/null 2>&1; then
+        ip link add vyoma-br0 type bridge
+        ip addr add 172.16.0.1/24 dev vyoma-br0
+        ip link set vyoma-br0 up
+    fi
+    # Enable IP forwarding
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+'
+
+[Install]
+WantedBy=multi-user.target
