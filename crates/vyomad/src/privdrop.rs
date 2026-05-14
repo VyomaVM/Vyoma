@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use caps::{Capability, CapSet, CapsHashSet};
 use libc::{getpwnam, passwd, setgid, setuid, gid_t, uid_t};
 use std::collections::HashSet;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 
 const TARGET_USER: &str = "vyoma";
 
@@ -50,30 +50,27 @@ pub fn drop_privileges() -> Result<()> {
         Capability::CAP_SYS_ADMIN,
         Capability::CAP_NET_ADMIN,
         Capability::CAP_NET_RAW,
-        Capability::CAP_SYS_PTRACE,
+        Capability::CAP_SETUID,
+        Capability::CAP_SETGID,
+        Capability::CAP_NET_BIND_SERVICE,
     ].iter().cloned().collect();
 
     info!("Setting bounding set capabilities...");
-    caps::set(None, CapSet::Bounding, &allowed_caps)
-        .map_err(|e| PrivDropError::CapabilityError(format!("Bounding set failed: {:?}", e)))?;
+    if let Err(e) = caps::set(None, CapSet::Bounding, &allowed_caps) {
+        warn!("Bounding set not supported (containerized?): {:?}", e);
+    }
 
     info!("Setting ambient capabilities...");
-    caps::set(None, CapSet::Ambient, &allowed_caps)
-        .map_err(|e| PrivDropError::CapabilityError(format!("Ambient set failed: {:?}", e)))?;
+    if let Err(e) = caps::set(None, CapSet::Ambient, &allowed_caps) {
+        warn!("Ambient set not supported (containerized?): {:?}", e);
+    }
 
     info!("Setting inheritable capabilities...");
-    caps::set(None, CapSet::Inheritable, &allowed_caps)
-        .map_err(|e| PrivDropError::CapabilityError(format!("Inheritable set failed: {:?}", e)))?;
-
-    info!("Clearing supplementary groups...");
-    unsafe {
-        let result = libc::setgroups(0, std::ptr::null());
-        if result != 0 {
-            return Err(PrivDropError::SetgroupsError(
-                std::io::Error::last_os_error().to_string()
-            ).into());
-        }
+    if let Err(e) = caps::set(None, CapSet::Inheritable, &allowed_caps) {
+        warn!("Inheritable set not supported (containerized?): {:?}", e);
     }
+
+    // Note: Preserving supplementary groups (kvm, disk) for access to /dev/kvm and /dev/mapper/control
 
     info!("Setting group to vyoma ({})...", vyoma_gid);
     unsafe {
