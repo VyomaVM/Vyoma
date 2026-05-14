@@ -173,6 +173,11 @@ cp kernel.bzimage "$KERNEL_DEST"
 chmod 644 "$KERNEL_DEST"
 echo "Kernel binary bundled"
 
+# Also place Cloud Hypervisor where the daemon expects it
+cp cloud-hypervisor "${WORK_DIR}/var/lib/vyoma/bin/cloud-hypervisor"
+chmod 755 "${WORK_DIR}/var/lib/vyoma/bin/cloud-hypervisor"
+echo "Cloud Hypervisor bundled to /var/lib/vyoma/bin"
+
 # Bundle virtiofsd (from system or project bin)
 if [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
     cp bin/virtiofsd "${WORK_DIR}/usr/lib/vyoma/virtiofsd"

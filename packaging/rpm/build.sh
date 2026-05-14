@@ -182,7 +182,9 @@ cp -r cni %{buildroot}/usr/lib/vyoma/cni
 
 # Install kernel binary
 mkdir -p %{buildroot}/var/lib/vyoma/bin
-install -m 644 bin/vmlinux %{buildroot}/var/lib/vyoma/bin/vmlinux"
+install -m 644 bin/vmlinux %{buildroot}/var/lib/vyoma/bin/vmlinux
+install -m 755 cloud-hypervisor %{buildroot}/var/lib/vyoma/bin/cloud-hypervisor"
+
 
 if [ "$UI_AVAILABLE" = true ]; then
     SPEC_CONTENT="$SPEC_CONTENT
@@ -204,7 +206,8 @@ SPEC_CONTENT="$SPEC_CONTENT
 /usr/bin/cloud-hypervisor
 /etc/systemd/system/vyomad.service
 /usr/lib/vyoma/cni
-/var/lib/vyoma/bin/vmlinux"
+/var/lib/vyoma/bin/vmlinux
+/var/lib/vyoma/bin/cloud-hypervisor"
 
 if [ "$UI_AVAILABLE" = true ]; then
     SPEC_CONTENT="$SPEC_CONTENT
