@@ -95,8 +95,8 @@ struct Args {
     /// Path to listen on (Unix Socket)
     #[arg(short, long, default_value = "/run/vyoma/vyoma.sock")]
     socket_path: String,
-    /// HTTP port for dashboard (default: 3000, use 0 to disable)
-    #[arg(short = 'p', long, default_value_t = 3000)]
+    /// HTTP port for dashboard (default: 8080, use 0 to disable)
+    #[arg(short = 'p', long, default_value_t = 8080)]
     http_port: u16,
     /// HTTP bind IP address (defaults to 127.0.0.1 for security)
     /// Use 0.0.0.0 for remote access (requires --api-token for authentication)
@@ -213,7 +213,7 @@ async fn main() {
 
     let mut swarm_raft = crate::swarm::SwarmRaft::new(node_id);
 
-    let net_integration = network_integration.blocking_lock().as_ref().unwrap().clone();
+    let net_integration = network_integration.lock().await.as_ref().unwrap().clone();
     let callback = crate::swarm::create_network_callback(net_integration);
     swarm_raft.set_side_effect_callback(callback);
     
@@ -447,6 +447,16 @@ async fn main() {
     let permissions = std::fs::Permissions::from_mode(0o660);
     if let Err(e) = std::fs::set_permissions(&actual_socket_path, permissions) {
         warn!("Could not set 0660 permissions on socket: {}", e);
+    }
+
+    // Change socket ownership to vyoma:vyoma so CLI can access it
+    let pw = unsafe { libc::getpwnam(b"vyoma\0".as_ptr() as *const _) };
+    if !pw.is_null() {
+        let uid = unsafe { (*pw).pw_uid };
+        let gid = unsafe { (*pw).pw_gid };
+        let path_c = std::ffi::CString::new(actual_socket_path.clone()).unwrap();
+        unsafe { libc::chown(path_c.as_ptr(), uid, gid); }
+        info!("Socket ownership changed to vyoma:vyoma");
     }
 
     info!("Daemon listening on Unix Socket {}", actual_socket_path);
