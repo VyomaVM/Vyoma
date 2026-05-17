@@ -1,0 +1,53 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  e2e-tests:
+    runs-on: vyoma-kvm-runner
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build binaries
+        run: |
+          make build
+        env:
+          CGO_ENABLED: 1
+
+      - name: Verify binaries exist
+        run: |
+          ls -la target/release/vyoma target/release/vyomad
+
+      - name: Run E2E Test Suite
+        run: |
+          sudo chmod +x tests/e2e/run_all.sh
+          sudo tests/e2e/run_all.sh
+        env:
+          HOME: /root
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            /tmp/vyoma-tests-*/
+            tests/e2e/*.log
+          retention-days: 7
+
+      - name: Collect test results
+        if: always()
+        run: |
+          echo "Test suite completed with status: ${{ job.status }}"

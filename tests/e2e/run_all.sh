@@ -25,5 +25,8 @@ run_test ./tests/e2e/04_compose.sh
 run_test ./tests/e2e/05_swarm.sh
 run_test ./tests/e2e/06_network.sh
 run_test ./tests/e2e/07_snapshot.sh
+run_test ./tests/e2e/08_snapshot_restore.sh
+run_test ./tests/e2e/09_port_forwarding.sh
+run_test ./tests/e2e/10_volume_mount.sh
 
 echo "Suite Completed."
