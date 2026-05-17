@@ -169,3 +169,28 @@ unregister_vm() {
     done
     RUNNING_VMS=("${new_array[@]}")
 }
+
+wait_for_vm_state_from_cli() {
+    local vyoma_cmd="$1"
+    local vm_id=$2
+    local expected_state=$3
+    local timeout=${4:-30}
+    local interval=1
+
+    local elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        local current_state=$($vyoma_cmd ps 2>/dev/null | grep "$vm_id" | awk '{print $NF}' | tr -d '[]')
+
+        if [ "$current_state" = "$expected_state" ]; then
+            echo "VM $vm_id reached state: $expected_state"
+            return 0
+        fi
+
+        sleep $interval
+        elapsed=$((elapsed + interval))
+    done
+
+    echo -e "${RED}Timeout: VM $vm_id did not reach state $expected_state within ${timeout}s${NC}"
+    return 1
+}
+}
