@@ -1,6 +1,28 @@
 #!/bin/bash
 
-# Utility to invoke tests and track partial failures
+CLEANUP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/cleanup-all.sh"
+
+pre_run_cleanup() {
+    if [ -f "$CLEANUP_SCRIPT" ]; then
+        echo "Running pre-test cleanup to ensure clean state..."
+        sudo bash "$CLEANUP_SCRIPT" || true
+        echo "Pre-test cleanup completed"
+    else
+        echo "Warning: cleanup-all.sh not found at $CLEANUP_SCRIPT"
+    fi
+}
+
+post_run_cleanup() {
+    echo "Running post-test cleanup..."
+    sudo pkill vyomad 2>/dev/null || true
+    if [ -f "$CLEANUP_SCRIPT" ]; then
+        sudo bash "$CLEANUP_SCRIPT" || true
+    fi
+    echo "Post-test cleanup completed"
+}
+
+trap post_run_cleanup EXIT
+
 run_test() {
     local script=$1
     echo "--------------------------------------------------"
@@ -11,10 +33,11 @@ run_test() {
     else
         echo "❌ FAIL: $script"
     fi
-    # Cleanup between tests just in case
-    sudo pkill vyomad || true
+    sudo pkill vyomad 2>/dev/null || true
     echo ""
 }
+
+pre_run_cleanup
 
 echo "Starting Full Regression Suite..."
 

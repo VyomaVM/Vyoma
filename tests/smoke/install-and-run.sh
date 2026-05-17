@@ -207,6 +207,18 @@ if command -v vyoma &> /dev/null; then
     echo -e "${RED}Warning: vyoma still in path after uninstall${NC}"
 fi
 
+echo -e "${YELLOW}Step 10: Running complete cleanup script to reset system...${NC}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if [ -f "$PROJECT_ROOT/scripts/cleanup-all.sh" ]; then
+    echo "Calling cleanup-all.sh..."
+    "$PROJECT_ROOT/scripts/cleanup-all.sh"
+    echo -e "${GREEN}Cleanup script completed${NC}"
+else
+    echo -e "${YELLOW}Warning: cleanup-all.sh not found, skipping${NC}"
+fi
+
 echo -e "${GREEN}Smoke test passed!${NC}"
 echo "=========================================="
 echo "Log file: $LOG_FILE"
