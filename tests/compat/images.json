@@ -211,6 +211,176 @@
       "healthcheck_path": "/",
       "expected_status": [301, 302, 200],
       "description": "WordPress latest"
+    },
+    {
+      "name": "library/busybox:latest",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["echo", "ok"],
+      "expected_exit_code": 0,
+      "description": "Minimal busybox image"
+    },
+    {
+      "name": "library/rockylinux:9",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["echo", "hello"],
+      "expected_exit_code": 0,
+      "description": "Rocky Linux 9"
+    },
+    {
+      "name": "library/python:3.10-slim",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["python3", "-c", "print('ok')"],
+      "expected_exit_code": 0,
+      "description": "Python 3.10 slim"
+    },
+    {
+      "name": "library/node:21-alpine",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["node", "-v"],
+      "expected_exit_code": 0,
+      "description": "Node.js 21 on Alpine"
+    },
+    {
+      "name": "library/nginx:alpine",
+      "healthcheck_type": "http",
+      "port": 80,
+      "healthcheck_path": "/",
+      "expected_status": [200, 204],
+      "description": "Nginx Alpine variant"
+    },
+    {
+      "name": "library/postgres:14",
+      "healthcheck_type": "postgres",
+      "port": 5432,
+      "healthcheck_cmd": ["pg_isready", "-U", "postgres"],
+      "expected_exit_code": 0,
+      "description": "PostgreSQL 14"
+    },
+    {
+      "name": "library/mariadb:10.11",
+      "healthcheck_type": "tcp",
+      "port": 3306,
+      "description": "MariaDB 10.11 LTS"
+    },
+    {
+      "name": "library/redis:alpine",
+      "healthcheck_type": "redis",
+      "port": 6379,
+      "description": "Redis Alpine variant"
+    },
+    {
+      "name": "library/elasticsearch:7",
+      "healthcheck_type": "http",
+      "port": 9200,
+      "healthcheck_path": "/",
+      "expected_status": [200],
+      "description": "Elasticsearch 7"
+    },
+    {
+      "name": "library/golang:1.20",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["go", "version"],
+      "expected_exit_code": 0,
+      "description": "Go 1.20"
+    },
+    {
+      "name": "library/ruby:3.2",
+      "healthcheck_type": "exec",
+      "healthcheck_cmd": ["ruby", "-v"],
+      "expected_exit_code": 0,
+      "description": "Ruby 3.2"
+    },
+    {
+      "name": "library/php:8.2-apache",
+      "healthcheck_type": "http",
+      "port": 80,
+      "healthcheck_path": "/",
+      "expected_status": [200],
+      "description": "PHP 8.2 with Apache"
+    },
+    {
+      "name": "library/openjdk:17-slim",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["java", "-version"],
+      "expected_exit_code": 0,
+      "description": "OpenJDK 17 slim"
+    },
+    {
+      "name": "library/dotnet:7.0",
+      "healthcheck_type": "generic",
+      "healthcheck_cmd": ["dotnet", "--version"],
+      "expected_exit_code": 0,
+      "description": ".NET 7.0"
+    },
+    {
+      "name": "library/jenkins/jenkins:lts",
+      "healthcheck_type": "http",
+      "port": 8080,
+      "healthcheck_path": "/login",
+      "expected_status": [200, 403],
+      "description": "Jenkins LTS"
+    },
+    {
+      "name": "library/grafana:latest",
+      "healthcheck_type": "http",
+      "port": 3000,
+      "healthcheck_path": "/api/health",
+      "expected_status": [200],
+      "description": "Grafana monitoring"
+    },
+    {
+      "name": "library/prometheus:latest",
+      "healthcheck_type": "http",
+      "port": 9090,
+      "healthcheck_path": "/-/healthy",
+      "expected_status": [200],
+      "description": "Prometheus metrics"
+    },
+    {
+      "name": "library/rabbitmq:3.12-management",
+      "healthcheck_type": "http",
+      "port": 15672,
+      "healthcheck_path": "/api/healthchecks",
+      "expected_status": [200],
+      "description": "RabbitMQ 3.12 with management"
+    },
+    {
+      "name": "library/traefik:latest",
+      "healthcheck_type": "http",
+      "port": 8080,
+      "healthcheck_path": "/ping",
+      "expected_status": [200],
+      "description": "Traefik reverse proxy"
+    },
+    {
+      "name": "library/minio/server:latest",
+      "healthcheck_type": "http",
+      "port": 9000,
+      "healthcheck_path": "/minio/health/live",
+      "expected_status": [200],
+      "description": "MinIO object storage"
+    },
+    {
+      "name": "library/consul:latest",
+      "healthcheck_type": "http",
+      "port": 8500,
+      "healthcheck_path": "/v1/status/leader",
+      "expected_status": [200],
+      "description": "Consul service mesh"
+    },
+    {
+      "name": "library/vault:latest",
+      "healthcheck_type": "http",
+      "port": 8200,
+      "healthcheck_path": "/v1/sys/health",
+      "expected_status": [200, 429],
+      "description": "HashiCorp Vault"
+    },
+    {
+      "name": "library/cassandra:4.1",
+      "healthcheck_type": "tcp",
+      "port": 9042,
+      "description": "Apache Cassandra 4.1"
     }
   ]
 }
