@@ -1,0 +1,84 @@
+name: Smoke Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build release binaries
+        run: |
+          make build
+        env:
+          CGO_ENABLED: 1
+
+      - name: Build DEB package
+        run: |
+          chmod +x packaging/deb/build.sh
+          ./packaging/deb/build.sh
+
+      - name: Verify package created
+        run: |
+          ls -la dist/
+          ls -la dist/vyoma_*.deb
+
+      - name: Upload package as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vyoma-deb
+          path: dist/vyoma_*.deb
+          retention-days: 1
+
+  smoke-test-remote:
+    needs: smoke-test
+    runs-on: [self-hosted, vyoma-kvm-runner]
+    timeout-minutes: 30
+
+    steps:
+      - name: Download package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vyoma-deb
+
+      - name: Display package
+        run: |
+          ls -la *.deb
+
+      - name: Run smoke test
+        run: |
+          chmod +x tests/smoke/install-and-run.sh
+          sudo tests/smoke/install-and-run.sh
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-logs
+          path: |
+            /tmp/vyoma-smoke-test-*.log
+            /tmp/vyomad.log
+          retention-days: 7
+
+      - name: Report status
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "Smoke test passed"
+          else
+            echo "Smoke test failed"
+            exit 1
+          fi
