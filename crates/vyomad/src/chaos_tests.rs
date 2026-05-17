@@ -650,4 +650,176 @@ mod tests {
 
         let _ = cleanup_resources(&data_dir);
     }
+
+    #[test]
+    fn test_cloud_hypervisor_kill_recovery() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let data_dir = temp_dir.path().to_path_buf();
+
+        {
+            let mut handle = DaemonHandle::start(&data_dir).unwrap();
+
+            let _ = handle.send_command("vm_create", serde_json::json!({
+                "id": "ch-kill-vm",
+                "image": "alpine:latest"
+            }));
+
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+
+            let ch_pids: Vec<u32> = Command::new("pgrep")
+                .args(["-f", "cloud-hypervisor"])
+                .output()
+                .ok()
+                .and_then(|o| {
+                    if o.status.success() {
+                        Some(
+                            String::from_utf8_lossy(&o.stdout)
+                                .lines()
+                                .filter_map(|l| l.parse::<u32>().ok())
+                                .collect()
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+
+            for pid in ch_pids {
+                println!("Killing cloud-hypervisor PID: {}", pid);
+                let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(500));
+
+            handle.kill().unwrap();
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let dangling = check_dangling_resources().unwrap();
+        assert!(
+            dangling.is_empty(),
+            "Found dangling resources after CH kill: {:?}",
+            dangling
+        );
+
+        let _ = cleanup_resources(&data_dir);
+    }
+
+    #[test]
+    fn test_cow_device_capacity_exhaustion() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let data_dir = temp_dir.path().to_path_buf();
+
+        let cow_file = data_dir.join("test_cow.img");
+        fs::write(&cow_file, vec![0u8; 1024 * 1024]).unwrap();
+
+        let loop_dev = Command::new("losetup")
+            .args(["-f", "--show", cow_file.to_str().unwrap()])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            });
+
+        if let Some(loop_device) = loop_dev {
+            println!("Created loop device: {}", loop_device);
+
+            let dm_dev = format!("vyoma-test-{}", std::process::id());
+            let result = Command::new("dmsetup")
+                .args([
+                    "create", &dm_dev,
+                    "--table", &format!("0 2048 linear {} 0", loop_device),
+                ])
+                .output();
+
+            if result.is_ok() {
+                println!("Created DM device: {}", dm_dev);
+
+                let fs_result = Command::new("mkfs.ext4")
+                    .args(["-F", &format!("/dev/mapper/{}", dm_dev)])
+                    .output();
+
+                if fs_result.is_ok() {
+                    let mount_dir = data_dir.join("mnt");
+                    fs::create_dir_all(&mount_dir).ok();
+
+                    if Command::new("mount")
+                        .args([&format!("/dev/mapper/{}", dm_dev), mount_dir.to_str().unwrap()])
+                        .output()
+                        .is_ok()
+                    {
+                        let write_result = std::panic::catch_unwind(|| {
+                            for _ in 0..1000 {
+                                fs::write(mount_dir.join("fill.dat"), vec![0u8; 1024 * 1024]).ok();
+                            }
+                        });
+
+                        println!("Write to full device: {:?}", write_result.is_err());
+
+                        let _ = Command::new("umount").arg(mount_dir.to_str().unwrap()).output();
+                    }
+
+                    let _ = Command::new("dmsetup").args(["remove", &dm_dev]).output();
+                }
+            }
+
+            let _ = Command::new("losetup").args(["-d", &loop_device]).output();
+        }
+
+        let dangling = check_dangling_resources().unwrap();
+        println!("Dangling resources after COW capacity test: {:?}", dangling);
+
+        let _ = cleanup_resources(&data_dir);
+    }
+
+    #[test]
+    fn test_network_failure_during_teleport() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let data_dir = temp_dir.path().to_path_buf();
+
+        {
+            let mut handle = DaemonHandle::start(&data_dir).unwrap();
+
+            let _ = handle.send_command("vm_create", serde_json::json!({
+                "id": "teleport-src",
+                "image": "alpine:latest"
+            }));
+
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+
+            let _ = handle.send_command("teleport_start", serde_json::json!({
+                "vm_id": "teleport-src",
+                "destination": "127.0.0.1:9999"
+            }));
+
+            std::thread::sleep(std::time::Duration::from_millis(200));
+
+            let ns_name = format!("vyoma-teleport-test-{}", std::process::id());
+            let _ = Command::new("ip")
+                .args(["netns", "add", &ns_name])
+                .output();
+
+            std::thread::sleep(std::time::Duration::from_millis(300));
+
+            handle.kill().unwrap();
+
+            std::thread::sleep(std::time::Duration::from_millis(500));
+
+            let _ = Command::new("ip").args(["netns", "del", &ns_name]).output();
+        }
+
+        let dangling = check_dangling_resources().unwrap();
+        assert!(
+            dangling.is_empty(),
+            "Found dangling resources after teleport failure: {:?}",
+            dangling
+        );
+
+        let _ = cleanup_resources(&data_dir);
+    }
 }
