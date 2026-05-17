@@ -52,6 +52,12 @@ jobs:
             test_path: chaos_tests::tests::test_netns_leak_recovery
           - scenario: rapid_restart
             test_path: chaos_tests::tests::test_rapid_restart_stress
+          - scenario: cloud_hypervisor_kill
+            test_path: chaos_tests::tests::test_cloud_hypervisor_kill_recovery
+          - scenario: cow_capacity
+            test_path: chaos_tests::tests::test_cow_device_capacity_exhaustion
+          - scenario: teleport_failure
+            test_path: chaos_tests::tests::test_network_failure_during_teleport
 
     steps:
       - name: Checkout Code
@@ -150,7 +156,7 @@ jobs:
           echo "## Chaos Test Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          SCENARIOS=("daemon_start_stop" "sigkill_vm_create" "wal_corruption" "running_vm_survives" "resource_cleanup" "netns_leak" "rapid_restart")
+          SCENARIOS=("daemon_start_stop" "sigkill_vm_create" "wal_corruption" "running_vm_survives" "resource_cleanup" "netns_leak" "rapid_restart" "cloud_hypervisor_kill" "cow_capacity" "teleport_failure")
           TOTAL=${#SCENARIOS[@]}
 
           echo "| Scenario | Status |" >> $GITHUB_STEP_SUMMARY
