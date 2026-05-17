@@ -39,15 +39,32 @@ export function Layout({ children, activeTab, onTabChange }: LayoutProps) {
       <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0">
         <div className="p-5 flex items-center gap-3 border-b border-slate-800/80">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center">
-            <svg width="32" height="32" viewBox="0 0 64 64" className="w-full h-full">
+            <svg className="nav__icon" width="28" height="28" viewBox="0 0 64 64" fill="none">
               <defs>
-                <linearGradient id="flame" x1="0%" y1="100%" x2="0%" y2="0%">
-                  <stop offset="0%" stopColor="#FF4500"/>
-                  <stop offset="50%" stopColor="#FF6B2B"/>
-                  <stop offset="100%" stopColor="#FFA500"/>
+                <radialGradient id="navSphere" cx="38%" cy="32%" r="65%">
+                  <stop offset="0%" stop-color="#fdd835"/>
+                  <stop offset="60%" stop-color="#d4a017"/>
+                  <stop offset="100%" stop-color="#7a5500"/>
+                </radialGradient>
+                <linearGradient id="navOrbit" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#67e8f9"/>
+                  <stop offset="100%" stop-color="#3b82f6"/>
                 </linearGradient>
               </defs>
-              <path d="M32 4C32 4 18 20 18 36c0 7.7 6.3 14 14 14s14-6.3 14-14C46 20 32 4 32 4zm0 40c-4.4 0-8-3.6-8-8 0-6 8-16 8-16s8 10 8 16c0 4.4-3.6 8-8 8z" fill="url(#flame)"/>
+              <circle cx="32" cy="32" r="24" fill="#0d0d18" stroke="#1e1e38" stroke-width="1"/>
+              <circle cx="32" cy="32" r="20" fill="url(#navSphere)" opacity="0.9"/>
+              <g stroke="#04040a" stroke-width="1.4" fill="none" opacity="0.6">
+                <line x1="32" y1="12" x2="32" y2="52"/>
+                <line x1="12" y1="32" x2="52" y2="32"/>
+                <line x1="18" y1="18" x2="46" y2="46"/>
+                <line x1="46" y1="18" x2="18" y2="46"/>
+                <ellipse cx="32" cy="32" rx="20" ry="9"/>
+                <ellipse cx="32" cy="32" rx="9" ry="20"/>
+              </g>
+              <circle cx="32" cy="32" r="3" fill="#fdd835"/>
+              <ellipse cx="32" cy="32" rx="30" ry="9" fill="none"
+                stroke="url(#navOrbit)" stroke-width="2.5"
+                transform="rotate(-25 32 32)" opacity="0.9"/>
             </svg>
           </div>
           <h1 className="font-bold text-lg tracking-tight text-white">Vyoma</h1>
