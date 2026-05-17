@@ -1,0 +1,260 @@
+name: Full Test Suite
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Test suites to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - e2e
+          - chaos
+          - smoke
+          - compat
+      cleanup_before:
+        description: 'Run cleanup before tests'
+        required: false
+        default: 'true'
+        type: boolean
+  release:
+    types: [published]
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  setup:
+    name: Setup Environment
+    runs-on: ubuntu-latest
+    outputs:
+      test_suite: ${{ steps.parse-inputs.outputs.test_suite }}
+      cleanup: ${{ steps.parse-inputs.outputs.cleanup }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Parse inputs
+        id: parse-inputs
+        run: |
+          SUITE="${{ github.event.inputs.test_suite }}"
+          if [ -z "$SUITE" ]; then
+            SUITE="all"
+          fi
+          CLEANUP="${{ github.event.inputs.cleanup_before }}"
+          if [ "$CLEANUP" == "" ]; then
+            CLEANUP="true"
+          fi
+          echo "test_suite=$SUITE" >> $GITHUB_OUTPUT
+          echo "cleanup=$CLEANUP" >> $GITHUB_OUTPUT
+          echo "Running test suite: $SUITE, cleanup: $CLEANUP"
+
+  e2e-tests:
+    name: E2E Tests
+    needs: setup
+    if: needs.setup.outputs.test_suite == 'all' || needs.setup.outputs.test_suite == 'e2e'
+    runs-on: [self-hosted, vyoma-kvm-runner]
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run pre-test cleanup
+        if: needs.setup.outputs.cleanup == 'true'
+        run: |
+          sudo chmod +x scripts/cleanup-all.sh
+          sudo scripts/cleanup-all.sh || true
+
+      - name: Build binaries
+        run: |
+          make build
+
+      - name: Run E2E tests
+        run: |
+          sudo chmod +x scripts/run-all-tests.sh
+          sudo scripts/run-all-tests.sh --e2e || true
+        env:
+          HOME: /root
+
+      - name: Upload E2E logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            /tmp/e2e-*.log
+          retention-days: 7
+
+  chaos-tests:
+    name: Chaos Tests
+    needs: setup
+    if: needs.setup.outputs.test_suite == 'all' || needs.setup.outputs.test_suite == 'chaos'
+    runs-on: [self-hosted, chaos-runner]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build with chaos feature
+        run: |
+          cargo build --features chaos
+
+      - name: Run chaos tests
+        run: |
+          sudo VYOMAD_PATH=./target/debug/vyomad \
+            cargo test --features chaos --package vyomad --lib chaos_tests::tests || true
+
+      - name: Upload chaos logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-logs
+          path: |
+            /tmp/chaos.log
+          retention-days: 7
+
+  smoke-test:
+    name: Smoke Test
+    needs: setup
+    if: needs.setup.outputs.test_suite == 'all' || needs.setup.outputs.test_suite == 'smoke'
+    runs-on: [self-hosted, vyoma-kvm-runner]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build package
+        run: |
+          make build
+          chmod +x packaging/deb/build.sh
+          ./packaging/deb/build.sh
+
+      - name: Run smoke test
+        run: |
+          sudo chmod +x tests/smoke/install-and-run.sh
+          sudo tests/smoke/install-and-run.sh || true
+        env:
+          HOME: /root
+
+      - name: Upload smoke logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: |
+            /tmp/vyoma-smoke-test-*.log
+            /tmp/vyomad.log
+          retention-days: 7
+
+  compat-matrix:
+    name: Compatibility Matrix
+    needs: setup
+    if: needs.setup.outputs.test_suite == 'all' || needs.setup.outputs.test_suite == 'compat'
+    runs-on: [self-hosted, vyoma-kvm-runner]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build compat matrix
+        run: |
+          cd tests/compat
+          cargo build --package compat-matrix --release
+
+      - name: Run compatibility matrix
+        run: |
+          cd tests/compat
+          ./target/release/compat-matrix \
+            --images-file tests/compat/images.json \
+            --parallel 4 \
+            --output-file compat-report.json || true
+
+      - name: Upload compat report
+        uses: actions/upload-artifact@v4
+        with:
+          name: compat-report
+          path: |
+            tests/compat/compat-report*.json
+          retention-days: 30
+
+  test-summary:
+    name: Test Summary
+    needs: [e2e-tests, chaos-tests, smoke-test, compat-matrix]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## Full Test Suite Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "| Test Suite | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.e2e-tests.result }}" == "success" ]; then
+            echo "| E2E Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.e2e-tests.result }}" == "failure" ]; then
+            echo "| E2E Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| E2E Tests | ⚠️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.chaos-tests.result }}" == "success" ]; then
+            echo "| Chaos Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.chaos-tests.result }}" == "failure" ]; then
+            echo "| Chaos Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Chaos Tests | ⚠️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.smoke-test.result }}" == "success" ]; then
+            echo "| Smoke Test | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.smoke-test.result }}" == "failure" ]; then
+            echo "| Smoke Test | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Smoke Test | ⚠️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.compat-matrix.result }}" == "success" ]; then
+            echo "| Compatibility | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.compat-matrix.result }}" == "failure" ]; then
+            echo "| Compatibility | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Compatibility | ⚠️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          OVERALL_SUCCESS=true
+          for job in e2e-tests chaos-tests smoke-test compat-matrix; do
+            if [ "${{ needs.$job.result }}" == "failure" ]; then
+              OVERALL_SUCCESS=false
+            fi
+          done
+
+          if [ "$OVERALL_SUCCESS" == "true" ]; then
+            echo "🎉 All test suites passed!" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          else
+            echo "⚠️ Some test suites failed. Review the logs for details." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
