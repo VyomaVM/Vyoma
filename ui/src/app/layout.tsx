@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { Outlet, useLocation, Link } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
-import { SidebarItem } from '../components/ui';
+import { SidebarItem, ScrollArea } from '../components/ui';
 import { useUIStore } from '../stores/ui.store';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useFocusOnNavigate } from '../hooks/useFocusOnNavigate';
@@ -101,23 +101,25 @@ export function AppLayout() {
           </button>
         </div>
 
-        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {tabs.map((tab, index) => {
-            const isGroupEnd = index === 3 || index === 7;
-            const active = currentPath.startsWith(tab.path) || (tab.path === '/' && currentPath === '/');
-            return (
-              <div key={tab.id} onClick={closeSidebarOnMobile}>
-                <SidebarItem
-                  icon={tab.icon}
-                  label={tab.label}
-                  active={active}
-                  to={tab.path}
-                />
-                {isGroupEnd && <div className="my-4 border-t border-sidebar-border mx-2" />}
-              </div>
-            );
-          })}
-        </nav>
+        <ScrollArea className="flex-1">
+          <nav className="p-3 space-y-1">
+            {tabs.map((tab, index) => {
+              const isGroupEnd = index === 3 || index === 7;
+              const active = currentPath.startsWith(tab.path) || (tab.path === '/' && currentPath === '/');
+              return (
+                <div key={tab.id} onClick={closeSidebarOnMobile}>
+                  <SidebarItem
+                    icon={tab.icon}
+                    label={tab.label}
+                    active={active}
+                    to={tab.path}
+                  />
+                  {isGroupEnd && <div className="my-4 border-t border-sidebar-border mx-2" />}
+                </div>
+              );
+            })}
+          </nav>
+        </ScrollArea>
 
         <div className="p-4 border-t border-sidebar-border bg-sidebar">
           <div className="flex items-center gap-3 rounded-lg bg-card/50 p-3 border border-border">
