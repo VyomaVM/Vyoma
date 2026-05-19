@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { SidebarItem } from '../components/ui';
 
