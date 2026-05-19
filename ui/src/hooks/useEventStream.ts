@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-const API_BASE = import.meta.env.DEV ? 'http://localhost:3000' : '';
+const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : '';
 
 export interface EventMessage {
   id: string;

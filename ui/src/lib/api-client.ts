@@ -1,6 +1,6 @@
 import { useAuthStore } from '../stores/auth.store';
 
-const BASE_URL = import.meta.env.DEV ? 'http://localhost:3000' : '';
+const BASE_URL = import.meta.env.DEV ? 'http://localhost:8080' : '';
 
 export async function apiFetch<T = unknown>(path: string, options?: RequestInit): Promise<T> {
   const token = useAuthStore.getState().token;
