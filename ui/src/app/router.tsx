@@ -1,6 +1,7 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { AppLayout } from './layout';
 
+import { DashboardPage } from '../features/dashboard/DashboardPage';
 import { VmsPage } from '../features/vms/VmsPage';
 import { ImagesPage } from '../features/images/ImagesPage';
 import { VolumesPage } from '../features/volumes/VolumesPage';
@@ -10,15 +11,11 @@ import { TopologyPage } from '../features/topology/TopologyPage';
 import { ComposePage } from '../features/compose/ComposePage';
 import { HubPage } from '../features/hub/HubPage';
 import { ClusterPage } from '../features/cluster/ClusterPage';
+import { BuildsPage } from '../features/builds/BuildsPage';
+import { EventsPage } from '../features/events/EventsPage';
+import { AttestationPage } from '../features/attestation/AttestationPage';
+import { LogViewerPage } from '../features/logs/LogViewerPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
-
-// Placeholders for views that don't exist yet
-const Placeholder = ({ title }: { title: string }) => (
-  <div className="p-8 text-foreground">
-    <h1 className="text-2xl font-bold">{title}</h1>
-    <p className="mt-4 text-muted-foreground">This page is under construction.</p>
-  </div>
-);
 
 export const router = createBrowserRouter([
   {
@@ -27,7 +24,7 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <Placeholder title="Dashboard" />,
+        element: <DashboardPage />,
       },
       {
         path: 'vms',
@@ -67,19 +64,19 @@ export const router = createBrowserRouter([
       },
       {
         path: 'builds',
-        element: <Placeholder title="Builds" />,
+        element: <BuildsPage />,
       },
       {
         path: 'events',
-        element: <Placeholder title="Events" />,
+        element: <EventsPage />,
       },
       {
         path: 'attestation',
-        element: <Placeholder title="Attestation" />,
+        element: <AttestationPage />,
       },
       {
         path: 'logs/:vmId',
-        element: <Placeholder title="VM Logs" />,
+        element: <LogViewerPage />,
       },
       {
         path: 'settings',
