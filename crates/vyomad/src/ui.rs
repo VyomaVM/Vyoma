@@ -11,9 +11,14 @@ use crate::state::AppState;
 #[folder = "../../ui/dist"]
 pub struct Assets;
 
-fn inject_token(html: String, token: &str) -> String {
-    let meta_tag = format!(r#"<meta name="vyoma-api-token" content="{}">"#, token);
-    html.replace("</head>", &format!("{}</head>", meta_tag))
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn inject_meta(html: String, token: &str, version: &str) -> String {
+    let tags = format!(
+        r#"<meta name="vyoma-api-token" content="{}"><meta name="vyoma-daemon-version" content="{}">"#,
+        token, version
+    );
+    html.replace("</head>", &format!("{}</head>", tags))
 }
 
 pub async fn ui_handler(
@@ -33,7 +38,7 @@ pub async fn ui_handler(
             let body = if should_inject {
                 let token = state.api_token.as_ref().unwrap();
                 let html = String::from_utf8_lossy(&content.data.to_vec()).into_owned();
-                let modified = inject_token(html, token);
+                let modified = inject_meta(html, token, VERSION);
                 Body::from(modified)
             } else {
                 Body::from(content.data.to_vec())
@@ -55,7 +60,7 @@ pub async fn ui_handler(
                     let body = if state.api_token.is_some() {
                         let token = state.api_token.as_ref().unwrap();
                         let html = String::from_utf8_lossy(&content.data.to_vec()).into_owned();
-                        let modified = inject_token(html, token);
+                        let modified = inject_meta(html, token, VERSION);
                         Body::from(modified)
                     } else {
                         Body::from(content.data.to_vec())

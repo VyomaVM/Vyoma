@@ -32,6 +32,8 @@ export function AppLayout() {
   const currentPath = location.pathname;
   const mainRef = useRef<HTMLElement>(null);
   const { sidebarOpen, setSidebarOpen } = useUIStore();
+  
+  const daemonVersion = document.querySelector('meta[name="vyoma-daemon-version"]')?.getAttribute('content') || 'v2.1.2';
 
   useFocusOnNavigate(mainRef);
 
@@ -127,8 +129,8 @@ export function AppLayout() {
               <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse border-2 border-background" />
             </div>
             <div className="text-xs">
-              <div className="text-foreground font-medium">Daemon Active</div>
-              <div className="text-muted-foreground">v2.1.2</div>
+              <div className="font-semibold text-foreground">Daemon</div>
+              <div className="text-muted-foreground">v{daemonVersion.replace(/^v/, '')}</div>
             </div>
           </div>
         </div>
