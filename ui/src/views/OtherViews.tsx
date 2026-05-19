@@ -106,7 +106,7 @@ export function StatsView() {
           <EmptyState title="No cluster nodes" description="Join a swarm to see cluster stats." icon={<Server size={48} />} />
         ) : (
           data.map((n, i) => (
-            <Card key={i} hover>
+            <Card key={i} className="hover:border-primary/50 transition-colors duration-200">
               <div className="flex items-center gap-3 mb-2">
                 <Server className="text-orange-500" />
                 <div>
