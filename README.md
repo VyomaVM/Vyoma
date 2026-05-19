@@ -36,12 +36,12 @@ Go to the [Releases Page](https://github.com/Subeshrock/vyoma/releases) and down
 
 **Debian/Ubuntu:**
 ```bash
-sudo apt install ./vyoma_2.7.0_amd64.deb
+sudo apt install ./vyoma_2.8.0_amd64.deb
 ```
 
 **Fedora/RHEL/CentOS:**
 ```bash
-sudo rpm -i vyoma-2.7.0-1.x86_64.rpm
+sudo rpm -i vyoma-2.8.0-1.x86_64.rpm
 ```
 
 ### 3. Post-Install Group Setup

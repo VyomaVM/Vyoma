@@ -11,7 +11,7 @@ else
     exit 1
 fi
 
-VERSION="2.7.0"
+VERSION="2.8.0"
 WORK_DIR="target/rpm"
 SOURCES_DIR="${WORK_DIR}/SOURCES/vyoma-${VERSION}"
 
