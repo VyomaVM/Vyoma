@@ -1,73 +1,41 @@
-# React + TypeScript + Vite
+# Vyoma UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This is the frontend dashboard for the Vyoma project, built with React, TypeScript, Tailwind CSS, and Vite.
 
-Currently, two official plugins are available:
+## Architecture
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **`src/features/`**: The core of the application is feature-based. Each domain (e.g., VMs, Images, Networks) has its own directory containing the page components and local logic.
+- **`src/components/ui/`**: A shared library of reusable, theme-aware components built on top of Radix UI primitives and styled with Tailwind CSS (Shadcn pattern).
+- **`src/hooks/`**: Global React hooks, including data-fetching hooks powered by TanStack Query.
+- **`src/stores/`**: Global state management using Zustand (e.g., authentication, UI states).
+- **`src/lib/`**: Utilities and configuration files, including the core API client.
 
-## React Compiler
+## Design System
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+We use a custom design system based on Tailwind CSS. The design tokens are defined in `src/index.css` via CSS custom properties, providing easy theming capabilities (e.g., dark mode out of the box).
+- **Backgrounds:** `--vyoma-bg-primary`, `--vyoma-bg-sidebar`
+- **Text:** `--vyoma-text-primary`, `--vyoma-text-muted`
+- **Accents:** `--vyoma-accent`
 
-## Expanding the ESLint configuration
+Avoid using arbitrary hex codes in components; always reference these predefined semantic variables to maintain consistency.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Adding a New Feature
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+1. Create a new directory in `src/features/[feature-name]/`.
+2. Implement your page component (e.g., `[Feature]Page.tsx`).
+3. If the feature requires data, create a dedicated custom hook in `src/hooks/queries/` using `useQuery` or `useMutation`.
+4. Register the new page route in `src/app/router.tsx`.
+5. Update the navigation `tabs` array in `src/app/layout.tsx` to include an icon and link to your new feature.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Development
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+```bash
+# Start the development server
+npm run dev
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+# Run unit and integration tests
+npm test
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# Build for production
+npm run build
 ```
