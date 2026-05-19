@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, Link } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
 import { SidebarItem } from '../components/ui';
 import { useUIStore } from '../stores/ui.store';
@@ -60,7 +60,7 @@ export function AppLayout() {
         }`}
       >
         <div className="p-5 flex items-center justify-between gap-3 border-b border-sidebar-border/80">
-          <div className="flex items-center gap-3">
+          <Link to="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary rounded-lg" onClick={closeSidebarOnMobile}>
             <div className="w-8 h-8 rounded-lg flex items-center justify-center">
               <svg className="nav__icon" width="28" height="28" viewBox="0 0 64 64" fill="none">
                 <defs>
@@ -91,7 +91,7 @@ export function AppLayout() {
               </svg>
             </div>
             <h1 className="font-bold text-lg tracking-tight text-foreground">Vyoma</h1>
-          </div>
+          </Link>
           <button 
             className="md:hidden text-muted-foreground hover:text-foreground p-1 rounded-md" 
             onClick={() => setSidebarOpen(false)} 
