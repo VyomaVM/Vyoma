@@ -1,26 +1,42 @@
 import { clsx } from 'clsx';
 import type { ReactNode } from 'react';
 
+import { Link } from 'react-router-dom';
+
 interface SidebarItemProps {
   icon: ReactNode;
   label: string;
   active?: boolean;
+  to?: string;
   onClick?: () => void;
 }
 
-export function SidebarItem({ icon, label, active, onClick }: SidebarItemProps) {
-  return (
-    <button
-      onClick={onClick}
-      className={clsx(
-        'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
-        active
-          ? 'bg-orange-500/10 text-orange-400 shadow-sm shadow-orange-900/10 border border-orange-500/10'
-          : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-      )}
-    >
+export function SidebarItem({ icon, label, active, to, onClick }: SidebarItemProps) {
+  const content = (
+    <>
       {icon}
       {label}
+    </>
+  );
+
+  const className = clsx(
+    'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
+    active
+      ? 'bg-primary/10 text-primary shadow-sm border border-primary/10'
+      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+  );
+
+  if (to) {
+    return (
+      <Link to={to} className={className} onClick={onClick}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button onClick={onClick} className={className}>
+      {content}
     </button>
   );
 }
