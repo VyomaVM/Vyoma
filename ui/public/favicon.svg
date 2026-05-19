@@ -1,10 +1,38 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
-    <linearGradient id="f" x1="0%" y1="100%" x2="0%" y2="0%">
-      <stop offset="0%" stop-color="#FF4500"/>
-      <stop offset="50%" stop-color="#FF6B2B"/>
-      <stop offset="100%" stop-color="#FFA500"/>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fdd835"/>
+      <stop offset="50%" stop-color="#d4a017"/>
+      <stop offset="100%" stop-color="#a07800"/>
     </linearGradient>
+    <linearGradient id="orbitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="50%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <radialGradient id="sphereGrad" cx="40%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#fdd835"/>
+      <stop offset="60%" stop-color="#d4a017"/>
+      <stop offset="100%" stop-color="#7a5500"/>
+    </radialGradient>
   </defs>
-  <path d="M32 4C32 4 18 20 18 36c0 7.7 6.3 14 14 14s14-6.3 14-14C46 20 32 4 32 4zm0 40c-4.4 0-8-3.6-8-8 0-6 8-16 8-16s8 10 8 16c0 4.4-3.6 8-8 8z" fill="url(#f)"/>
+  <!-- Dark sphere base -->
+  <circle cx="32" cy="32" r="26" fill="#0d0d18" stroke="#1e1e38" stroke-width="1"/>
+  <!-- Gold geodesic fill -->
+  <circle cx="32" cy="32" r="22" fill="url(#sphereGrad)" opacity="0.9"/>
+  <!-- Grid lines -->
+  <g stroke="#0d0d18" stroke-width="1.2" fill="none">
+    <line x1="32" y1="10" x2="32" y2="54"/>
+    <line x1="10" y1="32" x2="54" y2="32"/>
+    <line x1="16" y1="16" x2="48" y2="48"/>
+    <line x1="48" y1="16" x2="16" y2="48"/>
+    <ellipse cx="32" cy="32" rx="22" ry="10"/>
+    <ellipse cx="32" cy="32" rx="10" ry="22"/>
+  </g>
+  <!-- Center dot -->
+  <circle cx="32" cy="32" r="3" fill="#fdd835"/>
+  <!-- Orbital ring -->
+  <ellipse cx="32" cy="32" rx="30" ry="10" fill="none"
+    stroke="url(#orbitGrad)" stroke-width="2.5"
+    transform="rotate(-25 32 32)" opacity="0.9"/>
 </svg>
