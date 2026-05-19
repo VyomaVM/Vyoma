@@ -101,7 +101,7 @@ export function AppLayout() {
           </button>
         </div>
 
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 h-0">
           <nav className="p-3 space-y-1">
             {tabs.map((tab, index) => {
               const isGroupEnd = index === 3 || index === 7;
