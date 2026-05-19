@@ -1,6 +1,6 @@
 import { Globe, Plus } from 'lucide-react';
 import { useNetworks } from '../../hooks/queries/useNetworks';
-import { Card, EmptyState, Loading, Button } from '../../components/ui';
+import { Card, EmptyState, Button, Skeleton } from '../../components/ui';
 
 export function NetworksPage() {
   const { data, isLoading } = useNetworks();
@@ -21,7 +21,14 @@ export function NetworksPage() {
         </div>
         <div className="divide-y divide-border/50 bg-card">
           {isLoading ? (
-            <Loading text="Loading networks..." />
+            Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="grid grid-cols-2 gap-4 p-4 items-center">
+                <div className="flex items-center gap-2">
+                  <Globe size={14} className="text-muted" /> <Skeleton className="h-4 w-24" />
+                </div>
+                <div><Skeleton className="h-4 w-32" /></div>
+              </div>
+            ))
           ) : !data?.networks?.length ? (
             <EmptyState title="No networks" description="Create a network to get started." icon={<Globe size={48} />} />
           ) : (

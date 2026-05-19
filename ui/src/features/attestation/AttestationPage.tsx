@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { useVmList } from '../../hooks/queries/useVmList';
-import { Card, Button, StatusBadge, Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui';
+import { Card, Button, StatusBadge, Dialog, DialogContent, DialogHeader, DialogTitle, Skeleton } from '../../components/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api-client';
 
@@ -35,7 +35,17 @@ export function AttestationPage() {
         </div>
         <div className="divide-y divide-border/50 bg-card">
           {isLoading ? (
-            <div className="p-8 text-center text-muted-foreground animate-pulse">Loading VMs...</div>
+            Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="grid grid-cols-12 gap-4 p-4 items-center">
+                <div className="col-span-3"><Skeleton className="h-4 w-32" /></div>
+                <div className="col-span-3"><Skeleton className="h-4 w-20" /></div>
+                <div className="col-span-3"><Skeleton className="h-6 w-24 rounded-full" /></div>
+                <div className="col-span-3 flex justify-end gap-2">
+                  <Skeleton className="h-8 w-24 rounded" />
+                  <Skeleton className="h-8 w-20 rounded" />
+                </div>
+              </div>
+            ))
           ) : (
             vmsData?.vms?.map(vm => {
               const isRunning = vm.status?.startsWith('Running');

@@ -1,6 +1,6 @@
 import { RefreshCw, Terminal, Square, Play, Pause } from 'lucide-react';
 import { useVmList, useVmMutations } from '../../hooks/queries/useVmList';
-import { Card, StatusBadge, EmptyState, Loading } from '../../components/ui';
+import { Card, StatusBadge, EmptyState, Skeleton } from '../../components/ui';
 
 export function VmsPage() {
   const { data, isLoading, refetch } = useVmList();
@@ -31,7 +31,21 @@ export function VmsPage() {
         </div>
         <div className="divide-y divide-border/50 bg-card">
           {isLoading ? (
-            <Loading text="Loading VMs..." />
+            Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="grid grid-cols-12 gap-4 p-4 items-center">
+                <div className="col-span-2 flex justify-center"><Skeleton className="h-6 w-16 rounded-full" /></div>
+                <div className="col-span-4 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+                <div className="col-span-2"><Skeleton className="h-4 w-20" /></div>
+                <div className="col-span-2"><Skeleton className="h-4 w-24" /></div>
+                <div className="col-span-2 flex justify-end gap-2">
+                  <Skeleton className="h-8 w-8 rounded" />
+                  <Skeleton className="h-8 w-8 rounded" />
+                </div>
+              </div>
+            ))
           ) : !data?.vms?.length ? (
             <EmptyState title="No MicroVMs running" />
           ) : (

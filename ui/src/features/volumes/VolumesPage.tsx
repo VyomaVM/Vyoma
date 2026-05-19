@@ -1,6 +1,6 @@
 import { Database } from 'lucide-react';
 import { useVolumes } from '../../hooks/queries/useVolumes';
-import { Card, EmptyState, Loading } from '../../components/ui';
+import { Card, EmptyState, Skeleton } from '../../components/ui';
 
 export function VolumesPage() {
   const { data, isLoading } = useVolumes();
@@ -12,7 +12,12 @@ export function VolumesPage() {
         <div className="p-4 border-b border-border text-xs font-semibold text-muted-foreground uppercase bg-card">Volume Name / Path</div>
         <div className="divide-y divide-border/50 bg-card">
           {isLoading ? (
-            <Loading text="Loading volumes..." />
+            Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="p-4 space-y-2">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-48" />
+              </div>
+            ))
           ) : !data?.length ? (
             <EmptyState title="No volumes" description="Create a volume to get started." icon={<Database size={48} />} />
           ) : (

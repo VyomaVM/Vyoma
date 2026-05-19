@@ -1,4 +1,5 @@
-import { Component, ReactNode, ErrorInfo } from 'react';
+import { Component } from 'react';
+import type { ReactNode, ErrorInfo } from 'react';
 import { AlertTriangle, RefreshCcw } from 'lucide-react';
 import { Button } from './ui';
 

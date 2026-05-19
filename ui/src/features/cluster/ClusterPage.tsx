@@ -1,6 +1,6 @@
 import { Server } from 'lucide-react';
 import { useSwarmNodes } from '../../hooks/queries/useSwarmNodes';
-import { Card, EmptyState, Loading } from '../../components/ui';
+import { Card, EmptyState, Skeleton } from '../../components/ui';
 
 export function ClusterPage() {
   const { data, isLoading } = useSwarmNodes();
@@ -10,7 +10,22 @@ export function ClusterPage() {
       <h2 className="text-2xl font-bold text-foreground mb-6">Cluster Stats</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {isLoading ? (
-          <Loading text="Loading cluster stats..." />
+          Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i} className="p-4">
+              <div className="flex items-center gap-3 mb-4">
+                <Server className="text-muted" />
+                <div className="space-y-2 flex-1">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
+              </div>
+            </Card>
+          ))
         ) : !data?.length ? (
           <EmptyState title="No cluster nodes" description="Join a swarm to see cluster stats." icon={<Server size={48} />} />
         ) : (

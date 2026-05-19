@@ -1,6 +1,6 @@
 import { HardDrive } from 'lucide-react';
 import { useImages } from '../../hooks/queries/useImages';
-import { Card, EmptyState, Loading } from '../../components/ui';
+import { Card, EmptyState, Skeleton } from '../../components/ui';
 
 export function ImagesPage() {
   const { data, isLoading } = useImages();
@@ -16,7 +16,13 @@ export function ImagesPage() {
         </div>
         <div className="divide-y divide-border/50 bg-card">
           {isLoading ? (
-            <Loading text="Loading images..." />
+            Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="grid grid-cols-3 gap-4 p-4 items-center">
+                <div><Skeleton className="h-4 w-32" /></div>
+                <div><Skeleton className="h-4 w-16" /></div>
+                <div className="flex justify-end"><Skeleton className="h-4 w-12" /></div>
+              </div>
+            ))
           ) : !data?.length ? (
             <EmptyState title="No images" description="Pull an image to get started." icon={<HardDrive size={48} />} />
           ) : (
