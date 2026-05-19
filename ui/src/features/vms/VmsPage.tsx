@@ -4,7 +4,7 @@ import { Card, StatusBadge, EmptyState, Loading } from '../../components/ui';
 
 export function VmsPage() {
   const { data, isLoading, refetch } = useVmList();
-  const { startVm, stopVm, pauseVm, resumeVm, deleteVm } = useVmMutations();
+  const { startVm, stopVm, pauseVm, resumeVm } = useVmMutations();
 
   return (
     <div className="p-8 max-w-6xl mx-auto">

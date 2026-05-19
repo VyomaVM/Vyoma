@@ -1,6 +1,17 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { AppLayout } from './layout';
 
+import { VmsPage } from '../features/vms/VmsPage';
+import { ImagesPage } from '../features/images/ImagesPage';
+import { VolumesPage } from '../features/volumes/VolumesPage';
+import { NetworksPage } from '../features/networks/NetworksPage';
+import { TimeMachinePage } from '../features/timemachine/TimeMachinePage';
+import { TopologyPage } from '../features/topology/TopologyPage';
+import { ComposePage } from '../features/compose/ComposePage';
+import { HubPage } from '../features/hub/HubPage';
+import { ClusterPage } from '../features/cluster/ClusterPage';
+import { SettingsPage } from '../features/settings/SettingsPage';
+
 // Placeholders for views that don't exist yet
 const Placeholder = ({ title }: { title: string }) => (
   <div className="p-8 text-foreground">
@@ -8,19 +19,6 @@ const Placeholder = ({ title }: { title: string }) => (
     <p className="mt-4 text-muted-foreground">This page is under construction.</p>
   </div>
 );
-
-// We import existing views if they are meant to be simple placeholders for now.
-import {
-  MicroVMsView,
-  TimeMachineView,
-  TopologyView,
-  ComposeEditorView,
-  HubBrowserView,
-  ImagesView,
-  VolumesView,
-  NetworksView,
-  SettingsView
-} from '../views';
 
 export const router = createBrowserRouter([
   {
@@ -33,39 +31,39 @@ export const router = createBrowserRouter([
       },
       {
         path: 'vms',
-        element: <MicroVMsView />,
+        element: <VmsPage />,
       },
       {
         path: 'images',
-        element: <ImagesView />,
+        element: <ImagesPage />,
       },
       {
         path: 'volumes',
-        element: <VolumesView />,
+        element: <VolumesPage />,
       },
       {
         path: 'networks',
-        element: <NetworksView />,
+        element: <NetworksPage />,
       },
       {
         path: 'timemachine',
-        element: <TimeMachineView />,
+        element: <TimeMachinePage />,
       },
       {
         path: 'topology',
-        element: <TopologyView />,
+        element: <TopologyPage />,
       },
       {
         path: 'compose',
-        element: <ComposeEditorView />,
+        element: <ComposePage />,
       },
       {
         path: 'hub',
-        element: <HubBrowserView />,
+        element: <HubPage />,
       },
       {
         path: 'cluster',
-        element: <Placeholder title="Cluster" />,
+        element: <ClusterPage />,
       },
       {
         path: 'builds',
@@ -85,7 +83,7 @@ export const router = createBrowserRouter([
       },
       {
         path: 'settings',
-        element: <SettingsView />,
+        element: <SettingsPage />,
       },
     ],
   },
