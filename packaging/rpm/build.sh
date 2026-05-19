@@ -248,7 +248,7 @@ if [ -n "$SUDO_USER" ]; then
     usermod -aG vyoma "$SUDO_USER" 2>/dev/null || true
     usermod -aG kvm "$SUDO_USER" 2>/dev/null || true
     usermod -aG disk "$SUDO_USER" 2>/dev/null || true
-    echo "Added $SUDO_USER to vyoma, kvm, disk groups. Log out and back in to use CLI."
+    printf 'Added %s to vyoma, kvm, disk groups. Log out and back in to use CLI.\n' "$SUDO_USER"
 fi
 
 # Fix /dev/kvm permissions
