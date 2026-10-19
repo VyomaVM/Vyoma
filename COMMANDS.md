@@ -139,6 +139,16 @@ Time travel a VM to a specific snapshot (alias for `vyoma restore`).
 vyoma time-travel my-vm --to before-deploy
 ```
 
+### `vyoma branch`
+Branch an existing snapshot into a new independent MicroVM backed by copy-on-write QCOW2 storage.
+**Usage**: `vyoma branch <ID> --from <SNAPSHOT> <NEW_NAME>`
+**Options**:
+- `--from <SNAPSHOT>`: Snapshot tag name (e.g. `before-deploy`), snapshot ID, or reference (e.g. `snap:6`).
+**Example**:
+```bash
+vyoma branch my-db --from snap:6 experiment
+```
+
 ### `vyoma export`
 Export a snapshot to a tarball.
 **Usage**: `vyoma export <SNAPSHOT_ID> <FILE>`

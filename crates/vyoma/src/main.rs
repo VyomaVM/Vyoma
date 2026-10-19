@@ -155,6 +155,16 @@ enum Commands {
          #[arg(long)]
          to: String,
      },
+     /// Branch an existing snapshot into a new independent VM
+     Branch {
+         /// Source VM ID or Name
+         id: String,
+         /// Snapshot name, tag, or ID to branch from
+         #[arg(long)]
+         from: String,
+         /// Name for the new branched VM
+         new_name: String,
+     },
     /// Save a VM snapshot to a file (Export/Teleportation)
     Save {
         /// VM ID to save
@@ -752,6 +762,37 @@ async fn main() -> Result<()> {
                 .await;
 
             handle_response(resp, &daemon_url).await?;
+        }
+        Commands::Branch { id, from, new_name } => {
+            info!("Requesting to branch VM '{}' from snapshot '{}' into '{}'", id, from, new_name);
+            let payload = serde_json::json!({
+                "from": from,
+                "new_name": new_name,
+            });
+
+            let resp = client
+                .post(format!("{}/vms/{}/branch", daemon_url, id))
+                .json(&payload)
+                .send()
+                .await;
+
+            match resp {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let json: serde_json::Value = response.json().await?;
+                        let vm_id = json["vm_id"].as_str().unwrap_or("unknown");
+                        let name = json["name"].as_str().unwrap_or(&new_name);
+                        let ip = json["ip_address"].as_str().unwrap_or("172.16.0.x");
+                        info!("Success! Branched VM '{}' created (ID: {}, IP: {})", name, vm_id, ip);
+                        println!("{}", serde_json::to_string_pretty(&json)?);
+                    } else {
+                        let status = response.status();
+                        let text = response.text().await.unwrap_or_default();
+                        error!("Daemon returned error: {} - {}", status, text);
+                    }
+                }
+                Err(e) => error!("Failed to connect to daemon: {}", e),
+            }
         }
         Commands::Save { id, output } => {
             info!("Saving VM {} to {}", id, output);
