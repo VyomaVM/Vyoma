@@ -1,31 +1,10 @@
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::Path;
 use tracing::{info, error};
-use vyoma_storage::{LoopManager, DmManager, LoopDevice, DmDevice, StorageManager as NativeStorageManager};
+use vyoma_storage::{LoopManager, DmManager, LoopDevice};
 
 use super::types::PreparedStorage;
 use crate::state::AppState;
-
-pub struct StorageContext {
-    pub loop_mgr: LoopManager,
-    pub dm_mgr: DmManager,
-    pub base_loop: Option<LoopDevice>,
-    pub cow_loop: Option<LoopDevice>,
-    pub dm_device: Option<DmDevice>,
-}
-
-impl StorageContext {
-    pub fn new() -> Result<Self> {
-        Ok(Self {
-            loop_mgr: LoopManager::new()?,
-            dm_mgr: DmManager::new()?,
-            base_loop: None,
-            cow_loop: None,
-            dm_device: None,
-        })
-    }
-}
 
 pub async fn prepare_storage(
     state: &AppState,
@@ -188,51 +167,6 @@ pub async fn cleanup_storage(storage: &PreparedStorage) -> Result<()> {
     if std::path::Path::new(&storage.cow_file_path).exists() {
         info!("Removing COW file: {}", storage.cow_file_path);
         let _ = std::fs::remove_file(&storage.cow_file_path);
-    }
-
-    Ok(())
-}
-
-pub async fn cleanup_storage_full(
-    base_loop: Option<LoopDevice>,
-    cow_loop: Option<LoopDevice>,
-    dm_device: Option<DmDevice>,
-    dm_name: &str,
-) -> Result<()> {
-    let loop_mgr = match LoopManager::new() {
-        Ok(m) => m,
-        Err(e) => {
-            error!("Failed to create LoopManager: {}", e);
-            return Ok(());
-        }
-    };
-
-    if let Some(loop_dev) = base_loop {
-        info!("Detaching base loop device: {:?}", loop_dev.path());
-        if let Err(e) = loop_mgr.detach(&loop_dev) {
-            error!("Failed to detach base loop: {}", e);
-        }
-    }
-
-    if let Some(loop_dev) = cow_loop {
-        info!("Detaching COW loop device: {:?}", loop_dev.path());
-        if let Err(e) = loop_mgr.detach(&loop_dev) {
-            error!("Failed to detach COW loop: {}", e);
-        }
-    }
-
-    if let Some(dm) = dm_device {
-        let dm_mgr = match DmManager::new() {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Failed to create DmManager: {}", e);
-                return Ok(());
-            }
-        };
-        info!("Removing DM device: {}", dm.name());
-        if let Err(e) = dm_mgr.remove_snapshot(dm.name()) {
-            error!("Failed to remove DM device: {}", e);
-        }
     }
 
     Ok(())

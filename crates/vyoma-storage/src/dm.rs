@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use tracing::{info, debug, warn, error};
+use tracing::{info, error};
 
 // Add devicemapper imports
 use devicemapper::{DM, DmName, DmOptions, DmUuid, DevId};
@@ -58,13 +58,6 @@ impl DmManager {
         })?;
         Ok(Self { dm })
     }
-    
-    // fn device_size_sectors(path: &Path) -> Result<u64> {
-    //     use std::os::unix::fs::MetadataExt;
-    //     let meta = std::fs::metadata(path).map_err(StorageError::Io)?;
-    //     let bytes = meta.size();
-    //     Ok(bytes / 512)
-    // }
 
     fn device_size_sectors(path: &Path) -> Result<u64> {
         use std::os::unix::io::AsRawFd;
@@ -221,14 +214,6 @@ impl DmManager {
             Ok(_) => Ok(true),
             Err(_) => Ok(false),
         }
-    }
-
-    fn activate_device(&self, name: &DmName) -> Result<()> {
-        let _ = self
-            .dm
-            .device_suspend(&DevId::Name(name), DmOptions::default())
-            .map_err(|e| StorageError::Other(format!("Failed to activate device {}: {}", name, e)))?;
-        Ok(())
     }
 }
 
