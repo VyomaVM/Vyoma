@@ -258,14 +258,31 @@ impl VmmManager {
     }
 
     pub async fn add_drive(&mut self, drive_id: &str, host_path: &str, is_root: bool) -> Result<()> {
+        let is_qcow2 = host_path.ends_with(".qcow2");
         let disk = DiskConfig {
             path: host_path.to_string(),
-            readonly: if is_root { Some(true) } else { None }, // Usually rootfs is readonly if there's a COW layer
+            readonly: if is_qcow2 {
+                Some(false) // QCOW2 overlays must be writable for guest state mutations
+            } else if is_root {
+                Some(true) // Traditional Device Mapper / loop base rootfs is readonly
+            } else {
+                None
+            },
             direct: None,
             vhost_user: None,
             id: Some(drive_id.to_string()),
             queue_size: None,
             num_queues: None,
+            image_type: if is_qcow2 {
+                Some("Qcow2".to_string())
+            } else {
+                Some("Raw".to_string())
+            },
+            backing_files: if is_qcow2 {
+                Some(true)
+            } else {
+                None
+            },
         };
         
         if let Some(disks) = &mut self.config.disks {

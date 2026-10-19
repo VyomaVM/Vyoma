@@ -24,6 +24,8 @@ mod tests {
             loop_devices: vec!["/dev/loop0".to_string(), "/dev/loop1".to_string()],
             cow_file_path: "/tmp/diff.cow".to_string(),
             dm_name: "vyoma-test".to_string(),
+            is_qcow2: false,
+            qcow2_path: None,
         };
         
         let json = serde_json::to_string(&storage).unwrap();
