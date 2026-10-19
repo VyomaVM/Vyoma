@@ -273,6 +273,8 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         VmStatus::Running => "Running".to_string(),
         VmStatus::AttestationFailed { reason } => format!("AttestationFailed: {}", reason),
         VmStatus::Error { reason } => format!("Error: {}", reason),
+        VmStatus::Paused => "Paused".to_string(),
+        VmStatus::Hibernated => "Hibernated".to_string(),
     };
 
     let mut event_rx = instance.vmm.subscribe_events();

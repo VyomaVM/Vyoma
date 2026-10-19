@@ -316,6 +316,15 @@ pub async fn pause_vm(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
+pub async fn hibernate_vm_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<String, (StatusCode, String)> {
+    vm_service_state::hibernate_vm(&state, &id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
 pub async fn resume_vm(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -983,6 +992,8 @@ pub async fn inspect_vm_handler(
             VmStatus::Running => ("running", None),
             VmStatus::AttestationFailed { reason } => ("attestation_failed", Some(reason.clone())),
             VmStatus::Error { reason } => ("error", Some(reason.clone())),
+            VmStatus::Paused => ("paused", None),
+            VmStatus::Hibernated => ("hibernated", None),
         };
 
         let val = serde_json::json!({
