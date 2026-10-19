@@ -42,6 +42,8 @@ pub struct ServiceSpec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInfo {
     pub id: u64,
+    #[serde(default)]
+    pub name: Option<String>,
     pub addr: String,
     pub public_key: String,
     pub wireguard_key: Option<String>,
@@ -54,6 +56,7 @@ impl NodeInfo {
     pub fn new(id: u64, addr: String, public_key: String) -> Self {
         Self {
             id,
+            name: Some(format!("node-{}", id)),
             addr,
             public_key,
             wireguard_key: None,
@@ -61,6 +64,11 @@ impl NodeInfo {
             subnet_id: None,
             is_leader: false,
         }
+    }
+
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = Some(name);
+        self
     }
 
     pub fn with_wireguard(mut self, key: String, port: u16) -> Self {
@@ -306,6 +314,27 @@ impl SwarmRaft {
         });
         
         Ok(())
+    }
+
+    pub fn set_node_name(&mut self, node_id: u64, name: String) -> Result<(), String> {
+        let node = self.nodes.get_mut(&node_id).ok_or_else(|| format!("Node {} not found", node_id))?;
+        node.name = Some(name);
+        Ok(())
+    }
+
+    pub fn resolve_node(&self, target: &str) -> Option<String> {
+        for node in self.nodes.values() {
+            if node.name.as_deref() == Some(target)
+                || format!("node-{}", node.id) == target
+                || node.id.to_string() == target
+                || node.addr == target
+                || node.addr.split(':').next() == Some(target)
+            {
+                let ip = node.addr.split(':').next().unwrap_or(&node.addr);
+                return Some(ip.to_string());
+            }
+        }
+        None
     }
     
     pub fn submit_command(&mut self, cmd: SwarmCommand, command_index: u64) -> Result<(), String> {

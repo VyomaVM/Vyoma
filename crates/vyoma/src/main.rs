@@ -846,10 +846,65 @@ async fn main() -> Result<()> {
             import_vm(&input, &daemon_url).await?;
         }
         Commands::Teleport { id, target, to, bandwidth, progress } => {
-            let target = to.or(target).ok_or_else(|| {
+            let destination = to.or(target).ok_or_else(|| {
                 anyhow::anyhow!("Target node IP or node name is required. Specify either <TARGET> or --to <TARGET>.")
             })?;
-            info!("Initiating Live Teleportation for VM {} to target {}", id, target);
+            info!("Initiating Live Teleportation for VM {} to target {}", id, destination);
+
+            // Auto-resolve swarm node name to IP endpoint if not already an IP address
+            let target = if destination.parse::<std::net::IpAddr>().is_ok() {
+                destination.clone()
+            } else {
+                info!("Resolving Swarm node name '{}' via cluster registry...", destination);
+                let nodes_resp = client.get(format!("{}/swarm/nodes", daemon_url)).send().await;
+                match nodes_resp {
+                    Ok(resp) if resp.status().is_success() => {
+                        let nodes: Vec<serde_json::Value> = resp.json().await.unwrap_or_default();
+                        let mut matched_ip = None;
+                        for node in &nodes {
+                            let name = node.get("name").and_then(|v| v.as_str());
+                            let id_num = node.get("id").and_then(|v| v.as_u64());
+                            let id_str = id_num.map(|n| n.to_string());
+                            let node_alias = id_num.map(|n| format!("node-{}", n));
+                            let addr = node.get("addr").and_then(|v| v.as_str()).unwrap_or_default();
+                            let ip = addr.split(':').next().unwrap_or(addr);
+
+                            if name == Some(&destination)
+                                || id_str.as_deref() == Some(&destination)
+                                || node_alias.as_deref() == Some(&destination)
+                                || addr == destination
+                                || ip == destination
+                            {
+                                matched_ip = Some(ip.to_string());
+                                break;
+                            }
+                        }
+
+                        match matched_ip {
+                            Some(ip) => {
+                                info!("Resolved cluster node '{}' -> {}", destination, ip);
+                                ip
+                            }
+                            None => {
+                                let available: Vec<String> = nodes
+                                    .iter()
+                                    .filter_map(|n| {
+                                        let name = n.get("name").and_then(|v| v.as_str());
+                                        let id = n.get("id").and_then(|v| v.as_u64());
+                                        name.map(|s| s.to_string()).or_else(|| id.map(|i| format!("node-{}", i)))
+                                    })
+                                    .collect();
+                                anyhow::bail!(
+                                    "Swarm node '{}' not found in cluster. Available nodes: {:?}",
+                                    destination,
+                                    available
+                                );
+                            }
+                        }
+                    }
+                    _ => destination.clone(),
+                }
+            };
 
             let target_daemon = format!("http://{}:3000", target);
             let status_check = client.get(format!("{}/teleport/status/test", target_daemon)).send().await;

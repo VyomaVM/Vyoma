@@ -378,6 +378,7 @@ async fn async_main(args: Args) {
         .route("/swarm/init", post(handlers::swarm_init_handler))
         .route("/swarm/join", post(handlers::swarm_join_handler))
         .route("/swarm/nodes", get(handlers::swarm_nodes_handler))
+        .route("/swarm/nodes/:id/name", post(handlers::tag_node_handler))
         .route("/teleport", post(handlers::teleport_handler))
         .route("/teleport/status/:session_id", get(handlers::teleport_status_handler))
         .route("/teleport/cancel/:id", post(handlers::cancel_teleport_by_id_handler))

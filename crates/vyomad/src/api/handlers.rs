@@ -1414,9 +1414,11 @@ pub async fn swarm_join_handler(
     }))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SwarmNodeInfo {
     pub id: u64,
+    #[serde(default)]
+    pub name: Option<String>,
     pub addr: String,
     pub public_key: String,
     pub wireguard_key: Option<String>,
@@ -1431,6 +1433,7 @@ pub async fn swarm_nodes_handler(State(state): State<AppState>) -> Json<Vec<Swar
     let nodes: Vec<SwarmNodeInfo> = swarm_raft.get_nodes().iter().map(|n| {
         SwarmNodeInfo {
             id: n.id,
+            name: n.name.clone().or_else(|| Some(format!("node-{}", n.id))),
             addr: n.addr.clone(),
             public_key: n.public_key.clone(),
             wireguard_key: n.wireguard_key.clone(),
@@ -1441,6 +1444,22 @@ pub async fn swarm_nodes_handler(State(state): State<AppState>) -> Json<Vec<Swar
     }).collect();
     
     Json(nodes)
+}
+
+#[derive(Deserialize)]
+pub struct TagNodeRequest {
+    pub name: String,
+}
+
+pub async fn tag_node_handler(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(payload): Json<TagNodeRequest>,
+) -> Result<String, (StatusCode, String)> {
+    let mut swarm_raft = state.swarm_raft.lock().await;
+    swarm_raft.set_node_name(id, payload.name.clone())
+        .map_err(|e| (StatusCode::NOT_FOUND, e))?;
+    Ok(format!("Node {} named '{}'", id, payload.name))
 }
 
 #[derive(Serialize)]
@@ -1618,6 +1637,24 @@ pub async fn teleport_handler(
 ) -> Result<Json<TeleportResponse>, (StatusCode, String)> {
     info!("Handling POST /teleport for VM {} to {}", payload.vm_id, payload.target_node_ip);
 
+    let target_node_ip = if payload.target_node_ip.parse::<std::net::IpAddr>().is_err() {
+        let swarm_raft = state.swarm_raft.lock().await;
+        match swarm_raft.resolve_node(&payload.target_node_ip) {
+            Some(ip) => {
+                info!("Resolved swarm node '{}' to IP {}", payload.target_node_ip, ip);
+                ip
+            }
+            None => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!("Swarm node '{}' not found in cluster registry", payload.target_node_ip),
+                ));
+            }
+        }
+    } else {
+        payload.target_node_ip.clone()
+    };
+
     let session_id = uuid::Uuid::new_v4().to_string();
     let started_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1628,7 +1665,7 @@ pub async fn teleport_handler(
         session_id: session_id.clone(),
         vm_id: payload.vm_id.clone(),
         source_node: "local".to_string(),
-        target_node: payload.target_node_ip.clone(),
+        target_node: target_node_ip.clone(),
         status: "initiating".to_string(),
         progress: None,
         started_at,
@@ -1651,7 +1688,7 @@ pub async fn teleport_handler(
             let vm = vm_mutex.lock().await;
             (vm.ch_socket_path.clone(), vm.mem_size_mib)
         };
-        let target_url = payload.target_node_ip.clone();
+        let target_url = target_node_ip.clone();
         let vms_for_cleanup = Arc::clone(&state.vms);
 
         // Get local WireGuard IP for trusted source restriction
