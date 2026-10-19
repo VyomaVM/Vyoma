@@ -399,9 +399,11 @@ pub async fn branch_vm_handler(
         }
     };
 
-    let tm = state.timemachine.read().await;
-    let snapshot = tm.get_snapshot(&source_vm_id, &payload.from)
-        .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", payload.from, source_vm_id)))?;
+    let snapshot = {
+        let tm = state.timemachine.read().await;
+        tm.get_snapshot(&source_vm_id, &payload.from)
+            .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", payload.from, source_vm_id)))?
+    };
 
     let data_dir = std::path::PathBuf::from(&state.data_dir);
     let snaps_dir = data_dir.join(".vyoma").join("vms").join(&source_vm_id).join("snapshots").join(&snapshot.id);
@@ -577,9 +579,11 @@ pub async fn restore_vm(
     if let (Some(target_vm_id), Some(snap_ref)) = (vm_id_opt.clone(), snap_ref_opt.clone()) {
         info!("Request to restore VM {} to snapshot '{}'", target_vm_id, snap_ref);
 
-        let tm = state.timemachine.read().await;
-        let snapshot = tm.get_snapshot(&target_vm_id, &snap_ref)
-            .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", snap_ref, target_vm_id)))?;
+        let snapshot = {
+            let tm = state.timemachine.read().await;
+            tm.get_snapshot(&target_vm_id, &snap_ref)
+                .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", snap_ref, target_vm_id)))?
+        };
 
         // Check if VM is currently active in state
         let vms = state.vms.lock().await;
@@ -620,9 +624,11 @@ pub async fn restore_vm(
     }
 
     let (snapshot_path, mem_path, cow_path, _original_vm_id) = if let (Some(vm_id), Some(snap_ref)) = (vm_id_opt, snap_ref_opt) {
-        let tm = state.timemachine.read().await;
-        let snapshot = tm.get_snapshot(&vm_id, &snap_ref)
-            .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", snap_ref, vm_id)))?;
+        let snapshot = {
+            let tm = state.timemachine.read().await;
+            tm.get_snapshot(&vm_id, &snap_ref)
+                .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", snap_ref, vm_id)))?
+        };
 
         let data_dir = PathBuf::from(&state.data_dir);
         let source_vm_dir = data_dir.join(".vyoma").join("vms").join(&vm_id);
