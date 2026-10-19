@@ -56,5 +56,9 @@ run_test ./tests/e2e/11_migration.sh
 run_test ./tests/e2e/12_exec.sh
 run_test ./tests/e2e/13_stats.sh
 run_test ./tests/e2e/14_volumes.sh
+run_test ./tests/e2e/15_cli_ergonomics_hardware_test.sh
+run_test ./tests/e2e/16_branching_and_hibernation_hardware_test.sh
+run_test ./tests/e2e/17_teleport_mesh_resolution_test.sh
+run_test ./tests/e2e/18_full_hardware_regression.sh
 
 echo "Suite Completed."
