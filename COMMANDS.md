@@ -129,19 +129,37 @@ Import a VM from a snapshot tarball.
 
 ## Orchestration (Vyoma Compose)
 
+Vyoma automatically discovers compose files in the current working directory in priority order:
+`vyoma-compose.yml`, `vyoma-compose.yaml`, `compose.yaml`, `compose.yml`, `docker-compose.yml`, `docker-compose.yaml`.
+Existing `docker-compose.yml` stacks work completely unchanged!
+
 ### `vyoma up`
-Create and start resources from `vyoma-compose.yml`.
-**Usage**: `vyoma up [-d]`
-**Options**: `-d` (Detached mode).
+Create and start resources from a compose file.
+**Usage**: `vyoma up [OPTIONS]`
+**Options**:
+- `-f, --file <FILE>`: Explicit compose file path (auto-discovered if omitted).
+- `-d, --detach`: Run services in the background (detached mode).
+**Example**:
+```bash
+# docker-compose.yml works unchanged
+vyoma up -d
+```
 
 ### `vyoma down`
-Stop and remove resources defined in `vyoma-compose.yml`.
-**Usage**: `vyoma down`
+Stop and remove resources defined in the compose file.
+**Usage**: `vyoma down [-f <FILE>]`
+**Example**:
+```bash
+vyoma down
+```
 
 ### `vyoma scale`
 Scale a service to N replicas.
-**Usage**: `vyoma scale <SERVICE>=<COUNT>`
-**Example**: `vyoma scale web=3`
+**Usage**: `vyoma scale <SERVICE>=<COUNT> [-f <FILE>]`
+**Example**:
+```bash
+vyoma scale web=3
+```
 
 ## System
 

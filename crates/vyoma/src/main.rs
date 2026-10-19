@@ -221,9 +221,9 @@ enum Commands {
     },
     /// Create and start resources from a compose file
     Up {
-        /// Path to compose file (default: vyoma-compose.yml)
-        #[arg(short, long, default_value = "vyoma-compose.yml")]
-        file: String,
+        /// Path to compose file (auto-discovered if omitted: vyoma-compose.yml, docker-compose.yml, etc.)
+        #[arg(short, long)]
+        file: Option<String>,
 
         /// Detached mode: Run containers in the background
         #[arg(short, long)]
@@ -231,9 +231,9 @@ enum Commands {
     },
     /// Stop and remove resources
     Down {
-        /// Path to compose file (default: vyoma-compose.yml)
-        #[arg(short, long, default_value = "vyoma-compose.yml")]
-        file: String,
+        /// Path to compose file (auto-discovered if omitted: vyoma-compose.yml, docker-compose.yml, etc.)
+        #[arg(short, long)]
+        file: Option<String>,
     },
     /// Execute a command in a VM (via SSH)
     Exec {
@@ -253,9 +253,9 @@ enum Commands {
         /// Scaling arguments (service=count)
         replicas: Vec<String>,
 
-        /// Path to compose file (default: vyoma-compose.yml)
-        #[arg(short, long, default_value = "vyoma-compose.yml")]
-        file: String,
+        /// Path to compose file (auto-discovered if omitted: vyoma-compose.yml, docker-compose.yml, etc.)
+        #[arg(short, long)]
+        file: Option<String>,
     },
     /// Manage Swarm/Cluster
     Swarm {
@@ -974,8 +974,15 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Up { file, detach } => {
-            info!("Processing compose file: {}", file);
-            match VyomaCompose::from_file(&file) {
+            let compose_path = match resolve_compose_file(file.as_deref()) {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("{}", e);
+                    return Ok(());
+                }
+            };
+            info!("Processing compose file: {}", compose_path.display());
+            match VyomaCompose::from_file(&compose_path) {
                 Ok(compose) => {
                     println!("Vyoma Compose v{}", compose.version);
 
@@ -1130,7 +1137,7 @@ async fn main() -> Result<()> {
                         println!("(Detached mode selected)");
                     }
                 }
-                Err(e) => error!("Failed to parse compose file '{}': {}", file, e),
+                Err(e) => error!("Failed to parse compose file '{}': {}", compose_path.display(), e),
             }
         }
         Commands::Down { file } => {
@@ -1171,9 +1178,11 @@ async fn main() -> Result<()> {
 
             // 3. Determine Order
             let mut stop_order = Vec::new();
-            if let Ok(compose) = VyomaCompose::from_file(&file) {
-                if let Ok(order) = compose.start_order() {
-                    stop_order = order.into_iter().rev().map(|(n, _)| n).collect();
+            if let Ok(compose_path) = resolve_compose_file(file.as_deref()) {
+                if let Ok(compose) = VyomaCompose::from_file(&compose_path) {
+                    if let Ok(order) = compose.start_order() {
+                        stop_order = order.into_iter().rev().map(|(n, _)| n).collect();
+                    }
                 }
             }
 
@@ -1206,12 +1215,19 @@ async fn main() -> Result<()> {
         }
         Commands::Scale { replicas, file } => {
             // 1. Load Compose File
-            let compose = match VyomaCompose::from_file(&file) {
+            let compose_path = match resolve_compose_file(file.as_deref()) {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("{}", e);
+                    return Ok(());
+                }
+            };
+            let compose = match VyomaCompose::from_file(&compose_path) {
                 Ok(c) => c,
                 Err(e) => {
                     error!(
                         "Validation Error: Cannot scale without valid {}: {}",
-                        file, e
+                        compose_path.display(), e
                     );
                     return Ok(());
                 }
@@ -2212,6 +2228,46 @@ pub fn parse_memory_size(s: &str) -> Result<u32, String> {
     Ok(mib)
 }
 
+/// Resolve the compose file path: if specified explicitly, check that it exists.
+/// Otherwise, probe in priority order in the current directory:
+/// 1. vyoma-compose.yml
+/// 2. vyoma-compose.yaml
+/// 3. compose.yaml
+/// 4. compose.yml
+/// 5. docker-compose.yml
+/// 6. docker-compose.yaml
+pub fn resolve_compose_file(specified: Option<&str>) -> anyhow::Result<PathBuf> {
+    if let Some(path_str) = specified {
+        let path = PathBuf::from(path_str);
+        if path.exists() {
+            return Ok(path);
+        } else {
+            anyhow::bail!("Specified compose file not found: {}", path_str);
+        }
+    }
+
+    const CANDIDATES: &[&str] = &[
+        "vyoma-compose.yml",
+        "vyoma-compose.yaml",
+        "compose.yaml",
+        "compose.yml",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+    ];
+
+    for candidate in CANDIDATES {
+        let p = Path::new(candidate);
+        if p.exists() {
+            info!("Auto-discovered compose file: {}", candidate);
+            return Ok(p.to_path_buf());
+        }
+    }
+
+    anyhow::bail!(
+        "No compose file found in current directory (checked: vyoma-compose.yml, vyoma-compose.yaml, compose.yaml, compose.yml, docker-compose.yml, docker-compose.yaml)"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2247,6 +2303,21 @@ mod tests {
         assert!(parse_memory_size("invalid").is_err());
         assert!(parse_memory_size("-512M").is_err());
     }
+
+    #[test]
+    fn test_resolve_compose_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let dc = temp.path().join("docker-compose.yml");
+        std::fs::write(&dc, "version: '3'").unwrap();
+
+        // When specified explicitly:
+        let resolved = resolve_compose_file(Some(dc.to_str().unwrap())).unwrap();
+        assert_eq!(resolved, dc);
+
+        // When specified non-existent file:
+        assert!(resolve_compose_file(Some("/nonexistent/file.yml")).is_err());
+    }
 }
+
 
 
