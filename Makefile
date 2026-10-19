@@ -30,7 +30,7 @@ install:
 bundle_deps:
 	@echo "Downloading runtime dependencies for packaging..."
 	mkdir -p bin
-	if [ ! -f bin/cloud-hypervisor ]; then wget -q -O bin/cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v41.0/cloud-hypervisor && chmod +x bin/cloud-hypervisor; fi
+	if [ ! -f bin/cloud-hypervisor ]; then wget -q -O bin/cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-static && chmod +x bin/cloud-hypervisor; fi
 	if [ ! -f bin/vmlinux ]; then wget -q -O bin/vmlinux https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/bzImage-x86_64 && chmod 644 bin/vmlinux; fi
 
 deb: all

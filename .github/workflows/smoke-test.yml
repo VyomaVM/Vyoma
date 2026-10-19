@@ -16,16 +16,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-
-      - name: Build release binaries
+      - name: Install System Dependencies
         run: |
-          make build
-        env:
-          CGO_ENABLED: 1
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev build-essential libssl-dev protobuf-compiler libdevmapper-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify Cloud Hypervisor v54.0 Runtime
+        run: |
+          mkdir -p bin
+          if [ ! -f "bin/cloud-hypervisor" ]; then
+            wget -q -O bin/cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-static
+            chmod +x bin/cloud-hypervisor
+          fi
+          echo "4f4f98a3d661a40f3e5272627cc895a1b2e525f2f6bedf5f895f9cd21ba5c65b  bin/cloud-hypervisor" | sha256sum -c -
+          ./bin/cloud-hypervisor --version
 
       - name: Build DEB package
         run: |
