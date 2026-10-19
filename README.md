@@ -195,10 +195,26 @@ Vyoma is designed to be "Batteries Included", but some advanced features need he
 
 ---
 
+## 📚 Documentation
+
+Comprehensive documentation is available in the **[Documentation Portal](docs/README.md)**:
+
+*   **[Installation Guide](docs/getting-started/installation.md)**: System prerequisites, packaging (.deb/.rpm), and permissions.
+*   **[Quickstart Tutorial](docs/getting-started/quickstart.md)**: Spin up your first Micro-VM.
+*   **[CLI Reference](docs/getting-started/cli-reference.md)**: Complete guide to all 20+ commands.
+*   **[Architecture Deep Dives](docs/architecture/overview.md)**: Storage engine, networking, initramfs injection, and privilege model.
+*   **[Vyoma Swarm](docs/features/swarm.md)**: Multi-host clustering with Raft consensus and WireGuard mesh.
+*   **[TimeMachine](docs/features/timemachine.md)** & **[Teleportation](docs/features/teleportation.md)**: VM runtime versioning and live migration.
+*   **[Architecture Decision Records (ADRs)](docs/adrs/README.md)**: Complete record of design and technical choices.
+*   **[Troubleshooting](docs/operations/troubleshooting.md)**: Diagnostic and cleanup steps.
+
+---
+
 ## 🧪 Testing & Development
 
 For developers contributing to Vyoma, please refer to:
-*   [CLI Reference](COMMANDS.md) for full CLI reference.
+*   [CLI Reference](docs/getting-started/cli-reference.md) for full CLI reference.
+*   [Testing Guide](docs/operations/testing-guide.md) for running unit, integration, and chaos test suites.
 
 ## 🤝 Contributing
 
