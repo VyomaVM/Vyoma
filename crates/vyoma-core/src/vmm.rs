@@ -190,7 +190,7 @@ impl VmmManager {
                             Ok(0) => {
                                 thread::sleep(Duration::from_millis(100));
                             }
-                            Ok(1) => {
+                            Ok(_) => {
                                 let c = byte_buf[0] as char;
                                 buffer.push(c);
                                 if escape {
