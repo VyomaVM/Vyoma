@@ -130,6 +130,9 @@ enum Commands {
       Snapshot {
           /// VM ID
           id: String,
+          /// Snapshot name or tag (optional)
+          #[arg(long)]
+          name: Option<String>,
       },
      /// Time travel a VM to a specific snapshot
      TimeTravel {
@@ -661,12 +664,13 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Snapshot { id } => {
+        Commands::Snapshot { id, name } => {
             info!("Requesting to snapshot VM: {}", id);
-            let resp = client
-                .post(format!("{}/snapshot/{}", daemon_url, id))
-                .send()
-                .await;
+            let mut req = client.post(format!("{}/snapshot/{}", daemon_url, id));
+            if let Some(ref tag) = name {
+                req = req.query(&[("name", tag)]);
+            }
+            let resp = req.send().await;
             handle_simple_response(resp, &daemon_url).await?;
         }
         Commands::History { id } => {

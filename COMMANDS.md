@@ -92,8 +92,13 @@ List nodes in the swarm.
 
 ### `vyoma snapshot`
 Create a snapshot of a VM.
-**Usage**: `vyoma snapshot <ID>`
-**Example**: `vyoma snapshot web-server`
+**Usage**: `vyoma snapshot <ID> [--name <NAME>]`
+**Options**:
+- `--name <NAME>`: Optional human-readable tag or name for the snapshot.
+**Example**:
+```bash
+vyoma snapshot my-vm --name before-deploy
+```
 
 ### `vyoma restore`
 Restore a VM from a snapshot ID.

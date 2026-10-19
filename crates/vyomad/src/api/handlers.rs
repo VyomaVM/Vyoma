@@ -325,17 +325,27 @@ pub async fn resume_vm(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
+#[derive(Deserialize, Default)]
+pub struct SnapshotQuery {
+    pub name: Option<String>,
+}
+
 pub async fn snapshot_vm(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<SnapshotQuery>,
 ) -> Result<String, (StatusCode, String)> {
-    info!("Request to snapshot VM: {}", id);
+    info!("Request to snapshot VM: {} (name: {:?})", id, query.name);
 
-    let result = vm_service_state::snapshot_vm(&state, &id, None)
+    let result = vm_service_state::snapshot_vm(&state, &id, query.name.clone())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(format!("Snapshot {} created for VM {} at {:?}", result.id, id, result.path))
+    let tag_info = match query.name {
+        Some(tag) => format!(" (tag: '{}')", tag),
+        None => String::new(),
+    };
+    Ok(format!("Snapshot {}{} created for VM {} at {:?}", result.id, tag_info, id, result.path))
 }
 
 #[derive(Deserialize)]
