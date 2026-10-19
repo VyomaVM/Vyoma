@@ -78,7 +78,7 @@ For a complete reference of all 20+ commands, see [COMMANDS.md](COMMANDS.md).
 ### Lifecycle
 *   **Run a VM**:
     ```bash
-    vyoma run ubuntu:latest --vcpu 2 --memory 1024 -p 8080:80 -v /host/path:/vm/path
+    vyoma run ubuntu:latest --vcpu 2 --memory 1G -p 8080:80 -v /host/path:/vm/path
     ```
     > **Note for Volume Mounts**: The host directory must be readable (and writable, if needed) by the `vyoma` user, as the daemon runs under this unprivileged user. You can use `chown vyoma:vyoma /host/path` or `chmod o+r /host/path` to grant access.
 *   **List VMs**: `vyoma ps`

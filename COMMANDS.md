@@ -9,13 +9,13 @@ Run a new micro-VM from an image.
 **Usage**: `vyoma run [OPTIONS] <IMAGE>`
 **Options**:
 - `--vcpu <N>`: Number of vCPUs (Default: 1).
-- `--memory <MB>`: Memory size in MiB (Default: 512).
+- `--memory <SIZE>`: Memory size in human-readable units or MiB (e.g. `512M`, `1G`, `2GiB`, or raw MiB digits `1024`, Default: `512`).
 - `-p, --port <HOST>:<VM>`: Port mapping.
 - `-v, --volume <HOST>:<VM>`: Volume mount (Requires `virtiofsd`).
 - `--name <NAME>`: Custom hostname/name.
 **Example**:
 ```bash
-vyoma run alpine:latest --vcpu 2 --memory 1024 -p 8080:80
+vyoma run alpine:latest --vcpu 2 --memory 1G -p 8080:80
 ```
 
 ### `vyoma stop`

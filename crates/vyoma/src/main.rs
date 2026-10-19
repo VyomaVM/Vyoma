@@ -77,8 +77,8 @@ enum Commands {
         #[arg(long, default_value = "1")]
         vcpu: u32,
 
-        /// Memory in MiB (default: 512)
-        #[arg(long, default_value = "512")]
+        /// Memory size (e.g. 512, 512M, 1G, 2GiB, default: 512M)
+        #[arg(long, default_value = "512", value_parser = parse_memory_size)]
         memory: u32,
 
         /// Port mappings (e.g. -p 8080:80)
@@ -660,61 +660,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Attest { id, .. } => {
-            info!("Requesting attestation for VM: {}", id);
-            let resp = client
-                .post(format!("{}/attest/{}", daemon_url, id))
-                .send()
-                .await;
 
-            match resp {
-                Ok(response) => {
-                    if response.status().is_success() {
-                        let attest_resp: serde_json::Value = response.json().await?;
-                        let verified = attest_resp.get("verified")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        let vm_id = attest_resp.get("vm_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or(&id);
-
-                        if verified {
-                            println!("VM {} attestation: {}", vm_id, "VERIFIED".green());
-                        } else {
-                            println!("VM {} attestation: {}", vm_id, "FAILED".red());
-                        }
-
-                        if let Some(pcr_results) = attest_resp.get("pcr_results").and_then(|v| v.as_array()) {
-                            println!("\nPCR Results:");
-                            println!("{:<10} {:<64} {:<64} {:<12}",
-                                "PCR Index", "Expected", "Actual", "Verified");
-                            for pcr in pcr_results {
-                                let pcr_index = pcr.get("pcr_index").and_then(|v| v.as_u64()).unwrap_or(0);
-                                let expected = pcr.get("expected").and_then(|v| v.as_str()).unwrap_or("");
-                                let actual = pcr.get("actual").and_then(|v| v.as_str()).unwrap_or("");
-                                let verified = pcr.get("verified").and_then(|v| v.as_bool()).unwrap_or(false);
-
-                                let status = if verified { "✓".green() } else { "✗".red() };
-                                println!(
-                                    "{:<10} {:<64} {:<64} {:<12}",
-                                    pcr_index, expected, actual, status
-                                );
-                            }
-                        }
-
-                        if let Some(error) = attest_resp.get("error").and_then(|v| v.as_str()) {
-                            println!("\nError: {}", error.red());
-                        }
-                    } else {
-                        let error_msg = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                        error!("Attestation failed: {}", error_msg);
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to connect to daemon at {}: {}", daemon_url, e);
-                }
-            }
-        }
         Commands::Snapshot { id } => {
             info!("Requesting to snapshot VM: {}", id);
             let resp = client
@@ -2200,6 +2146,50 @@ fn parse_size_str(s: &str) -> anyhow::Result<u64> {
     Ok(val * multiplier)
 }
 
+/// Parse human-readable memory strings (e.g. "512M", "1G", "2048", "512MiB", "1GiB") into MiB.
+pub fn parse_memory_size(s: &str) -> Result<u32, String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err("Memory size cannot be empty".to_string());
+    }
+
+    let upper = trimmed.to_uppercase();
+    let num_part: String = upper.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    let unit_part: String = upper.chars().skip_while(|c| c.is_ascii_digit() || *c == '.').collect();
+
+    if num_part.is_empty() {
+        return Err(format!("Invalid memory size '{}': missing numerical value", s));
+    }
+
+    let val = num_part
+        .parse::<f64>()
+        .map_err(|e| format!("Invalid memory size '{}': {}", s, e))?;
+
+    if val <= 0.0 {
+        return Err(format!("Memory size must be greater than 0, got {}", s));
+    }
+
+    let multiplier = match unit_part.trim() {
+        "" | "M" | "MB" | "MIB" => 1.0,
+        "G" | "GB" | "GIB" => 1024.0,
+        "K" | "KB" | "KIB" => 1.0 / 1024.0,
+        "T" | "TB" | "TIB" => 1024.0 * 1024.0,
+        other => {
+            return Err(format!(
+                "Invalid memory unit '{}' in '{}'. Supported units: M, MB, MiB, G, GB, GiB",
+                other, s
+            ))
+        }
+    };
+
+    let mib = (val * multiplier).round() as u32;
+    if mib == 0 {
+        return Err(format!("Memory size '{}' resolves to 0 MiB", s));
+    }
+
+    Ok(mib)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2214,6 +2204,26 @@ mod tests {
         assert_eq!(parse_size_str("256MB").unwrap(), 256 * 1024 * 1024);
         assert!(parse_size_str("").is_err());
         assert!(parse_size_str("invalid").is_err());
+    }
+
+    #[test]
+    fn test_parse_memory_size() {
+        assert_eq!(parse_memory_size("512").unwrap(), 512);
+        assert_eq!(parse_memory_size("512M").unwrap(), 512);
+        assert_eq!(parse_memory_size("512m").unwrap(), 512);
+        assert_eq!(parse_memory_size("512MB").unwrap(), 512);
+        assert_eq!(parse_memory_size("512MiB").unwrap(), 512);
+        assert_eq!(parse_memory_size("1G").unwrap(), 1024);
+        assert_eq!(parse_memory_size("1g").unwrap(), 1024);
+        assert_eq!(parse_memory_size("1GB").unwrap(), 1024);
+        assert_eq!(parse_memory_size("1GiB").unwrap(), 1024);
+        assert_eq!(parse_memory_size("2G").unwrap(), 2048);
+        assert_eq!(parse_memory_size("1.5G").unwrap(), 1536);
+        assert_eq!(parse_memory_size("2048").unwrap(), 2048);
+        assert!(parse_memory_size("").is_err());
+        assert!(parse_memory_size("0").is_err());
+        assert!(parse_memory_size("invalid").is_err());
+        assert!(parse_memory_size("-512M").is_err());
     }
 }
 
