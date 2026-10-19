@@ -354,6 +354,7 @@ async fn async_main(args: Args) {
         .route("/history/:id", get(handlers::history_vm))
         .route("/time-travel", post(handlers::time_travel_vm))
         .route("/restore", post(handlers::restore_vm))
+        .route("/vms/:id/restore", post(handlers::restore_vm_by_id))
         .route("/logs/:id", get(handlers::stream_logs))
         .route("/build", post(handlers::build_image))
         .route("/images", get(handlers::list_images_handler))

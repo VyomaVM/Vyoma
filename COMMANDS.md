@@ -101,8 +101,22 @@ vyoma snapshot my-vm --name before-deploy
 ```
 
 ### `vyoma restore`
-Restore a VM from a snapshot ID.
-**Usage**: `vyoma restore <SNAPSHOT_ID>`
+Restore a VM to a previous snapshot (by tag name, snapshot ID, or `snap:N` reference).
+**Usage**: `vyoma restore <ID> --from <SNAPSHOT>`
+**Options**:
+- `--from <SNAPSHOT>`: Snapshot tag name (e.g. `before-deploy`), snapshot ID, or reference (e.g. `snap:1`).
+**Example**:
+```bash
+vyoma restore my-vm --from before-deploy
+```
+
+### `vyoma time-travel`
+Time travel a VM to a specific snapshot (alias for `vyoma restore`).
+**Usage**: `vyoma time-travel <ID> --to <SNAPSHOT>`
+**Example**:
+```bash
+vyoma time-travel my-vm --to before-deploy
+```
 
 ### `vyoma export`
 Export a snapshot to a tarball.

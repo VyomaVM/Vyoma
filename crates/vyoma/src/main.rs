@@ -134,11 +134,19 @@ enum Commands {
           #[arg(long)]
           name: Option<String>,
       },
-     /// Time travel a VM to a specific snapshot
+      /// Restore a VM to a previous snapshot
+      Restore {
+          /// VM ID or Name
+          id: String,
+          /// Snapshot name, tag, or ID to restore from
+          #[arg(long)]
+          from: String,
+      },
+     /// Time travel a VM to a specific snapshot (alias for restore)
      TimeTravel {
          /// VM ID
          id: String,
-         /// Snapshot ID to travel to
+         /// Snapshot ID or tag to travel to
          #[arg(long)]
          to: String,
      },
@@ -346,11 +354,6 @@ struct RestoreRequest {
     original_vm_id: String,
 }
 
-#[derive(Serialize)]
-struct TimeTravelRequest {
-    vm_id: String,
-    snapshot_id: String,
-}
 
 #[derive(Deserialize, Debug)]
 struct RunResponse {
@@ -687,15 +690,30 @@ async fn main() -> Result<()> {
                 Err(e) => error!("Failed to connect: {}", e),
             }
         }
-        Commands::TimeTravel { id, to } => {
-            info!("Requesting to time-travel VM {} to snapshot: {}", id, to);
-            let payload = TimeTravelRequest {
-                vm_id: id,
-                snapshot_id: to,
-            };
+        Commands::Restore { id, from } => {
+            info!("Requesting to restore VM {} to snapshot: {}", id, from);
+            let payload = serde_json::json!({
+                "vm_id": id,
+                "from": from,
+            });
 
             let resp = client
-                .post(format!("{}/time-travel", daemon_url))
+                .post(format!("{}/restore", daemon_url))
+                .json(&payload)
+                .send()
+                .await;
+
+            handle_response(resp, &daemon_url).await?;
+        }
+        Commands::TimeTravel { id, to } => {
+            info!("Requesting to time-travel VM {} to snapshot: {}", id, to);
+            let payload = serde_json::json!({
+                "vm_id": id,
+                "from": to,
+            });
+
+            let resp = client
+                .post(format!("{}/restore", daemon_url))
                 .json(&payload)
                 .send()
                 .await;

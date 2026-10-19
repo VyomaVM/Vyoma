@@ -348,12 +348,18 @@ pub async fn snapshot_vm(
     Ok(format!("Snapshot {}{} created for VM {} at {:?}", result.id, tag_info, id, result.path))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct RestoreRequest {
-    pub snapshot_path: String,
-    pub mem_path: String,
-    pub cow_path: String,
-    pub original_vm_id: String,
+    // Unified parameters for TimeMachine / tag / ID rollback:
+    pub vm_id: Option<String>,
+    pub from: Option<String>,
+    pub snapshot_id: Option<String>,
+
+    // Raw files fallback (used by vyoma load / import):
+    pub snapshot_path: Option<String>,
+    pub mem_path: Option<String>,
+    pub cow_path: Option<String>,
+    pub original_vm_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -362,14 +368,64 @@ pub struct TimeTravelRequest {
     pub snapshot_id: String,
 }
 
+pub async fn restore_vm_by_id(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(mut payload): Json<RestoreRequest>,
+) -> Result<Json<RunResponse>, (StatusCode, String)> {
+    payload.vm_id = Some(id);
+    restore_vm(State(state), Json(payload)).await
+}
+
 pub async fn restore_vm(
     State(state): State<AppState>,
     Json(payload): Json<RestoreRequest>,
 ) -> Result<Json<RunResponse>, (StatusCode, String)> {
-    info!(
-        "Request to restore VM from snapshot: {}",
-        payload.snapshot_path
-    );
+    // 1. Check if this is a TimeMachine snapshot restore (by VM ID and tag/ID)
+    let vm_id_opt = payload.vm_id.clone().or_else(|| payload.original_vm_id.clone());
+    let snap_ref_opt = payload.from.clone().or_else(|| payload.snapshot_id.clone());
+
+    let (snapshot_path, mem_path, cow_path, _original_vm_id) = if let (Some(vm_id), Some(snap_ref)) = (vm_id_opt, snap_ref_opt) {
+        info!("Request to restore VM {} to snapshot '{}'", vm_id, snap_ref);
+
+        let tm = state.timemachine.read().await;
+        let snapshot = tm.get_snapshot(&vm_id, &snap_ref)
+            .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", snap_ref, vm_id)))?;
+
+        let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
+        let vms_root = home.join(".vyoma").join("vms");
+        let source_vm_dir = vms_root.join(&vm_id);
+        let snaps_dir = source_vm_dir.join("snapshots").join(&snapshot.id);
+
+        let snap_file = if snaps_dir.join("snapshot.snap").exists() {
+            snaps_dir.join("snapshot.snap")
+        } else {
+            snaps_dir.join("snapshot.bin")
+        };
+        let mem_file = snaps_dir.join("memory.mem");
+        let cow_file = snaps_dir.join("diff.cow");
+
+        (
+            snap_file.to_string_lossy().to_string(),
+            mem_file.to_string_lossy().to_string(),
+            cow_file.to_string_lossy().to_string(),
+            vm_id,
+        )
+    } else if let Some(snap_path) = payload.snapshot_path {
+        // Raw file paths fallback
+        info!("Request to restore VM from raw snapshot path: {}", snap_path);
+        (
+            snap_path,
+            payload.mem_path.unwrap_or_default(),
+            payload.cow_path.unwrap_or_default(),
+            payload.original_vm_id.unwrap_or_else(|| "imported".to_string()),
+        )
+    } else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid restore request: must provide either 'vm_id' and 'from'/'snapshot_id', or raw file paths".to_string(),
+        ));
+    };
 
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
     let vyoma_root = home.join(".vyoma");
@@ -390,8 +446,8 @@ pub async fn restore_vm(
     // 3. New COW File
     let cow_file = vm_dir.join("diff.cow");
 
-    info!("Restoring disk state from {:?}", payload.cow_path);
-    std::fs::copy(&payload.cow_path, &cow_file).map_err(|e| {
+    info!("Restoring disk state from {:?}", cow_path);
+    std::fs::copy(&cow_path, &cow_file).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to copy COW file: {}", e),
@@ -460,7 +516,7 @@ pub async fn restore_vm(
 
     // 7. Load Snapshot INSTEAD of Boot Source
     if let Err(e) = vmm
-        .load_snapshot(&payload.snapshot_path, &payload.mem_path)
+        .load_snapshot(&snapshot_path, &mem_path)
         .await
     {
         let _ = vmm.kill();
@@ -563,33 +619,16 @@ pub async fn time_travel_vm(
     State(state): State<AppState>,
     Json(payload): Json<TimeTravelRequest>,
 ) -> Result<Json<RunResponse>, (StatusCode, String)> {
-    info!(
-        "Request to time-travel VM {} to snapshot: {}",
-        payload.vm_id, payload.snapshot_id
-    );
-
-    let tm = state.timemachine.read().await;
-    let _snapshot = tm.get_snapshot(&payload.vm_id, &payload.snapshot_id)
-        .ok_or((StatusCode::NOT_FOUND, "Snapshot not found".to_string()))?;
-
-    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let vms_root = home.join(".vyoma").join("vms");
-    let source_vm_dir = vms_root.join(&payload.vm_id);
-    let snaps_dir = source_vm_dir.join("snapshots").join(&payload.snapshot_id);
-
-    let snapshot_path = snaps_dir.join("snapshot.snap");
-    let mem_path = snaps_dir.join("memory.mem");
-    let cow_path = snaps_dir.join("diff.cow");
-
     let restore_req = RestoreRequest {
-        snapshot_path: snapshot_path.to_string_lossy().to_string(),
-        mem_path: mem_path.to_string_lossy().to_string(),
-        cow_path: cow_path.to_string_lossy().to_string(),
-        original_vm_id: payload.vm_id.clone(),
+        vm_id: Some(payload.vm_id),
+        from: Some(payload.snapshot_id.clone()),
+        snapshot_id: Some(payload.snapshot_id),
+        snapshot_path: None,
+        mem_path: None,
+        cow_path: None,
+        original_vm_id: None,
     };
-
-    // Forward to existing restore logic
-    restore_vm(State(state.clone()), Json(restore_req)).await
+    restore_vm(State(state), Json(restore_req)).await
 }
 
 #[derive(Serialize)]
