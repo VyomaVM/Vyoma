@@ -50,6 +50,7 @@ Operator procedures, diagnostics, and deployment:
 
 ### 📐 [Specifications & Roadmap](specifications/)
 Technical blueprints and development milestones:
+- **[Cloud Hypervisor v54.0 Upgrade Specification](specifications/cloud-hypervisor-v54-upgrade.md)**: Architectural analysis, migration roadmap, and implementation plan for upgrading to Cloud Hypervisor v54.0.
 - **[Engineering Specification v2.0](specifications/technical-spec-v2.md)**: Complete 2,400+ line implementation guide spanning Phase 1 to Phase 4.
 - **[Project Roadmap](roadmap.md)**: Version milestones tracking completed features from v0.1.0 to upcoming goals.
 
