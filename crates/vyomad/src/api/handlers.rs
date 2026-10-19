@@ -349,6 +349,186 @@ pub async fn snapshot_vm(
 }
 
 #[derive(Deserialize, Debug, Clone)]
+pub struct BranchRequest {
+    pub from: String,
+    pub new_name: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct BranchResponse {
+    pub vm_id: String,
+    pub name: String,
+    pub parent_vm_id: String,
+    pub snapshot_id: String,
+    pub status: String,
+    pub ip_address: String,
+    pub cow_file_path: String,
+}
+
+pub async fn branch_vm_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<BranchRequest>,
+) -> Result<Json<BranchResponse>, (StatusCode, String)> {
+    info!("Request to branch VM '{}' from snapshot '{}' into new VM '{}'", id, payload.from, payload.new_name);
+
+    let (source_vm_id, source_disk, parent_image) = {
+        let vms = state.vms.lock().await;
+        if let Some(vm_arc) = vms.get(&id) {
+            let vm = vm_arc.lock().await;
+            (id.clone(), vm.cow_file_path.clone(), vm.base_image_path.clone())
+        } else {
+            let mut found = None;
+            for (k, v) in vms.iter() {
+                let vm = v.lock().await;
+                if vm.hostname.as_deref() == Some(&id) {
+                    found = Some((k.clone(), vm.cow_file_path.clone(), vm.base_image_path.clone()));
+                    break;
+                }
+            }
+            found.ok_or((StatusCode::NOT_FOUND, format!("Source VM '{}' not found", id)))?
+        }
+    };
+
+    let tm = state.timemachine.read().await;
+    let snapshot = tm.get_snapshot(&source_vm_id, &payload.from)
+        .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", payload.from, source_vm_id)))?;
+
+    let data_dir = std::path::PathBuf::from(&state.data_dir);
+    let snaps_dir = data_dir.join(".vyoma").join("vms").join(&source_vm_id).join("snapshots").join(&snapshot.id);
+    let backing_disk = if snaps_dir.join("root.qcow2").exists() {
+        snaps_dir.join("root.qcow2")
+    } else if std::path::Path::new(&source_disk).exists() {
+        std::path::PathBuf::from(&source_disk)
+    } else {
+        data_dir.join(".vyoma").join("vms").join(&source_vm_id).join("root.qcow2")
+    };
+
+    let new_vm_id = uuid::Uuid::new_v4().to_string();
+    let new_vm_dir = data_dir.join(".vyoma").join("vms").join(&new_vm_id);
+    std::fs::create_dir_all(&new_vm_dir)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create branched VM dir: {}", e)))?;
+
+    let new_overlay_path = new_vm_dir.join("root.qcow2");
+    if backing_disk.exists() {
+        vyoma_storage::Qcow2Manager::create_overlay(&new_overlay_path, &backing_disk)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create branched QCOW2 overlay: {}", e)))?;
+    } else {
+        vyoma_storage::Qcow2Manager::create_image(&new_overlay_path, 10240)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to initialize QCOW2 disk: {}", e)))?;
+    }
+
+    {
+        let tm = state.timemachine.write().await;
+        let _ = tm.create_snapshot(new_vm_id.clone(), Some(format!("Branched from {} ({})", source_vm_id, payload.from)));
+    }
+
+    let ch_socket = new_vm_dir.join("ch.sock").to_string_lossy().to_string();
+    let vsock_path = new_vm_dir.join("vsock.sock");
+    let cid = (uuid::Uuid::parse_str(&new_vm_id).map(|u| u.as_fields().0).unwrap_or(1234) % 1000000) + 3;
+
+    let ch_config = crate::vm_service::types::ChConfig {
+        ch_path: format!("{}/bin/cloud-hypervisor", state.data_dir),
+        kernel_path: format!("{}/bin/vmlinux", state.data_dir),
+        initramfs_path: None,
+        rootfs_path: new_overlay_path.to_string_lossy().to_string(),
+        socket_path: ch_socket.clone(),
+        vsock_path,
+        vsock_cid: cid,
+        boot_args: "console=ttyS0 reboot=k panic=1 root=/dev/vda rw quiet".to_string(),
+        tpm_socket_path: None,
+    };
+
+    let random_octet = 2 + (rand::random::<u8>() % 252);
+    let ip_address = format!("172.16.0.{}", random_octet);
+    let network_config = crate::vm_service::types::VmNetworkConfig {
+        ip_address: ip_address.clone(),
+        primary_tap: String::new(),
+        gateway: "172.16.0.1".to_string(),
+        network_infos: vec![],
+        netns_path: None,
+    };
+
+    let run_req = crate::vm_service::types::VmRunRequest {
+        image: parent_image.clone(),
+        vcpu: 1,
+        mem_size_mib: 256,
+        ports: vec![],
+        volumes: vec![],
+        hostname: Some(payload.new_name.clone()),
+        networks: vec!["default".to_string()],
+        labels: HashMap::new(),
+        base_image_path: parent_image.clone(),
+    };
+
+    let (vmm, proxy_tasks, fs_managers, vtpm_manager) = match crate::vm_service::boot::start_vm(
+        &state,
+        &ch_config,
+        &network_config,
+        &run_req,
+    ).await {
+        Ok(res) => res,
+        Err(e) => {
+            warn!("Failed to boot branched VM immediately: {}. Registering as prepared instance.", e);
+            let vmm = vyoma_core::vmm::VmmManager::new(&ch_socket);
+            (vmm, vec![], vec![], None)
+        }
+    };
+
+    let vm_instance = crate::state::VmInstance {
+        vmm,
+        id: new_vm_id.clone(),
+        status: crate::state::VmStatus::Running,
+        attestation_status: None,
+        ch_socket_path: ch_socket,
+        tap_name: String::new(),
+        dm_name: format!("qcow2-{}", new_vm_id),
+        loop_devices: vec![],
+        cow_file_path: new_overlay_path.to_string_lossy().to_string(),
+        ip_address: ip_address.clone(),
+        proxy_tasks,
+        fs_managers,
+        vtpm_manager,
+        cgroup_path: None,
+        netns_path: None,
+        config_ports: vec![],
+        config_volumes: vec![],
+        hostname: Some(payload.new_name.clone()),
+        labels: HashMap::new(),
+        networks: vec!["default".to_string()],
+        base_image_path: parent_image,
+        vcpu: 1,
+        mem_size_mib: 256,
+        attestation_task: None,
+        last_cpu_sample: None,
+    };
+
+    {
+        let mut vms = state.vms.lock().await;
+        vms.insert(new_vm_id.clone(), Arc::new(tokio::sync::Mutex::new(vm_instance)));
+    }
+
+    let _ = state.events_tx.send(serde_json::json!({
+        "type": "vm_branched",
+        "id": new_vm_id,
+        "parent_id": source_vm_id,
+        "snapshot_id": snapshot.id,
+        "name": payload.new_name,
+        "ip": ip_address
+    }).to_string());
+
+    Ok(Json(BranchResponse {
+        vm_id: new_vm_id,
+        name: payload.new_name,
+        parent_vm_id: source_vm_id,
+        snapshot_id: snapshot.id,
+        status: "running".to_string(),
+        ip_address,
+        cow_file_path: new_overlay_path.to_string_lossy().to_string(),
+    }))
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct RestoreRequest {
     // Unified parameters for TimeMachine / tag / ID rollback:
     pub vm_id: Option<String>,

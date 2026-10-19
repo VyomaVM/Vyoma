@@ -162,3 +162,24 @@ impl StorageManager {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_qcow2_create_and_branch() {
+        let temp_dir = tempdir().unwrap();
+        let base_img = temp_dir.path().join("base.qcow2");
+        let overlay_img = temp_dir.path().join("overlay.qcow2");
+
+        // 1. Create base volume
+        Qcow2Manager::create_image(&base_img, 10).unwrap();
+        assert!(base_img.exists());
+
+        // 2. Branch overlay snapshot
+        Qcow2Manager::create_overlay(&overlay_img, &base_img).unwrap();
+        assert!(overlay_img.exists());
+    }
+}
+
