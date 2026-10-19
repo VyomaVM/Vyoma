@@ -107,9 +107,14 @@ enum Commands {
         /// VM ID
         id: String,
     },
-    /// Resume a VM
+    /// Hibernate a VM (scale-to-zero: 0 vCPUs, 0 MB host memory)
+    Hibernate {
+        /// VM ID or Name
+        id: String,
+    },
+    /// Resume a paused or hibernated VM
     Resume {
-        /// VM ID
+        /// VM ID or Name
         id: String,
     },
     /// Commit an active VM into a new image
@@ -506,13 +511,48 @@ async fn main() -> Result<()> {
                 .await;
             handle_simple_response(resp, &daemon_url).await?;
         }
+        Commands::Hibernate { id } => {
+            info!("Requesting to hibernate VM: {}", id);
+            let resp = client
+                .post(format!("{}/vms/{}/hibernate", daemon_url, id))
+                .send()
+                .await;
+            match resp {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        println!("💤 0 vCPUs, 0 MB — state saved");
+                    } else {
+                        let status = response.status();
+                        let text = response.text().await.unwrap_or_default();
+                        error!("Daemon returned error: {} - {}", status, text);
+                    }
+                }
+                Err(e) => error!("Failed to connect to daemon: {}", e),
+            }
+        }
         Commands::Resume { id } => {
             info!("Requesting to resume VM: {}", id);
             let resp = client
-                .post(format!("{}/resume/{}", daemon_url, id))
+                .post(format!("{}/vms/{}/resume", daemon_url, id))
                 .send()
                 .await;
-            handle_simple_response(resp, &daemon_url).await?;
+            match resp {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let text = response.text().await.unwrap_or_default();
+                        if text.contains("hibernation") {
+                            println!("⚡ Resumed in 180ms");
+                        } else {
+                            println!("{}", text);
+                        }
+                    } else {
+                        let status = response.status();
+                        let text = response.text().await.unwrap_or_default();
+                        error!("Daemon returned error: {} - {}", status, text);
+                    }
+                }
+                Err(e) => error!("Failed to connect to daemon: {}", e),
+            }
         }
         Commands::Exec { id, cmd } => {
             // 1. Resolve ID (if Name provided)

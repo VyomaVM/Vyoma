@@ -23,13 +23,27 @@ Stop a running VM gracefully.
 **Usage**: `vyoma stop <ID>`
 **Example**: `vyoma stop a1b2c3d4`
 
-### `vyoma start`
-Start a stopped VM (Resume execution). (Use `restart` to replace).
-**Usage**: `vyoma start <ID>`
+### `vyoma hibernate`
+Put a running VM into scale-to-zero hibernation. The VM's CPU and RAM state are saved to disk, and the hypervisor process terminates, releasing 100% of host CPU and memory (0 vCPUs, 0 MB RAM overhead).
+**Usage**: `vyoma hibernate <ID>`
+**Example**:
+```bash
+$ vyoma hibernate staging-env
+  💤 0 vCPUs, 0 MB — state saved
+```
 
-### `vyoma restart`
-Stop and Restart a VM (Full reboot).
-**Usage**: `vyoma restart <ID>`
+### `vyoma resume`
+Resume a paused or hibernated VM. Hibernated VMs wake up in ~180ms with in-memory state and network IP intact.
+**Usage**: `vyoma resume <ID>`
+**Example**:
+```bash
+$ vyoma resume staging-env
+  ⚡ Resumed in 180ms
+```
+
+### `vyoma pause`
+Temporarily pause a running VM's vCPUs without terminating the hypervisor process.
+**Usage**: `vyoma pause <ID>`
 
 ### `vyoma ps`
 List all active VMs.

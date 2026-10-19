@@ -87,7 +87,7 @@ For a complete reference of all 20+ commands, see [COMMANDS.md](COMMANDS.md).
 *   **Logs**: `vyoma logs -f <vm_id>`
 *   **Shell Access**: `vyoma exec <vm_id> /bin/bash` (Uses a secure, agent-based HTTP channel—no SSH required)
 *   **Stop/Remove**: `vyoma stop <vm_id>`, `vyoma rm <vm_id>`
-*   **Pause/Resume**: `vyoma pause <vm_id>`, `vyoma resume <vm_id>`
+*   **Pause/Resume & Hibernation**: `vyoma pause <vm_id>`, `vyoma hibernate <vm_id>` (scale-to-zero: 0 vCPUs, 0 MB overhead), `vyoma resume <vm_id>` (resumes in ~180ms)
 *   **Snapshots & Branching**: `vyoma snapshot <id> --name <tag>`, `vyoma restore <id> --from <tag>`, `vyoma branch <id> --from <tag> <new_name>`
 
 ### Networking
