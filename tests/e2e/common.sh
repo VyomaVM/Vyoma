@@ -57,7 +57,7 @@ setup_env() {
          cp /var/lib/vyoma/bin/cloud-hypervisor $TEST_HOME/.vyoma/bin/
     else
          echo -e "cloud-hypervisor not found. Downloading..."
-         wget -q -O $TEST_HOME/.vyoma/bin/cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v41.0/cloud-hypervisor
+         wget -q -O $TEST_HOME/.vyoma/bin/cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-static
          chmod +x $TEST_HOME/.vyoma/bin/cloud-hypervisor
     fi
 
