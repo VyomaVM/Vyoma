@@ -163,6 +163,26 @@ Branch an existing snapshot into a new independent MicroVM backed by copy-on-wri
 vyoma branch my-db --from snap:6 experiment
 ```
 
+### `vyoma teleport`
+Live teleport (migrate) a running MicroVM to another Swarm node or target IP address with sub-second cutover.
+**Usage**: `vyoma teleport <ID> [<TARGET>] [--to <TARGET>] [--bandwidth <MBPS>]`
+**Options**:
+- `--to <TARGET>`: Target Swarm node name (e.g. `node-eu-west-1`), node ID, or IP address.
+- `--bandwidth <MBPS>`: Bandwidth throttle limit in Mbps (optional).
+- `--progress`: Show live migration progress bar (default: `true`).
+**Examples**:
+```bash
+# Teleport using --to flag with Swarm node name
+vyoma teleport api-server --to node-eu-west-1
+
+# Teleport using positional target IP address
+vyoma teleport api-server 192.168.1.50
+```
+
+### `vyoma cancel-teleport`
+Cancel an active in-flight live migration / teleportation session.
+**Usage**: `vyoma cancel-teleport <ID>`
+
 ### `vyoma export`
 Export a snapshot to a tarball.
 **Usage**: `vyoma export <SNAPSHOT_ID> <FILE>`

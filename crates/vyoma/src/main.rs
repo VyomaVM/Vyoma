@@ -186,8 +186,11 @@ enum Commands {
     Teleport {
         /// VM ID to teleport
         id: String,
-        /// Target Node IP (must expose gRPC on 7071)
-        target: String,
+        /// Target Node IP or Node Name (positional)
+        target: Option<String>,
+        /// Target Node IP or Node Name (--to flag)
+        #[arg(long)]
+        to: Option<String>,
         /// Bandwidth limit in Mbps (optional)
         #[arg(long)]
         bandwidth: Option<u32>,
@@ -842,7 +845,10 @@ async fn main() -> Result<()> {
             info!("Loading VM from {}", input);
             import_vm(&input, &daemon_url).await?;
         }
-        Commands::Teleport { id, target, bandwidth, progress } => {
+        Commands::Teleport { id, target, to, bandwidth, progress } => {
+            let target = to.or(target).ok_or_else(|| {
+                anyhow::anyhow!("Target node IP or node name is required. Specify either <TARGET> or --to <TARGET>.")
+            })?;
             info!("Initiating Live Teleportation for VM {} to target {}", id, target);
 
             let target_daemon = format!("http://{}:3000", target);
