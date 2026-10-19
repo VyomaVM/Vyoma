@@ -164,6 +164,21 @@ enum Commands {
         #[arg(long, default_value = "true")]
         progress: bool,
     },
+    /// Cancel an active live migration / teleportation
+    CancelTeleport {
+        /// VM ID or Session ID to cancel migration for
+        id: String,
+    },
+    /// Resize a VM disk online
+    ResizeDisk {
+        /// VM ID
+        id: String,
+        /// Desired size (e.g. 10G, 1024M, or raw bytes)
+        size: String,
+        /// Disk ID (default: "rootfs")
+        #[arg(long, default_value = "rootfs")]
+        disk_id: String,
+    },
     /// Stream logs from a VM
     Logs {
         /// VM ID
@@ -820,6 +835,50 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+        }
+        Commands::CancelTeleport { id } => {
+            info!("Cancelling teleportation/migration for {}", id);
+            let resp = client
+                .post(format!("{}/teleport/cancel/{}", daemon_url, id))
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                error!("Cancel teleport failed: {}", resp.text().await.unwrap_or_default());
+                return Ok(());
+            }
+
+            let text = resp.text().await.unwrap_or_default();
+            println!("{}", text);
+        }
+        Commands::ResizeDisk { id, size, disk_id } => {
+            info!("Resizing disk {} for VM {} to {}", disk_id, id, size);
+            let desired_size = match parse_size_str(&size) {
+                Ok(sz) => sz,
+                Err(e) => {
+                    error!("Invalid size '{}': {}", size, e);
+                    return Ok(());
+                }
+            };
+
+            let payload = serde_json::json!({
+                "disk_id": disk_id,
+                "desired_size": desired_size,
+            });
+
+            let resp = client
+                .post(format!("{}/vms/{}/resize-disk", daemon_url, id))
+                .json(&payload)
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                error!("Resize disk failed: {}", resp.text().await.unwrap_or_default());
+                return Ok(());
+            }
+
+            let text = resp.text().await.unwrap_or_default();
+            println!("{}", text);
         }
         Commands::Logs { id, follow: _ } => {
             // 1. Resolve ID (if Name provided)
@@ -2103,6 +2162,11 @@ async fn show_migration_progress(client: &reqwest::Client, daemon_url: &str, ses
                         println!("\n\nMigration failed!");
                         break;
                     }
+
+                    if status == "cancelled" {
+                        println!("\n\nMigration cancelled!");
+                        break;
+                    }
                 }
             }
             _ => break,
@@ -2111,3 +2175,46 @@ async fn show_migration_progress(client: &reqwest::Client, daemon_url: &str, ses
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     }
 }
+
+fn parse_size_str(s: &str) -> anyhow::Result<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        anyhow::bail!("Size cannot be empty");
+    }
+    let (num_part, multiplier) = if s.ends_with('G') || s.ends_with('g') {
+        (&s[..s.len() - 1], 1024 * 1024 * 1024u64)
+    } else if s.ends_with("GB") || s.ends_with("gb") || s.ends_with("GiB") || s.ends_with("gib") {
+        let idx = s.find(|c: char| c.is_alphabetic()).unwrap_or(s.len());
+        (&s[..idx], 1024 * 1024 * 1024u64)
+    } else if s.ends_with('M') || s.ends_with('m') {
+        (&s[..s.len() - 1], 1024 * 1024u64)
+    } else if s.ends_with("MB") || s.ends_with("mb") || s.ends_with("MiB") || s.ends_with("mib") {
+        let idx = s.find(|c: char| c.is_alphabetic()).unwrap_or(s.len());
+        (&s[..idx], 1024 * 1024u64)
+    } else if s.ends_with('K') || s.ends_with('k') {
+        (&s[..s.len() - 1], 1024u64)
+    } else {
+        (s, 1u64)
+    };
+    let val: u64 = num_part.trim().parse()?;
+    Ok(val * multiplier)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_size_str() {
+        assert_eq!(parse_size_str("1024").unwrap(), 1024);
+        assert_eq!(parse_size_str("10K").unwrap(), 10 * 1024);
+        assert_eq!(parse_size_str("512M").unwrap(), 512 * 1024 * 1024);
+        assert_eq!(parse_size_str("10G").unwrap(), 10 * 1024 * 1024 * 1024);
+        assert_eq!(parse_size_str("2GiB").unwrap(), 2 * 1024 * 1024 * 1024);
+        assert_eq!(parse_size_str("256MB").unwrap(), 256 * 1024 * 1024);
+        assert!(parse_size_str("").is_err());
+        assert!(parse_size_str("invalid").is_err());
+    }
+}
+
+
