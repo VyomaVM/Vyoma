@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vyoma"
+version = "2.9.0"
+description = "Official Python SDK for Vyoma MicroVM Runtime"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Vyoma Team" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: System :: Emulators",
+    "Topic :: System :: Systems Administration",
+]
+keywords = ["microvm", "cloud-hypervisor", "kvm", "virtualization", "containers"]
+
+[project.urls]
+Homepage = "https://vyoma.dev"
+Repository = "https://github.com/vyomavm/vyoma"
+Documentation = "https://vyoma.dev/docs"

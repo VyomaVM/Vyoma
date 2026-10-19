@@ -40,3 +40,9 @@ cloud-hypervisor
 bin/
 
 .env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
