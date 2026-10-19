@@ -373,11 +373,15 @@ async fn async_main(args: Args) {
         .route("/swarm/nodes", get(handlers::swarm_nodes_handler))
         .route("/teleport", post(handlers::teleport_handler))
         .route("/teleport/status/:session_id", get(handlers::teleport_status_handler))
+        .route("/teleport/cancel/:id", post(handlers::cancel_teleport_by_id_handler))
+        .route("/teleport/cancel", post(handlers::cancel_teleport_handler))
         .route("/receive-teleport", post(handlers::receive_teleport_handler))
         .route("/adopt-teleported-vm", post(handlers::adopt_teleported_vm))
         .route("/policy", get(handlers::get_policy_handler).post(handlers::set_policy_handler))
         .route("/attest/:id", post(handlers::attest_vm_handler))
         .route("/vms/:id/stats", get(handlers::get_vm_stats))
+        .route("/vms/:id/resize-disk", post(handlers::resize_disk_handler))
+        .route("/vms/:id/resize", post(handlers::resize_disk_handler))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth::auth_middleware));
 
     // Health check and UI are public (no auth required)
