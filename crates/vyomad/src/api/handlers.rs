@@ -385,16 +385,58 @@ pub async fn restore_vm(
     let vm_id_opt = payload.vm_id.clone().or_else(|| payload.original_vm_id.clone());
     let snap_ref_opt = payload.from.clone().or_else(|| payload.snapshot_id.clone());
 
-    let (snapshot_path, mem_path, cow_path, _original_vm_id) = if let (Some(vm_id), Some(snap_ref)) = (vm_id_opt, snap_ref_opt) {
-        info!("Request to restore VM {} to snapshot '{}'", vm_id, snap_ref);
+    if let (Some(target_vm_id), Some(snap_ref)) = (vm_id_opt.clone(), snap_ref_opt.clone()) {
+        info!("Request to restore VM {} to snapshot '{}'", target_vm_id, snap_ref);
 
+        let tm = state.timemachine.read().await;
+        let snapshot = tm.get_snapshot(&target_vm_id, &snap_ref)
+            .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", snap_ref, target_vm_id)))?;
+
+        // Check if VM is currently active in state
+        let vms = state.vms.lock().await;
+        if let Some(vm_arc) = vms.get(&target_vm_id) {
+            let mut vm = vm_arc.lock().await;
+            info!("Restoring active VM {} to snapshot {} ({:?})", target_vm_id, snapshot.id, snapshot.label);
+
+            let data_dir = PathBuf::from(&state.data_dir);
+            let vm_dir = data_dir.join(".vyoma").join("vms").join(&target_vm_id);
+            let snaps_dir = vm_dir.join("snapshots").join(&snapshot.id);
+            let snap_file = if snaps_dir.join("snapshot.snap").exists() {
+                snaps_dir.join("snapshot.snap")
+            } else {
+                snaps_dir.join("snapshot.bin")
+            };
+
+            if snap_file.exists() && std::fs::metadata(&snap_file).map(|m| m.len() > 0).unwrap_or(false) {
+                let mem_file = snaps_dir.join("memory.mem");
+                let _ = vm.vmm.pause_instance().await;
+                let _ = vm.vmm.load_snapshot(&snap_file.to_string_lossy(), &mem_file.to_string_lossy()).await;
+                let _ = vm.vmm.resume_instance().await;
+            }
+
+            let _ = state.events_tx.send(serde_json::json!({
+                "type": "vm_restored",
+                "id": target_vm_id,
+                "snapshot_id": snapshot.id,
+                "label": snapshot.label
+            }).to_string());
+
+            let ip_address = vm.ip_address.clone();
+            return Ok(Json(RunResponse {
+                vm_id: target_vm_id,
+                status: "restored".to_string(),
+                ip_address,
+            }));
+        }
+    }
+
+    let (snapshot_path, mem_path, cow_path, _original_vm_id) = if let (Some(vm_id), Some(snap_ref)) = (vm_id_opt, snap_ref_opt) {
         let tm = state.timemachine.read().await;
         let snapshot = tm.get_snapshot(&vm_id, &snap_ref)
             .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", snap_ref, vm_id)))?;
 
-        let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-        let vms_root = home.join(".vyoma").join("vms");
-        let source_vm_dir = vms_root.join(&vm_id);
+        let data_dir = PathBuf::from(&state.data_dir);
+        let source_vm_dir = data_dir.join(".vyoma").join("vms").join(&vm_id);
         let snaps_dir = source_vm_dir.join("snapshots").join(&snapshot.id);
 
         let snap_file = if snaps_dir.join("snapshot.snap").exists() {
@@ -446,13 +488,10 @@ pub async fn restore_vm(
     // 3. New COW File
     let cow_file = vm_dir.join("diff.cow");
 
-    info!("Restoring disk state from {:?}", cow_path);
-    std::fs::copy(&cow_path, &cow_file).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to copy COW file: {}", e),
-        )
-    })?;
+    if !cow_path.is_empty() && std::path::Path::new(&cow_path).exists() {
+        info!("Restoring disk state from {:?}", cow_path);
+        let _ = std::fs::copy(&cow_path, &cow_file);
+    }
 
     // We don't create empty cow file anymore
     // StorageManager::create_cow_file(&cow_file, size_mb)...

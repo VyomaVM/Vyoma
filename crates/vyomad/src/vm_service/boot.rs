@@ -66,8 +66,10 @@ pub async fn start_vm(
     vmm.add_drive("rootfs", &ch_config.rootfs_path, true).await
         .context("Add drive")?;
 
-    vmm.add_network_interface("eth0", &network_config.primary_tap, None).await
-        .context("Add net (primary)")?;
+    if !network_config.primary_tap.is_empty() {
+        vmm.add_network_interface("eth0", &network_config.primary_tap, None).await
+            .context("Add net (primary)")?;
+    }
 
     for (idx, network_info) in network_config.network_infos.iter().enumerate().skip(1) {
         let ifname = format!("eth{}", idx);
