@@ -18,7 +18,7 @@ WORK_DIR="target/debian/${PKG_NAME}_${VERSION}_${ARCH}"
 
 # Hardcoded checksums for binary verification
 # Computed from official release sources
-CLOUD_HYPERVISOR_CHECKSUM="8a013003ae29f59da7b2d7ac67f19eea3ea535166dac00ff5e8c2c27ac643f8a"
+CLOUD_HYPERVISOR_CHECKSUM="4f4f98a3d661a40f3e5272627cc895a1b2e525f2f6bedf5f895f9cd21ba5c65b"
 CNI_PLUGINS_CHECKSUM="77baa2f669980a82255ffa2f2717de823992480271ee778aa51a9c60ae89ff9b"
 
 # Verify checksum of a downloaded file
@@ -69,8 +69,8 @@ echo "Fetching dependencies..."
 
 # Fetch Cloud Hypervisor with checksum verification
 if [ ! -f "cloud-hypervisor" ]; then
-    echo "Downloading cloud-hypervisor v41.0..."
-    wget -q -O cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v41.0/cloud-hypervisor
+    echo "Downloading cloud-hypervisor v54.0 static binary..."
+    wget -q -O cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-static
     chmod +x cloud-hypervisor
 fi
 
