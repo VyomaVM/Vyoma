@@ -1853,3 +1853,215 @@ pub async fn get_vm_stats(
         memory_percent: mem_percent,
     }))
 }
+
+#[derive(Deserialize, Debug, Default)]
+pub struct CancelTeleportRequest {
+    pub session_id: Option<String>,
+    pub vm_id: Option<String>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct CancelTeleportResponse {
+    pub success: bool,
+    pub message: String,
+    pub session_id: Option<String>,
+    pub vm_id: Option<String>,
+}
+
+pub async fn cancel_teleport_by_id_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<CancelTeleportResponse>, (StatusCode, String)> {
+    cancel_teleport_internal(state, Some(id), None).await
+}
+
+pub async fn cancel_teleport_handler(
+    State(state): State<AppState>,
+    payload: Option<Json<CancelTeleportRequest>>,
+) -> Result<Json<CancelTeleportResponse>, (StatusCode, String)> {
+    let req = payload.map(|Json(r)| r).unwrap_or_default();
+    cancel_teleport_internal(state, req.session_id, req.vm_id).await
+}
+
+async fn cancel_teleport_internal(
+    state: AppState,
+    session_id_arg: Option<String>,
+    vm_id_arg: Option<String>,
+) -> Result<Json<CancelTeleportResponse>, (StatusCode, String)> {
+    let sessions = get_migration_sessions();
+    let mut found_session_id = None;
+    let mut target_vm_id = vm_id_arg.clone();
+
+    {
+        let mut sessions_guard = sessions.lock().unwrap();
+        if let Some(ref sid) = session_id_arg {
+            if let Some(session) = sessions_guard.get_mut(sid) {
+                session.status = "cancelling".to_string();
+                found_session_id = Some(session.session_id.clone());
+                target_vm_id = Some(session.vm_id.clone());
+            } else {
+                for (s_id, session) in sessions_guard.iter_mut() {
+                    if session.vm_id == *sid {
+                        session.status = "cancelling".to_string();
+                        found_session_id = Some(s_id.clone());
+                        target_vm_id = Some(session.vm_id.clone());
+                        break;
+                    }
+                }
+            }
+        } else if let Some(ref vid) = vm_id_arg {
+            for (s_id, session) in sessions_guard.iter_mut() {
+                if session.vm_id == *vid {
+                    session.status = "cancelling".to_string();
+                    found_session_id = Some(s_id.clone());
+                    target_vm_id = Some(session.vm_id.clone());
+                    break;
+                }
+            }
+        }
+    }
+
+    let vm_id = target_vm_id.or(session_id_arg).unwrap_or_default();
+    if vm_id.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Neither session_id nor vm_id specified".to_string()));
+    }
+
+    let vm_arc = {
+        let vms = state.vms.lock().await;
+        vms.get(&vm_id).cloned()
+    };
+
+    let mut cancel_res = Ok(());
+    if let Some(vm_mutex) = vm_arc {
+        let vm = vm_mutex.lock().await;
+        cancel_res = vm.vmm.cancel_migration().await;
+    }
+
+    {
+        let mut sessions_guard = sessions.lock().unwrap();
+        if let Some(ref sid) = found_session_id {
+            if let Some(session) = sessions_guard.get_mut(sid) {
+                session.status = "cancelled".to_string();
+            }
+        }
+    }
+
+    let _ = state.events_tx.send(serde_json::json!({
+        "type": "teleport_cancelled",
+        "vm_id": vm_id.clone(),
+        "session_id": found_session_id.clone(),
+    }).to_string());
+
+    match cancel_res {
+        Ok(_) => Ok(Json(CancelTeleportResponse {
+            success: true,
+            message: format!("Migration for VM {} cancelled successfully", vm_id),
+            session_id: found_session_id,
+            vm_id: Some(vm_id),
+        })),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("no ongoing migration") {
+                Ok(Json(CancelTeleportResponse {
+                    success: true,
+                    message: format!("No ongoing migration active on hypervisor for VM {}", vm_id),
+                    session_id: found_session_id,
+                    vm_id: Some(vm_id),
+                }))
+            } else {
+                Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to cancel migration: {}", msg)))
+            }
+        }
+    }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ResizeDiskRequest {
+    #[serde(default = "default_disk_id")]
+    pub disk_id: String,
+    pub desired_size: u64,
+}
+
+fn default_disk_id() -> String {
+    "rootfs".to_string()
+}
+
+#[derive(Serialize, Debug)]
+pub struct ResizeDiskResponse {
+    pub success: bool,
+    pub vm_id: String,
+    pub disk_id: String,
+    pub desired_size: u64,
+    pub message: String,
+}
+
+pub async fn resize_disk_handler(
+    State(state): State<AppState>,
+    Path(vm_id): Path<String>,
+    Json(payload): Json<ResizeDiskRequest>,
+) -> Result<Json<ResizeDiskResponse>, (StatusCode, String)> {
+    info!("Handling POST /vms/{}/resize-disk: disk={}, desired_size={}", vm_id, payload.disk_id, payload.desired_size);
+
+    let vm_arc = {
+        let vms = state.vms.lock().await;
+        vms.get(&vm_id).cloned()
+    }.ok_or((StatusCode::NOT_FOUND, format!("VM {} not found", vm_id)))?;
+
+    let res = {
+        let vm = vm_arc.lock().await;
+        vm.vmm.resize_disk(&payload.disk_id, payload.desired_size).await
+    };
+
+    match res {
+        Ok(_) => {
+            let _ = state.events_tx.send(serde_json::json!({
+                "type": "disk_resized",
+                "vm_id": vm_id.clone(),
+                "disk_id": payload.disk_id.clone(),
+                "desired_size": payload.desired_size,
+            }).to_string());
+
+            Ok(Json(ResizeDiskResponse {
+                success: true,
+                vm_id,
+                disk_id: payload.disk_id,
+                desired_size: payload.desired_size,
+                message: "Disk resized successfully".to_string(),
+            }))
+        }
+        Err(e) => {
+            let err_msg = e.to_string();
+            error!("Failed to resize disk for VM {}: {}", vm_id, err_msg);
+            Err((StatusCode::BAD_REQUEST, format!("Failed to resize disk: {}", err_msg)))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resize_disk_request_default_disk_id() {
+        let json = r#"{"desired_size": 10737418240}"#;
+        let req: ResizeDiskRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.disk_id, "rootfs");
+        assert_eq!(req.desired_size, 10737418240);
+    }
+
+    #[test]
+    fn test_resize_disk_request_custom_disk_id() {
+        let json = r#"{"disk_id": "data_disk", "desired_size": 5368709120}"#;
+        let req: ResizeDiskRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.disk_id, "data_disk");
+        assert_eq!(req.desired_size, 5368709120);
+    }
+
+    #[test]
+    fn test_cancel_teleport_request_deserialize() {
+        let json = r#"{"session_id": "sess-123", "vm_id": "vm-abc"}"#;
+        let req: CancelTeleportRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.session_id.as_deref(), Some("sess-123"));
+        assert_eq!(req.vm_id.as_deref(), Some("vm-abc"));
+    }
+}

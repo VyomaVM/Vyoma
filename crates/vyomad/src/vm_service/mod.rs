@@ -275,6 +275,22 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         VmStatus::Error { reason } => format!("Error: {}", reason),
     };
 
+    let mut event_rx = instance.vmm.subscribe_events();
+    let events_tx_ch = state.events_tx.clone();
+    let ch_vm_id = vm_id.clone();
+    tokio::spawn(async move {
+        while let Ok(evt) = event_rx.recv().await {
+            let _ = events_tx_ch.send(serde_json::json!({
+                "type": "ch_vmm_event",
+                "vm_id": ch_vm_id,
+                "source": evt.source,
+                "event": evt.event,
+                "timestamp": evt.timestamp,
+                "properties": evt.properties,
+            }).to_string());
+        }
+    });
+
     {
         let mut vms = state.vms.lock().await;
         vms.insert(vm_id.clone(), Arc::new(tokio::sync::Mutex::new(instance)));
