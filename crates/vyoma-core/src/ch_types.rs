@@ -91,6 +91,10 @@ pub struct DiskConfig {
     pub queue_size: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub num_queues: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backing_files: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
