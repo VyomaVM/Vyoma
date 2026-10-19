@@ -177,20 +177,43 @@ impl VmmManager {
                 }
 
                 if let Ok(file) = std::fs::File::open(path) {
+                    use std::io::Read;
                     let mut reader = BufReader::new(file);
-                    let mut line = String::new();
+                    let mut buffer = String::new();
+                    let mut brace_depth = 0i32;
+                    let mut in_string = false;
+                    let mut escape = false;
+
                     loop {
-                        line.clear();
-                        match reader.read_line(&mut line) {
+                        let mut byte_buf = [0u8; 1];
+                        match reader.read(&mut byte_buf) {
                             Ok(0) => {
                                 thread::sleep(Duration::from_millis(100));
                             }
-                            Ok(_) => {
-                                let trimmed = line.trim();
-                                if !trimmed.is_empty() {
-                                    if let Ok(evt) = serde_json::from_str::<VmmEvent>(trimmed) {
-                                        tracing::info!("[CH EVENT] {}: {}", evt.source, evt.event);
-                                        let _ = tx_event.send(evt);
+                            Ok(1) => {
+                                let c = byte_buf[0] as char;
+                                buffer.push(c);
+                                if escape {
+                                    escape = false;
+                                } else if c == '\\' {
+                                    escape = true;
+                                } else if c == '"' {
+                                    in_string = !in_string;
+                                } else if !in_string {
+                                    if c == '{' {
+                                        brace_depth += 1;
+                                    } else if c == '}' {
+                                        brace_depth -= 1;
+                                        if brace_depth == 0 {
+                                            let trimmed = buffer.trim();
+                                            if !trimmed.is_empty() {
+                                                if let Ok(evt) = serde_json::from_str::<VmmEvent>(trimmed) {
+                                                    tracing::info!("[CH EVENT] {}: {}", evt.source, evt.event);
+                                                    let _ = tx_event.send(evt);
+                                                }
+                                            }
+                                            buffer.clear();
+                                        }
                                     }
                                 }
                             }
