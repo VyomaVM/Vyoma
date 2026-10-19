@@ -9,17 +9,18 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 
 ---
 
-## 🚀 Key Features (v2.1.2)
+## 🚀 Key Features (v2.9.0)
 
-*   **Docker UX**: Familiar commands: `run`, `ps`, `logs`, `exec`.
-*   **Vyoma Swarm**: Built-in clustering with **Mesh Networking** (VXLAN) and deterministic IP allocation.
-*   **Vyoma Compose**: Orchestrate stacks with `vyoma-compose.yml`.
-*   **Web Dashboard**: Built-in visual management UI (bundled in Daemon, accessible at `http://localhost:3000`).
-*   **VS Code Extension**: Manage VMs directly from VS Code.
-*   **Self-Contained**: `.deb` and `.rpm` packages bundle all dependencies (Cloud Hypervisor, CNI plugins, UI).
-*   **Persistence**: Volume mounts (`virtiofs`) and Port Mapping.
-*   **Snapshotting**: Instant VM snapshots and State Teleportation.
-*   **Secure by Default**: Daemon runs as `vyoma` user with kernel capabilities, socket permissions 0660.
+*   **Docker UX**: Familiar commands: `run`, `ps`, `logs`, `exec`, `inspect`.
+*   **Human-Readable Memory**: Seamlessly specify `--memory 512M`, `1G`, `2GiB` or raw MiB digits.
+*   **4 Enterprise Security Pillars**: Hardware KVM isolation, least-privilege daemon (`privdrop`), TPM2 measured boot, and WireGuard/VXLAN encrypted mesh.
+*   **TimeMachine & QCOW2 Branching**: Instant MicroVM branching (`vyoma branch`) without duplicating disk space.
+*   **Scale-to-Zero Hibernation**: `vyoma hibernate` saves state and frees 100% of host RAM/vCPUs (0 vCPUs, 0 MB overhead); `vyoma resume` wakes in `<200ms`.
+*   **Smart Compose**: Seamless orchestration (`vyoma up -d`) with auto-discovery of `docker-compose.yml` and `compose.yaml`.
+*   **Python SDK & Kubernetes CRI (`vk8s`)**: Official `vyoma` Python SDK and CRI v1 plugin (`/var/run/vyoma-cri.sock`).
+*   **Vyoma Swarm & Teleportation**: Built-in clustering with sub-second live migration (`vyoma teleport --to <node>`).
+*   **Web Dashboard**: Built-in visual management UI (bundled in Daemon, accessible at `http://localhost:8080`).
+*   **Self-Contained**: `.deb` and `.rpm` packages bundle all dependencies (Cloud Hypervisor, CNI plugins, CRI shim, UI).
 
 ---
 
@@ -36,12 +37,12 @@ Go to the [Releases Page](https://github.com/Subeshrock/vyoma/releases) and down
 
 **Debian/Ubuntu:**
 ```bash
-sudo apt install ./vyoma_2.8.0_amd64.deb
+sudo apt install ./vyoma_2.9.0_amd64.deb
 ```
 
 **Fedora/RHEL/CentOS:**
 ```bash
-sudo rpm -i vyoma-2.8.0-1.x86_64.rpm
+sudo rpm -i vyoma-2.9.0-1.x86_64.rpm
 ```
 
 ### 3. Post-Install Group Setup
