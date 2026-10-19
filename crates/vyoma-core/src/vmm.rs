@@ -406,6 +406,11 @@ impl VmmManager {
         self.api_request("/api/v1/vm.receive-migration", Method::PUT, Some(&config)).await
     }
 
+    pub async fn cancel_migration(&self) -> Result<()> {
+        info!("Cancelling migration for VM on socket {}", self.socket_path);
+        self.api_request::<()>("/api/v1/vm.cancel-migration", Method::PUT, None).await
+    }
+
     pub async fn enable_sev_snp(&mut self, policy: Option<&str>, guest_key_root: Option<&str>) -> Result<()> {
         let sev_snp = crate::ch_types::SevSnpConfig {
             enabled: true,
