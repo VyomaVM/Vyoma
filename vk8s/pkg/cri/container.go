@@ -4,24 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
 	pb "k8s.io/cri-api/pkg/apis/runtime/v1"
 	"github.com/vyoma/vk8s/pkg/agent"
 )
-
-type ContainerInfo struct {
-	ID        string
-	PodID     string
-	Name      string
-	Image     string
-	Created   int64
-	State     pb.ContainerState
-	Config    *pb.ContainerConfig
-	Pid       uint32
-	StartTime int64
-}
 
 func (s *VyomaCriServer) CreateContainer(ctx context.Context, req *pb.CreateContainerRequest) (*pb.CreateContainerResponse, error) {
 	podID := req.GetPodSandboxId()
@@ -220,8 +208,6 @@ func (s *VyomaCriServer) ContainerStatus(ctx context.Context, req *pb.ContainerS
 	startedAt := container.StartTime
 	finishedAt := int64(0)
 	exitCode := int32(0)
-	signal := int32(0)
-	restartCount := uint32(0)
 
 	switch state {
 	case pb.ContainerState_CONTAINER_CREATED:
@@ -265,8 +251,6 @@ func (s *VyomaCriServer) ContainerStatus(ctx context.Context, req *pb.ContainerS
 			StartedAt:         startedAt,
 			FinishedAt:        finishedAt,
 			ExitCode:          exitCode,
-			Signal:            signal,
-			RestartCount:      restartCount,
 			Image:             &pb.ImageSpec{Image: container.Image},
 			ImageRef:          container.Image,
 			Reason:            reason,
@@ -296,14 +280,14 @@ func (s *VyomaCriServer) ListContainers(ctx context.Context, req *pb.ListContain
 			if filter.State != nil && c.State != filter.State.State {
 				continue
 			}
-			if len(filter.LabelSelectors) > 0 {
+			if len(filter.LabelSelector) > 0 {
 				match := true
-				for _, sel := range filter.LabelSelectors {
+				for k, v := range filter.LabelSelector {
 					if c.Config == nil || c.Config.Labels == nil {
 						match = false
 						break
 					}
-					if val, ok := c.Config.Labels[sel]; !ok || val == "" {
+					if val, ok := c.Config.Labels[k]; !ok || val != v {
 						match = false
 						break
 					}
@@ -315,14 +299,14 @@ func (s *VyomaCriServer) ListContainers(ctx context.Context, req *pb.ListContain
 		}
 
 		containers = append(containers, &pb.Container{
-			Id:          c.ID,
+			Id:           c.ID,
 			PodSandboxId: c.PodID,
-			Metadata:    &pb.ContainerMetadata{Name: c.Name},
-			Image:       c.Image,
-			ImageRef:    c.Image,
-			State:       c.State,
-			CreatedAt:   c.Created,
-			Labels:      c.Config.GetLabels(),
+			Metadata:     &pb.ContainerMetadata{Name: c.Name},
+			Image:        &pb.ImageSpec{Image: c.Image},
+			ImageRef:     c.Image,
+			State:        c.State,
+			CreatedAt:    c.Created,
+			Labels:       c.Config.GetLabels(),
 		})
 	}
 
@@ -334,7 +318,7 @@ func (s *VyomaCriServer) UpdateContainerResources(ctx context.Context, req *pb.U
 	s.logger.Printf("UpdateContainerResources: %s", containerID)
 
 	s.mu.RLock()
-	container, ok := s.containers[containerID]
+	_, ok := s.containers[containerID]
 	s.mu.RUnlock()
 
 	if !ok {
@@ -342,7 +326,7 @@ func (s *VyomaCriServer) UpdateContainerResources(ctx context.Context, req *pb.U
 	}
 
 	if req.GetLinux() != nil {
-		s.logger.Printf("  linux resources: cpu=%v memory=%v", req.Linux.CPU, req.Linux.Memory)
+		s.logger.Printf("  linux resources: cpu_period=%v cpu_quota=%v memory=%v", req.Linux.CpuPeriod, req.Linux.CpuQuota, req.Linux.MemoryLimitInBytes)
 	}
 
 	return &pb.UpdateContainerResourcesResponse{}, nil

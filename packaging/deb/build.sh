@@ -159,6 +159,9 @@ fi
 # 4. Copy Assets
 cp target/release/vyomad "${WORK_DIR}/usr/bin/"
 cp target/release/vyoma "${WORK_DIR}/usr/bin/"
+if [ -f "bin/vyoma-cri" ]; then
+    cp bin/vyoma-cri "${WORK_DIR}/usr/bin/vyoma-cri"
+fi
 cp target/x86_64-unknown-linux-musl/release/vyoma-agent-vm "${WORK_DIR}/usr/bin/vyoma-agent-vm"
 cp cloud-hypervisor "${WORK_DIR}/usr/bin/cloud-hypervisor"
 cp packaging/systemd/vyomad.service "${WORK_DIR}/etc/systemd/system/"

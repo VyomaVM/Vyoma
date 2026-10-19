@@ -1,14 +1,11 @@
 package cri
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
 	"time"
 
+	"google.golang.org/grpc/codes"
 	pb "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
@@ -16,12 +13,7 @@ func (s *VyomaCriServer) PullImage(ctx context.Context, req *pb.PullImageRequest
 	image := req.GetImage().GetImage()
 	s.logger.Printf("PullImage: %s", image)
 
-	body, err := json.Marshal(map[string]string{"image": image})
-	if err != nil {
-		return nil, errorf(codes.Internal, "marshal request: %v", err)
-	}
-
-	data, err := s.httpRequest(ctx, "POST", "/pull", bytes.NewReader(body))
+	data, err := s.httpRequest(ctx, "POST", "/pull", map[string]string{"image": image})
 	if err != nil {
 		s.logError(ctx, "PullImage", err)
 		return nil, errorf(codes.Internal, "pull image: %v", err)

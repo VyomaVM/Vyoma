@@ -1,7 +1,6 @@
 package cri
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -14,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
 	pb "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	"github.com/vyoma/vk8s/pkg/agent"
@@ -198,7 +198,7 @@ func (h *streamingHandler) execStream(w http.ResponseWriter, r *http.Request, cl
 
 	go func() {
 		defer wg.Done()
-		stdout, _, _ := cli.ExecCommand(r.Context(), st.Command, nil, "")
+		stdout, _, _, _ := cli.ExecCommand(r.Context(), st.Command, nil, "")
 		w.Write(stdout)
 	}()
 
@@ -273,7 +273,7 @@ func (h *streamingHandler) handleAttach(w http.ResponseWriter, r *http.Request) 
 
 	go func() {
 		defer wg.Done()
-		stdout, _, _ := cli.ExecCommand(ctx, []string{"cat", "/dev/console"}, nil, "")
+		stdout, _, _, _ := cli.ExecCommand(ctx, []string{"cat", "/dev/console"}, nil, "")
 		w.Write(stdout)
 	}()
 
@@ -497,45 +497,4 @@ func (s *VyomaCriServer) PortForward(ctx context.Context, req *pb.PortForwardReq
 
 	url := fmt.Sprintf("http://localhost:%d/portforward/%s", streamingPort, tokenStr)
 	return &pb.PortForwardResponse{Url: url}, nil
-}
-
-func (s *VyomaCriServer) ResizePty(ctx context.Context, req *pb.ResizePtyRequest) (*pb.ResizePtyResponse, error) {
-	s.logger.Printf("ResizePty: container=%s size=%dx%d", req.GetContainerId(), req.GetWidth(), req.GetHeight())
-	return &pb.ResizePtyResponse{}, nil
-}
-
-func (s *VyomaCriServer) httpRequest(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
-	var bodyReader *bytes.Reader
-	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return nil, err
-		}
-		bodyReader = bytes.NewReader(data)
-	} else {
-		bodyReader = bytes.NewReader(nil)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, s.vyomadHTTPAddr+path, bodyReader)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("vyomad %s %s: %d - %s", method, path, resp.StatusCode, string(data))
-	}
-
-	return data, nil
 }

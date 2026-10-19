@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	vyomav1 "github.com/vyoma/vk8s/pkg/vyoma/proto"
 )
@@ -23,7 +24,7 @@ type VmServiceClient interface {
 	CreateVm(ctx context.Context, in *vyomav1.CreateVmRequest, opts ...grpc.CallOption) (*vyomav1.CreateVmResponse, error)
 	StartVm(ctx context.Context, in *vyomav1.VmIdRequest, opts ...grpc.CallOption) (*vyomav1.VmStatusResponse, error)
 	StopVm(ctx context.Context, in *vyomav1.VmIdRequest, opts ...grpc.CallOption) (*vyomav1.VmStatusResponse, error)
-	DeleteVm(ctx context.Context, in *vyomav1.VmIdRequest, opts ...grpc.CallOption) (*vyomav1.Empty, error)
+	DeleteVm(ctx context.Context, in *vyomav1.VmIdRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	ListVms(ctx context.Context, in *vyomav1.ListVmsRequest, opts ...grpc.CallOption) (*vyomav1.ListVmsResponse, error)
 	GetVm(ctx context.Context, in *vyomav1.VmIdRequest, opts ...grpc.CallOption) (*vyomav1.VmInfo, error)
 }
@@ -55,7 +56,7 @@ func (c *Client) StopVm(ctx context.Context, req *vyomav1.VmIdRequest) (*vyomav1
 	return c.vmSvc.StopVm(ctx, req)
 }
 
-func (c *Client) DeleteVm(ctx context.Context, req *vyomav1.VmIdRequest) (*vyomav1.Empty, error) {
+func (c *Client) DeleteVm(ctx context.Context, req *vyomav1.VmIdRequest) (*emptypb.Empty, error) {
 	return c.vmSvc.DeleteVm(ctx, req)
 }
 
