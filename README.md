@@ -82,6 +82,7 @@ For a complete reference of all 20+ commands, see [COMMANDS.md](COMMANDS.md).
     ```
     > **Note for Volume Mounts**: The host directory must be readable (and writable, if needed) by the `vyoma` user, as the daemon runs under this unprivileged user. You can use `chown vyoma:vyoma /host/path` or `chmod o+r /host/path` to grant access.
 *   **List VMs**: `vyoma ps`
+*   **Inspect VM**: `vyoma inspect <vm_id>` (View complete VM configuration and state in JSON)
 *   **VM Stats**: `vyoma stats <vm_id>` (View real-time CPU and Memory usage)
 *   **Logs**: `vyoma logs -f <vm_id>`
 *   **Shell Access**: `vyoma exec <vm_id> /bin/bash` (Uses a secure, agent-based HTTP channel—no SSH required)

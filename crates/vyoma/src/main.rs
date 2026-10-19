@@ -121,6 +121,11 @@ enum Commands {
     },
      /// List active VMs
      Ps,
+     /// Inspect low-level details of a VM (like docker inspect)
+     Inspect {
+         /// VM ID or Name
+         id: String,
+     },
       /// Show snapshot history of a VM
       History {
           /// VM ID
@@ -659,6 +664,32 @@ async fn main() -> Result<()> {
                         }
                     } else {
                         error!("Daemon returned error: {}", response.status());
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to connect to daemon at {}: {}", daemon_url, e);
+                }
+            }
+        }
+
+        Commands::Inspect { id } => {
+            let resp = client.get(format!("{}/vms/{}", daemon_url, id)).send().await;
+
+            match resp {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let text = response.text().await?;
+                        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&text) {
+                            println!("{}", serde_json::to_string_pretty(&json_val)?);
+                        } else {
+                            println!("{}", text);
+                        }
+                    } else if response.status() == StatusCode::NOT_FOUND {
+                        error!("VM '{}' not found", id);
+                    } else {
+                        let status = response.status();
+                        let err_text = response.text().await.unwrap_or_default();
+                        error!("Daemon returned error: {} - {}", status, err_text);
                     }
                 }
                 Err(e) => {

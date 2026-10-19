@@ -40,6 +40,27 @@ ID        IMAGE           IP            STATUS    UPTIME
 a1b2c3    alpine:latest   172.16.0.5    Running   5m
 ```
 
+### `vyoma inspect`
+Inspect low-level details and configuration of a VM (like `docker inspect`) in structured JSON.
+**Usage**: `vyoma inspect <ID>`
+**Example**:
+```bash
+vyoma inspect a1b2c3
+```
+**Example Output**:
+```json
+{
+  "id": "a1b2c3...",
+  "status": "running",
+  "ip_address": "172.16.0.5",
+  "vcpu": 1,
+  "mem_size_mib": 512,
+  "tap_name": "tapa1b2c3",
+  "ports": [],
+  "volumes": []
+}
+```
+
 ### `vyoma logs`
 Stream logs from a VM's serial console.
 **Usage**: `vyoma logs [-f] <ID>`

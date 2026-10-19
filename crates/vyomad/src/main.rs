@@ -369,6 +369,7 @@ async fn async_main(args: Args) {
         )
         .route("/events", get(handlers::events_handler))
         .route("/vms/:id", get(handlers::inspect_vm_handler))
+        .route("/inspect/:id", get(handlers::inspect_vm_handler))
         .route("/swarm/init", post(handlers::swarm_init_handler))
         .route("/swarm/join", post(handlers::swarm_join_handler))
         .route("/swarm/nodes", get(handlers::swarm_nodes_handler))
