@@ -12,7 +12,8 @@ use reqwest::{Client, Method};
 
 use crate::ch_types::{
     VmConfig, CpusConfig, MemoryConfig, PayloadConfig, DiskConfig, NetConfig, FsConfig,
-    ConsoleConfig, VmSnapshotConfig, VmRestoreConfig, SendMigrationData, ReceiveMigrationData
+    ConsoleConfig, VmSnapshotConfig, VmRestoreConfig, SendMigrationData, ReceiveMigrationData,
+    VmResizeDiskConfig,
 };
 
 impl fmt::Debug for VmmManager {
@@ -262,6 +263,9 @@ impl VmmManager {
             readonly: if is_root { Some(true) } else { None }, // Usually rootfs is readonly if there's a COW layer
             direct: None,
             vhost_user: None,
+            id: Some(drive_id.to_string()),
+            queue_size: None,
+            num_queues: None,
         };
         
         if let Some(disks) = &mut self.config.disks {
@@ -411,6 +415,15 @@ impl VmmManager {
         self.api_request::<()>("/api/v1/vm.cancel-migration", Method::PUT, None).await
     }
 
+    pub async fn resize_disk(&self, disk_id: &str, desired_size: u64) -> Result<()> {
+        info!("Resizing disk {} to {} bytes via Cloud Hypervisor API", disk_id, desired_size);
+        let config = VmResizeDiskConfig {
+            id: disk_id.to_string(),
+            desired_size,
+        };
+        self.api_request::<VmResizeDiskConfig>("/api/v1/vm.resize-disk", Method::PUT, Some(&config)).await
+    }
+
     pub async fn enable_sev_snp(&mut self, policy: Option<&str>, guest_key_root: Option<&str>) -> Result<()> {
         let sev_snp = crate::ch_types::SevSnpConfig {
             enabled: true,
@@ -499,5 +512,17 @@ mod tests {
         assert_eq!(event.event, "migration-cancelled");
         assert!(event.timestamp.is_none());
     }
+
+    #[test]
+    fn test_resize_disk_config_serialization() {
+        let config = VmResizeDiskConfig {
+            id: "drive-root".to_string(),
+            desired_size: 10 * 1024 * 1024 * 1024,
+        };
+        let json = serde_json::to_string(&config).expect("serialization failed");
+        assert!(json.contains("\"id\":\"drive-root\""));
+        assert!(json.contains("\"desired_size\":10737418240"));
+    }
 }
+
 

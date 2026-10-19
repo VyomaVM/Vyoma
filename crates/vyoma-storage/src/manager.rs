@@ -7,6 +7,7 @@ use crate::dm::DmManager;
 use crate::cow::LoopManager;
 use crate::ext4::Ext4Manager;
 use crate::snapshot_tree::{SnapshotTree, SnapshotNode};
+use crate::qcow2::Qcow2Manager;
 
 pub struct StorageManager {
     base_path: PathBuf,
@@ -126,4 +127,38 @@ impl StorageManager {
         
         Ok(new_node)
     }
+
+    /// Create a native QCOW2 standalone volume for Cloud Hypervisor v54.0.
+    pub fn create_qcow2_volume(&self, vm_id: &str, capacity_mb: u64) -> Result<SnapshotNode> {
+        info!("Provisioning QCOW2 base volume for VM {} ({}MB)", vm_id, capacity_mb);
+        let vol_dir = self.base_path.join(vm_id);
+        fs::create_dir_all(&vol_dir).map_err(StorageError::Io)?;
+        let base_file = vol_dir.join("root.qcow2");
+
+        Qcow2Manager::create_image(&base_file, capacity_mb)?;
+
+        let mut node = SnapshotNode::new(vm_id, None);
+        node.snapshot_path = base_file.clone();
+        self.tree.create(&node)?;
+
+        Ok(node)
+    }
+
+    /// Branch an existing snapshot into a QCOW2 overlay image using native Cloud Hypervisor backing files.
+    pub fn branch_qcow2_snapshot(&self, snap_id: &str, new_vm_id: &str) -> Result<SnapshotNode> {
+        info!("Branching snapshot {} into new VM {} using native QCOW2 overlay", snap_id, new_vm_id);
+        let parent = self.tree.get(snap_id)?;
+        let new_vol_dir = self.base_path.join(new_vm_id);
+        fs::create_dir_all(&new_vol_dir).map_err(StorageError::Io)?;
+
+        let overlay_file = new_vol_dir.join("root.qcow2");
+        Qcow2Manager::create_overlay(&overlay_file, &parent.snapshot_path)?;
+
+        let mut child = self.tree.branch(snap_id, new_vm_id)?;
+        child.snapshot_path = overlay_file.clone();
+        self.tree.update(&child)?;
+
+        Ok(child)
+    }
 }
+
