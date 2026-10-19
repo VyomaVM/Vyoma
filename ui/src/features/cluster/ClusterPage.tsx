@@ -34,14 +34,14 @@ export function ClusterPage() {
               <div className="flex items-center gap-3 mb-2 p-4 pb-0">
                 <Server className="text-primary" />
                 <div>
-                  <h3 className="font-bold text-foreground">{n.hostname}</h3>
-                  <div className="text-xs text-muted-foreground">{n.role}</div>
+                  <h3 className="font-bold text-foreground">{n.hostname || n.addr || `Node ${n.id}`}</h3>
+                  <div className="text-xs text-muted-foreground">{n.role || (n.is_leader ? 'Leader' : 'Worker')}</div>
                 </div>
               </div>
               <div className="space-y-2 p-4">
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">IP</span>
-                  <span className="font-mono text-foreground">{n.ip}</span>
+                  <span className="text-muted-foreground">IP / Addr</span>
+                  <span className="font-mono text-foreground">{n.ip || n.addr}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">CPU</span>
