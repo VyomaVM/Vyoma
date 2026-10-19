@@ -370,18 +370,16 @@ mod integration_tests {
     const TEST_VM_ID: &str = "test-vm-12345";
 
     fn create_test_image_dir() -> PathBuf {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        let image_dir = home.join(".vyoma").join("images").join("test_alpine_latest");
-        if let Err(e) = std::fs::create_dir_all(&image_dir) {
+        let temp = std::env::temp_dir().join("vyoma_test_images").join("test_alpine_latest");
+        if let Err(e) = std::fs::create_dir_all(&temp) {
             eprintln!("Warning: Could not create test image dir: {}", e);
         }
-        image_dir
+        temp
     }
 
     fn cleanup_test_image_dir() {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        let image_dir = home.join(".vyoma").join("images").join("test_alpine_latest");
-        let _ = std::fs::remove_dir_all(&image_dir);
+        let temp = std::env::temp_dir().join("vyoma_test_images").join("test_alpine_latest");
+        let _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]

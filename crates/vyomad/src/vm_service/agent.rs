@@ -262,8 +262,8 @@ mod tests {
     #[test]
     fn test_generate_init_script_default() {
         let config = vyoma_core::oci::OciImageConfig::default();
-        let script = generate_init_script(&config);
-        assert!(script.contains("#!/bin/sh"));
+        let script = generate_init_script(&config, "172.16.0.2", "172.16.0.1", &[]);
+        assert!(script.contains("#!/bin/busybox sh"));
         assert!(script.contains("vyoma-agent-vm"));
         assert!(script.contains("mount"));
     }
@@ -276,11 +276,11 @@ mod tests {
         config.env = Some(vec!["NGINX_HOST=localhost".to_string(), "NGINX_PORT=80".to_string()]);
         config.working_dir = Some("/usr/share/nginx/html".to_string());
 
-        let script = generate_init_script(&config);
+        let script = generate_init_script(&config, "172.16.0.2", "172.16.0.1", &[]);
         assert!(script.contains("export NGINX_HOST=localhost"));
         assert!(script.contains("export NGINX_PORT=80"));
-        assert!(script.contains("cd /usr/share/nginx/html"));
-        assert!(script.contains("exec /bin/nginx -g 'daemon off;'"));
+        assert!(script.contains("export VWORKDIR=/usr/share/nginx/html"));
+        assert!(script.contains("/bin/nginx -g 'daemon off;'"));
     }
 
     #[test]
@@ -305,9 +305,10 @@ mod tests {
             let line = format!("export X={}", escaped);
 
             // Check for dangerous characters outside of quoted context
+            let sanitized_line = line.replace("'\\''", "");
             let mut in_single = false;
-            for (i, c) in line.char_indices() {
-                if c == '\'' && (i == 0 || line.as_bytes()[i-1] != b'\\') {
+            for c in sanitized_line.chars() {
+                if c == '\'' {
                     in_single = !in_single;
                     continue;
                 }
@@ -336,7 +337,7 @@ mod tests {
     #[test]
     fn test_generate_init_script_has_defensive_options() {
         let config = vyoma_core::oci::OciImageConfig::default();
-        let script = generate_init_script(&config);
+        let script = generate_init_script(&config, "172.16.0.2", "172.16.0.1", &[]);
         assert!(script.contains("set -e"), "Script should contain 'set -e'");
         assert!(script.contains("set -u"), "Script should contain 'set -u'");
         assert!(script.contains("trap"), "Script should contain 'trap ERR'");
