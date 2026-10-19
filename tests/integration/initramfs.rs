@@ -17,7 +17,7 @@ ip link set lo up 2>/dev/null || true
 exec /sbin/init
 "#;
 
-        let result = initramfs::create_initramfs(init_script, None, &initramfs_path);
+        let result = initramfs::create_initramfs(init_script, None, None, &initramfs_path);
         assert!(result.is_ok());
         assert!(initramfs_path.exists());
 
@@ -49,6 +49,7 @@ exec /sbin/init
         let result = initramfs::create_initramfs(
             init_script,
             Some(&fake_agent as &Path),
+            None,
             &initramfs_path,
         );
 
@@ -70,6 +71,7 @@ exec /sbin/init
         let result = initramfs::create_initramfs(
             init_script,
             Some(&nonexistent_agent as &Path),
+            None,
             &initramfs_path,
         );
 
@@ -83,7 +85,7 @@ exec /sbin/init
         let initramfs_path = temp_dir.path().join("check_content.cpio.gz");
 
         let init_script = "#!/bin/sh\necho Hello";
-        initramfs::create_initramfs(init_script, None, &initramfs_path).unwrap();
+        initramfs::create_initramfs(init_script, None, None, &initramfs_path).unwrap();
 
         use flate2::read::GzDecoder;
         use std::io::Read;
