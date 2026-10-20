@@ -64,7 +64,8 @@ The Vyoma host daemon (`vyomad`) implements strict POSIX privilege separation:
 - **vTPM 2.0 Integration**: Each microVM can be provisioned with an isolated virtual TPM 2.0 device powered by `swtpm`.
 - **PCR Measurement**: The microVM kernel image (PCR 0), initramfs guest agent (PCR 1), and kernel boot parameters are cryptographically measured prior to execution.
 - **Remote Attestation**: Workloads can be attested on demand via `vyoma attest <vm-id>`, generating a hardware-anchored TPM quote that guarantees the guest environment has not been tampered with or modified.
-- **Ed25519 Image Signatures**: Enterprise VMIF images support cryptographic signature verification using Ed25519 keys, rejecting unauthorized or unsigned layers before execution.
+- **Ed25519 Image Signatures & Supply Chain**: Enterprise VMIF images support cryptographic signature verification using Ed25519 keys (`crates/vyoma-image/src/signing.rs`). When `require_signed_manifest = true`, the daemon validates the image manifest, kernel digest, and rootfs hash against the trusted keyring (`/etc/vyoma/keys/trusted/`) prior to VM launch, rejecting untrusted or tampered images before hypervisor instantiation.
+- **Workload-Tuned Kernel Verification**: Verified boot parameters and specialized guest kernels are cataloged and enforced via the [Vyoma Hub & Kernel Catalog](file:///home/subesh/Startup_Projects/Vyoma/vyoma/docs/architecture/vyoma-hub-and-kernel-catalog.md).
 
 ---
 

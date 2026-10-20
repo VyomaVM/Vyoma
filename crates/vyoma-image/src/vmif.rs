@@ -17,6 +17,10 @@ pub struct VmifManifest {
     pub labels: HashMap<String, String>,
     pub size_bytes: u64,
     #[serde(default)]
+    pub kernel_profile: Option<String>,
+    #[serde(default)]
+    pub kernel_cmdline: Option<Vec<String>>,
+    #[serde(default)]
     pub firmware: FirmwareInfo,
     #[serde(default)]
     pub measured_boot: MeasuredBootInfo,
@@ -133,10 +137,26 @@ impl VmifManifest {
             config,
             labels: HashMap::new(),
             size_bytes,
+            kernel_profile: None,
+            kernel_cmdline: None,
             firmware: FirmwareInfo::default(),
             measured_boot: MeasuredBootInfo::default(),
             confidential_computing: ConfidentialComputingInfo::default(),
         }
+    }
+
+    pub fn with_kernel_profile(mut self, profile: impl Into<String>) -> Self {
+        self.kernel_profile = Some(profile.into());
+        self
+    }
+
+    pub fn with_kernel_cmdline(mut self, cmdline: Vec<String>) -> Self {
+        self.kernel_cmdline = Some(cmdline);
+        self
+    }
+
+    pub fn effective_cmdline(&self) -> Vec<String> {
+        self.kernel_cmdline.clone().unwrap_or_default()
     }
 
     pub fn validate(&self) -> Result<(), VmifError> {

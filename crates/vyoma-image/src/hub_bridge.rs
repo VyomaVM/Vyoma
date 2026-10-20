@@ -53,17 +53,33 @@ impl HubBridge {
         let image_dir = self.get_image_dir(image_ref);
         std::fs::create_dir_all(&image_dir)?;
 
+        let catalog = crate::kernel_catalog::KernelCatalog::new();
+        let suggested_profile = catalog.suggest_profile_for_image(image_ref).cloned();
+        let effective_kernel = kernel_ref
+            .map(str::to_string)
+            .or_else(|| suggested_profile.as_ref().map(|p| p.name.clone()));
+
         let converter = VmifConverter::new();
-        let vmif_image = converter.convert_directory_to_vmif(
+        let mut vmif_image = converter.convert_directory_to_vmif(
             &staging_dir,
             &image_dir,
             image_ref,
             "amd64",
             config,
-            kernel_ref.map(str::to_string),
+            effective_kernel,
             None,
             SquashfsCompression::default(),
         ).map_err(|e| HubBridgeError::ConversionError(e.to_string()))?;
+
+        if let Some(profile) = suggested_profile {
+            info!("Enriching VMIF with kernel profile '{}' for image '{}'", profile.name, image_ref);
+            vmif_image.manifest.kernel_profile = Some(profile.name);
+            vmif_image.manifest.kernel_cmdline = Some(profile.recommended_cmdline);
+            let manifest_path = image_dir.join("vyoma.toml");
+            if let Ok(toml_str) = toml::to_string_pretty(&vmif_image.manifest) {
+                let _ = std::fs::write(&manifest_path, toml_str);
+            }
+        }
 
         std::fs::remove_dir_all(&staging_dir).ok();
 
