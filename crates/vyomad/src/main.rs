@@ -286,13 +286,22 @@ async fn async_main(args: Args) {
 
             let vmm = vyoma_core::vmm::VmmManager::new(&ch_socket);
 
+            let vsock_path = vm_dir.join("vsock.sock");
             let mut proxy_tasks = Vec::new();
             for port in &rvm.state.ports {
-                let task = ProxyManager::start_proxy(
-                    port.host_port,
-                    rvm.state.ip_address.clone(),
-                    port.vm_port,
-                );
+                let task = if vsock_path.exists() {
+                    ProxyManager::start_vsock_proxy(
+                        port.host_port,
+                        vsock_path.clone(),
+                        port.vm_port,
+                    )
+                } else {
+                    ProxyManager::start_proxy(
+                        port.host_port,
+                        rvm.state.ip_address.clone(),
+                        port.vm_port,
+                    )
+                };
                 proxy_tasks.push(task);
             }
 

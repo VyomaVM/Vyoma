@@ -124,9 +124,9 @@ pub async fn start_vm(
 
     let mut proxy_tasks = Vec::new();
     for mapping in &request.ports {
-        let handle = ProxyManager::start_proxy(
+        let handle = ProxyManager::start_vsock_proxy(
             mapping.host_port,
-            network_config.ip_address.clone(),
+            ch_config.vsock_path.clone(),
             mapping.vm_port,
         );
         proxy_tasks.push(handle);

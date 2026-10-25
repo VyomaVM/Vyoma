@@ -151,15 +151,12 @@ fn generate_init_script(config: &vyoma_core::oci::OciImageConfig, ip_address: &s
     script.push_str("/bin/busybox mount -t devtmpfs dev /dev 2>/dev/null || true\n");
     script.push_str("/bin/busybox ip link set lo up 2>/dev/null || true\n");
 
-    script.push_str("# Wait for eth0 to appear (virtio-net driver might take a moment)\n");
-    script.push_str("while ! /bin/busybox ip link show eth0 >/dev/null 2>&1; do\n");
-    script.push_str("  /bin/busybox sleep 0.1\n");
-    script.push_str("done\n");
-
-    script.push_str("# Configure eth0 manually\n");
-    script.push_str(&format!("/bin/busybox ip addr add {}/24 dev eth0 2>/dev/null || true\n", ip_address));
-    script.push_str(&format!("/bin/busybox ip link set eth0 up 2>/dev/null || true\n"));
-    script.push_str(&format!("/bin/busybox ip route add default via {} 2>/dev/null || true\n", gateway));
+    script.push_str("# Configure eth0 if virtio-net is attached\n");
+    script.push_str("if /bin/busybox ip link show eth0 >/dev/null 2>&1; then\n");
+    script.push_str(&format!("  /bin/busybox ip addr add {}/24 dev eth0 2>/dev/null || true\n", ip_address));
+    script.push_str(&format!("  /bin/busybox ip link set eth0 up 2>/dev/null || true\n"));
+    script.push_str(&format!("  /bin/busybox ip route add default via {} 2>/dev/null || true\n", gateway));
+    script.push_str("fi\n");
 
     if let Some(envs) = &config.env {
         for env in envs {
@@ -177,8 +174,8 @@ fn generate_init_script(config: &vyoma_core::oci::OciImageConfig, ip_address: &s
     script.push_str("/bin/busybox mkdir -p /lower\n");
     script.push_str("# Wait for /dev/vda to appear\n");
     script.push_str("while [ ! -b /dev/vda ]; do /bin/busybox sleep 0.1; done\n");
-    // Mount squashfs into /lower
-    script.push_str("/bin/busybox mount -r -t squashfs /dev/vda /lower 2>/dev/null || /bin/busybox mount -r /dev/vda /lower 2>/dev/null || /bin/busybox mount -t tmpfs tmpfs /lower\n");
+    // Mount rootfs into /lower (supports native ext4 and squashfs)
+    script.push_str("/bin/busybox mount -r -t ext4 /dev/vda /lower 2>/dev/null || /bin/busybox mount -r -t squashfs /dev/vda /lower 2>/dev/null || /bin/busybox mount -r /dev/vda /lower 2>/dev/null || /bin/busybox mount -t tmpfs tmpfs /lower\n");
 
     // Setup overlayfs
     script.push_str("/bin/busybox mkdir -p /overlay\n");
@@ -223,8 +220,8 @@ fn generate_init_script(config: &vyoma_core::oci::OciImageConfig, ip_address: &s
     // Install busybox applets so 'echo', 'sh', etc. are available (especially if we are in tmpfs fallback)
     script.push_str("/bin/busybox --install -s /bin || true\n");
     
-    // Start agent
-    script.push_str("/mnt/vyoma-agent-vm > /dev/console 2>&1 &\n");
+    // Start agent in vsock mode
+    script.push_str("/mnt/vyoma-agent-vm --mode vsock > /dev/console 2>&1 &\n");
     
     // Execute original container command
     let full_cmd = config.full_command();

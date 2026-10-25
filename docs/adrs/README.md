@@ -54,3 +54,5 @@ This directory tracks the architectural decisions made during the design, develo
 | [042](adr-042-studio-v2.md) | Vyoma Studio v2 Web Dashboard | Accepted | 2026-05-05 | Monaco editor, topology graph, timeline UI |
 | [043](adr-043-in-vm-agent.md) | In-VM Agent Implementation (`vyoma-agent-vm`) | Accepted | 2026-05-15 | Guest introspection over vsock/TCP |
 | [044](adr-044-connection-architecture.md) | Client-Daemon Connection Architecture | Accepted | 2026-05-20 | Unix socket fallback and HTTP endpoints |
+| [045](adr-045-rootless-vsock-port-forwarding.md) | Rootless MicroVM Networking via Vsock L4 Stream Forwarding | Accepted | 2026-10-25 | 100% rootless port forwarding with zero sudo |
+

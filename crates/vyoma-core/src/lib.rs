@@ -15,7 +15,6 @@ pub mod unified_attest;
 
 pub mod cgroups;
 
-pub mod slirp;
 pub mod cni;
 pub mod initramfs;
 

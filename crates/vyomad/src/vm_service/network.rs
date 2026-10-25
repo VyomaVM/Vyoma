@@ -33,33 +33,36 @@ async fn setup_privileged_network(
     let tap_name = format!("tap{}", &vm_id[..8]);
     let bridge_name = "vyoma0";
 
-    // 1. Create TAP and attach to bridge (atomic via ip command)
-    let output = std::process::Command::new("ip")
-        .args(&["tuntap", "add", "dev", &tap_name, "mode", "tap", "user", "vyoma"])
-        .output();
+    let is_root = unsafe { libc::geteuid() == 0 };
+    let tap_created = if is_root {
+        // Attempt TAP creation only when running as root
+        let output = std::process::Command::new("ip")
+            .args(&["tuntap", "add", "dev", &tap_name, "mode", "tap", "user", "vyoma"])
+            .output();
 
-    let tap_created = match output {
-        Ok(out) => {
-            if !out.status.success() {
-                warn!("ip tuntap add failed: {}. Continuing without TAP for unprivileged environment.", String::from_utf8_lossy(&out.stderr));
+        match output {
+            Ok(out) => {
+                if out.status.success() {
+                    let _ = std::process::Command::new("ip")
+                        .args(&["link", "set", &tap_name, "up"])
+                        .output();
+                    let _ = std::process::Command::new("ip")
+                        .args(&["link", "set", &tap_name, "master", bridge_name])
+                        .output();
+                    true
+                } else {
+                    warn!("ip tuntap add failed: {}. Continuing with rootless Vsock.", String::from_utf8_lossy(&out.stderr));
+                    false
+                }
+            }
+            Err(e) => {
+                warn!("Failed to execute ip command: {}. Continuing with rootless Vsock.", e);
                 false
-            } else {
-                // 2. Set TAP up
-                let _ = std::process::Command::new("ip")
-                    .args(&["link", "set", &tap_name, "up"])
-                    .output();
-
-                // 3. Attach TAP to bridge
-                let _ = std::process::Command::new("ip")
-                    .args(&["link", "set", &tap_name, "master", bridge_name])
-                    .output();
-                true
             }
         }
-        Err(e) => {
-            warn!("Failed to execute ip command: {}. Continuing without TAP.", e);
-            false
-        }
+    } else {
+        info!("Running in rootless mode. MicroVM networking operating via Rootless Vsock L4 port forwarding.");
+        false
     };
 
     // 4. Assign IP address to VM
