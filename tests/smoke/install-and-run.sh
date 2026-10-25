@@ -52,8 +52,11 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 echo -e "${YELLOW}Step 1: Building package...${NC}"
-cd /home/subesh/Startup_Projects/Vyoma/vyoma
+cd "$PROJECT_ROOT"
 
 if [ ! -f "packaging/deb/build.sh" ]; then
     echo -e "${RED}Error: Build script not found${NC}"

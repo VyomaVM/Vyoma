@@ -221,7 +221,7 @@ cp -r cni %{buildroot}/usr/lib/vyoma/cni
 # Install kernel binary
 mkdir -p %{buildroot}/var/lib/vyoma/bin
 install -m 644 bin/vmlinux %{buildroot}/var/lib/vyoma/bin/vmlinux
-install -m 755 cloud-hypervisor %{buildroot}/var/lib/vyoma/bin/cloud-hypervisor"
+ln -sf /usr/bin/cloud-hypervisor %{buildroot}/var/lib/vyoma/bin/cloud-hypervisor"
 
 
 if [ "$UI_AVAILABLE" = true ]; then
@@ -358,7 +358,6 @@ mv ${WORK_DIR}/RPMS/x86_64/*.rpm dist/
 
 # 8. Cleanup
 rm -f cloud-hypervisor cloud-hypervisor.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
-rm -rf release-v1.7.0-x86_64
 rm -rf "${WORK_DIR}"
 
 echo "RPM created in dist/"

@@ -7,7 +7,7 @@ Cargo.lock
 build/
 dist/
 packaging/deb/target/
-packaging/deb/could-hypervisor
+packaging/deb/cloud-hypervisor
 packaging/deb/cni-plugins.tgz
 
 # IDEs

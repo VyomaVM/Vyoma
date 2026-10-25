@@ -184,10 +184,9 @@ cp kernel.bzimage "$KERNEL_DEST"
 chmod 644 "$KERNEL_DEST"
 echo "Kernel binary bundled"
 
-# Also place Cloud Hypervisor where the daemon expects it
-cp cloud-hypervisor "${WORK_DIR}/var/lib/vyoma/bin/cloud-hypervisor"
-chmod 755 "${WORK_DIR}/var/lib/vyoma/bin/cloud-hypervisor"
-echo "Cloud Hypervisor bundled to /var/lib/vyoma/bin"
+# Link Cloud Hypervisor to where the daemon expects it without duplicating binary size
+ln -sf /usr/bin/cloud-hypervisor "${WORK_DIR}/var/lib/vyoma/bin/cloud-hypervisor"
+echo "Cloud Hypervisor linked to /var/lib/vyoma/bin"
 
 # Bundle virtiofsd (from system or project bin)
 if [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
@@ -311,7 +310,6 @@ dpkg-deb --build "${WORK_DIR}" "dist/${PKG_NAME}_${VERSION}_${ARCH}.deb"
 
 # 9. Cleanup
 rm -f cloud-hypervisor cloud-hypervisor.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
-rm -rf release-v1.7.0-x86_64
 rm -rf "${WORK_DIR}"
 
 echo "Package created at dist/${PKG_NAME}_${VERSION}_${ARCH}.deb"

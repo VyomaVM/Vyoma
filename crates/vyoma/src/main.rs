@@ -1694,6 +1694,9 @@ fn check_binary(name: &str) -> Result<bool> {
     if Path::new(&format!("/usr/libexec/vyoma/{}", name)).exists() {
         return Ok(true);
     }
+    if Path::new(&format!("/usr/libexec/{}", name)).exists() {
+        return Ok(true);
+    }
     // Check bundled path from package
     if Path::new(&format!("/usr/lib/vyoma/{}", name)).exists() {
         return Ok(true);
