@@ -60,10 +60,10 @@ export function AttestationPage() {
               return (
                 <div key={vm.id} className="grid grid-cols-12 gap-4 p-4 items-center">
                   <div className="col-span-3 font-medium text-foreground">
-                    {vm.labels['vyoma.service'] || vm.id.slice(0, 12)}
+                    {vm.labels?.['vyoma.service'] || vm.id.slice(0, 12)}
                   </div>
                   <div className="col-span-3 text-muted-foreground text-sm">
-                    {vm.labels['image'] || 'unknown'}
+                    {vm.labels?.['image'] || 'unknown'}
                   </div>
                   <div className="col-span-3">
                     <StatusBadge status={attestationState as any} />

@@ -129,14 +129,14 @@ export function VmRow({
       </div>
       <div className="col-span-3">
         <div className="font-semibold text-foreground text-sm">
-          {vm.labels['vyoma.service'] || 'MicroVM'}
+          {vm.labels?.['vyoma.service'] || 'MicroVM'}
         </div>
         <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate" title={vm.id}>
           {vm.id.substring(0, 12)}
         </div>
       </div>
       <div className="col-span-2 text-sm text-muted-foreground">
-        {vm.labels['image'] || 'alpine'}
+        {vm.labels?.['image'] || 'alpine'}
       </div>
       <div className="col-span-2 text-sm text-muted-foreground font-mono">
         {vm.ip_address || '--'}
@@ -252,7 +252,7 @@ function ResizeDiskDialog({ vm, onClose }: { vm: Vm | null; onClose: () => void 
               MicroVM
             </label>
             <div className="font-mono text-sm text-foreground bg-muted p-2 rounded">
-              {vm.labels['vyoma.service'] || vm.id} ({vm.id.slice(0, 12)})
+              {vm.labels?.['vyoma.service'] || vm.id} ({vm.id.slice(0, 12)})
             </div>
           </div>
           <div>
@@ -408,7 +408,7 @@ function TeleportDialog({ vm, onClose }: { vm: Vm | null; onClose: () => void })
                 Source MicroVM
               </label>
               <div className="font-mono text-sm text-foreground bg-muted p-2 rounded">
-                {vm.labels['vyoma.service'] || vm.id} ({vm.id.slice(0, 12)})
+                {vm.labels?.['vyoma.service'] || vm.id} ({vm.id.slice(0, 12)})
               </div>
             </div>
             <div>
