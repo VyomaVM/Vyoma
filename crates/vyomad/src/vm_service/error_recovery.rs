@@ -151,6 +151,8 @@ mod tests {
             loop_devices: vec!["/dev/loop0".to_string()],
             cow_file_path: "/tmp/test.cow".to_string(),
             dm_name: "test-vm".to_string(),
+            is_qcow2: false,
+            qcow2_path: None,
         }
     }
 
@@ -223,6 +225,8 @@ impl MockFailingStorageManager {
             loop_devices: vec![],
             cow_file_path: "/tmp/test.cow".to_string(),
             dm_name: "test".to_string(),
+            is_qcow2: false,
+            qcow2_path: None,
         })
     }
 
@@ -356,6 +360,8 @@ impl MockStorageWithCleanupTracking {
             loop_devices: vec![],
             cow_file_path: "/tmp/test.cow".to_string(),
             dm_name: "test".to_string(),
+            is_qcow2: false,
+            qcow2_path: None,
         })
     }
 

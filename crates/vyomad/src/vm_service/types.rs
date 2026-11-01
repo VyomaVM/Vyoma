@@ -53,6 +53,10 @@ pub struct PreparedStorage {
     pub loop_devices: Vec<String>,
     pub cow_file_path: String,
     pub dm_name: String,
+    #[serde(default)]
+    pub is_qcow2: bool,
+    #[serde(default)]
+    pub qcow2_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +159,8 @@ mod tests {
             loop_devices: vec!["/dev/loop0".to_string(), "/dev/loop1".to_string()],
             cow_file_path: "/tmp/diff.cow".to_string(),
             dm_name: "vyoma-test".to_string(),
+            is_qcow2: false,
+            qcow2_path: None,
         };
         assert_eq!(storage.loop_devices.len(), 2);
         assert_eq!(storage.dm_name, "vyoma-test");
@@ -244,6 +250,8 @@ mod tests {
             loop_devices: vec!["/dev/loop0".to_string()],
             cow_file_path: "/tmp/diff.cow".to_string(),
             dm_name: "vyoma-test".to_string(),
+            is_qcow2: false,
+            qcow2_path: None,
         };
         let json = serde_json::to_string(&storage).unwrap();
         let parsed: PreparedStorage = serde_json::from_str(&json).unwrap();

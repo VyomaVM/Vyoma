@@ -12,6 +12,8 @@ pub struct SendMigrationData {
     pub local: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bandwidth: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +78,38 @@ impl Teleporter {
         }
     }
 
+    pub fn vm_id(&self) -> &str {
+        &self.vm_id
+    }
+
+    pub fn target_addr(&self) -> &str {
+        &self.target_addr
+    }
+
+    pub async fn cancel_migration(&self, ch_socket_path: &str) -> Result<(), String> {
+        info!("Cancelling active migration for VM {}", self.vm_id);
+        let client = Client::builder()
+            .timeout(Duration::from_secs(5))
+            .unix_socket(ch_socket_path)
+            .build()
+            .map_err(|e| format!("Failed to build socket client: {}", e))?;
+
+        let response = client
+            .request(Method::PUT, "http://localhost/api/v1/vm.cancel-migration")
+            .send()
+            .await
+            .map_err(|e| format!("Cancel migration API request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let err_text = response.text().await.unwrap_or_default();
+            error!("Cancel migration failed: {}", err_text);
+            return Err(format!("Cancel migration failed: {}", err_text));
+        }
+
+        info!("Migration cancelled successfully via Cloud Hypervisor v54 API");
+        Ok(())
+    }
+
     pub async fn teleport_vm(&self, _memory_file: PathBuf, _state_file: PathBuf, ch_socket_path: &str) -> Result<(), String> {
         self.teleport_vm_with_config(ch_socket_path, None, None).await
     }
@@ -86,9 +120,19 @@ impl Teleporter {
         bandwidth_mbps: Option<u32>,
         progress_callback: Option<Box<dyn Fn(MigrationProgress) + Send + Sync>>,
     ) -> Result<(), String> {
+        self.teleport_vm_with_mode(ch_socket_path, bandwidth_mbps, None, progress_callback).await
+    }
+
+    pub async fn teleport_vm_with_mode(
+        &self,
+        ch_socket_path: &str,
+        bandwidth_mbps: Option<u32>,
+        mode: Option<String>,
+        progress_callback: Option<Box<dyn Fn(MigrationProgress) + Send + Sync>>,
+    ) -> Result<(), String> {
         info!(
-            "Starting live migration to {} with bandwidth limit: {:?} Mbps",
-            self.target_addr, bandwidth_mbps
+            "Starting live migration to {} with bandwidth limit: {:?} Mbps, mode: {:?}",
+            self.target_addr, bandwidth_mbps, mode
         );
 
         let client = Client::builder()
@@ -102,6 +146,7 @@ impl Teleporter {
             destination_url,
             local: Some(false),
             bandwidth: bandwidth_mbps,
+            mode,
         };
 
         let response = client
@@ -145,7 +190,9 @@ impl Teleporter {
 
         loop {
             if start_time.elapsed() > max_wait_time {
-                return Err("Migration timeout: exceeded 10 minutes".to_string());
+                warn!("Migration timeout exceeded, attempting graceful abort via cancel-migration");
+                let _ = self.cancel_migration(ch_socket_path).await;
+                return Err("Migration timeout: exceeded 10 minutes and cancelled".to_string());
             }
 
             let response = client
@@ -244,3 +291,47 @@ impl Teleporter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_send_migration_data_serialization() {
+        let data = SendMigrationData {
+            destination_url: "tcp:192.168.1.100:9000".to_string(),
+            local: Some(false),
+            bandwidth: Some(1000),
+            mode: Some("precopy".to_string()),
+        };
+
+        let json = serde_json::to_string(&data).unwrap();
+        assert!(json.contains("\"destination_url\":\"tcp:192.168.1.100:9000\""));
+        assert!(json.contains("\"bandwidth\":1000"));
+        assert!(json.contains("\"mode\":\"precopy\""));
+        assert!(json.contains("\"local\":false"));
+    }
+
+    #[test]
+    fn test_send_migration_data_serialization_minimal() {
+        let data = SendMigrationData {
+            destination_url: "tcp:192.168.1.100:9000".to_string(),
+            local: None,
+            bandwidth: None,
+            mode: None,
+        };
+
+        let json = serde_json::to_string(&data).unwrap();
+        assert!(json.contains("\"destination_url\":\"tcp:192.168.1.100:9000\""));
+        assert!(!json.contains("\"bandwidth\""));
+        assert!(!json.contains("\"mode\""));
+    }
+
+    #[test]
+    fn test_teleporter_construct() {
+        let teleporter = Teleporter::new("vm-test-123".to_string(), "10.0.0.5".to_string(), 1024 * 1024 * 1024);
+        assert_eq!(teleporter.vm_id(), "vm-test-123");
+        assert_eq!(teleporter.target_addr(), "10.0.0.5");
+    }
+}
+

@@ -9,13 +9,13 @@ Run a new micro-VM from an image.
 **Usage**: `vyoma run [OPTIONS] <IMAGE>`
 **Options**:
 - `--vcpu <N>`: Number of vCPUs (Default: 1).
-- `--memory <MB>`: Memory size in MiB (Default: 512).
+- `--memory <SIZE>`: Memory size in human-readable units or MiB (e.g. `512M`, `1G`, `2GiB`, or raw MiB digits `1024`, Default: `512`).
 - `-p, --port <HOST>:<VM>`: Port mapping.
 - `-v, --volume <HOST>:<VM>`: Volume mount (Requires `virtiofsd`).
 - `--name <NAME>`: Custom hostname/name.
 **Example**:
 ```bash
-vyoma run alpine:latest --vcpu 2 --memory 1024 -p 8080:80
+vyoma run alpine:latest --vcpu 2 --memory 1G -p 8080:80
 ```
 
 ### `vyoma stop`
@@ -23,13 +23,27 @@ Stop a running VM gracefully.
 **Usage**: `vyoma stop <ID>`
 **Example**: `vyoma stop a1b2c3d4`
 
-### `vyoma start`
-Start a stopped VM (Resume execution). (Use `restart` to replace).
-**Usage**: `vyoma start <ID>`
+### `vyoma hibernate`
+Put a running VM into scale-to-zero hibernation. The VM's CPU and RAM state are saved to disk, and the hypervisor process terminates, releasing 100% of host CPU and memory (0 vCPUs, 0 MB RAM overhead).
+**Usage**: `vyoma hibernate <ID>`
+**Example**:
+```bash
+$ vyoma hibernate staging-env
+  💤 0 vCPUs, 0 MB — state saved
+```
 
-### `vyoma restart`
-Stop and Restart a VM (Full reboot).
-**Usage**: `vyoma restart <ID>`
+### `vyoma resume`
+Resume a paused or hibernated VM. Hibernated VMs wake up in ~180ms with in-memory state and network IP intact.
+**Usage**: `vyoma resume <ID>`
+**Example**:
+```bash
+$ vyoma resume staging-env
+  ⚡ Resumed in 180ms
+```
+
+### `vyoma pause`
+Temporarily pause a running VM's vCPUs without terminating the hypervisor process.
+**Usage**: `vyoma pause <ID>`
 
 ### `vyoma ps`
 List all active VMs.
@@ -38,6 +52,27 @@ List all active VMs.
 ```
 ID        IMAGE           IP            STATUS    UPTIME
 a1b2c3    alpine:latest   172.16.0.5    Running   5m
+```
+
+### `vyoma inspect`
+Inspect low-level details and configuration of a VM (like `docker inspect`) in structured JSON.
+**Usage**: `vyoma inspect <ID>`
+**Example**:
+```bash
+vyoma inspect a1b2c3
+```
+**Example Output**:
+```json
+{
+  "id": "a1b2c3...",
+  "status": "running",
+  "ip_address": "172.16.0.5",
+  "vcpu": 1,
+  "mem_size_mib": 512,
+  "tap_name": "tapa1b2c3",
+  "ports": [],
+  "volumes": []
+}
 ```
 
 ### `vyoma logs`
@@ -92,12 +127,61 @@ List nodes in the swarm.
 
 ### `vyoma snapshot`
 Create a snapshot of a VM.
-**Usage**: `vyoma snapshot <ID>`
-**Example**: `vyoma snapshot web-server`
+**Usage**: `vyoma snapshot <ID> [--name <NAME>]`
+**Options**:
+- `--name <NAME>`: Optional human-readable tag or name for the snapshot.
+**Example**:
+```bash
+vyoma snapshot my-vm --name before-deploy
+```
 
 ### `vyoma restore`
-Restore a VM from a snapshot ID.
-**Usage**: `vyoma restore <SNAPSHOT_ID>`
+Restore a VM to a previous snapshot (by tag name, snapshot ID, or `snap:N` reference).
+**Usage**: `vyoma restore <ID> --from <SNAPSHOT>`
+**Options**:
+- `--from <SNAPSHOT>`: Snapshot tag name (e.g. `before-deploy`), snapshot ID, or reference (e.g. `snap:1`).
+**Example**:
+```bash
+vyoma restore my-vm --from before-deploy
+```
+
+### `vyoma time-travel`
+Time travel a VM to a specific snapshot (alias for `vyoma restore`).
+**Usage**: `vyoma time-travel <ID> --to <SNAPSHOT>`
+**Example**:
+```bash
+vyoma time-travel my-vm --to before-deploy
+```
+
+### `vyoma branch`
+Branch an existing snapshot into a new independent MicroVM backed by copy-on-write QCOW2 storage.
+**Usage**: `vyoma branch <ID> --from <SNAPSHOT> <NEW_NAME>`
+**Options**:
+- `--from <SNAPSHOT>`: Snapshot tag name (e.g. `before-deploy`), snapshot ID, or reference (e.g. `snap:6`).
+**Example**:
+```bash
+vyoma branch my-db --from snap:6 experiment
+```
+
+### `vyoma teleport`
+Live teleport (migrate) a running MicroVM to another Swarm node or target IP address with sub-second cutover.
+**Usage**: `vyoma teleport <ID> [<TARGET>] [--to <TARGET>] [--bandwidth <MBPS>]`
+**Options**:
+- `--to <TARGET>`: Target Swarm node name (e.g. `node-eu-west-1`), node ID, or IP address.
+- `--bandwidth <MBPS>`: Bandwidth throttle limit in Mbps (optional).
+- `--progress`: Show live migration progress bar (default: `true`).
+**Examples**:
+```bash
+# Teleport using --to flag with Swarm node name
+vyoma teleport api-server --to node-eu-west-1
+
+# Teleport using positional target IP address
+vyoma teleport api-server 192.168.1.50
+```
+
+### `vyoma cancel-teleport`
+Cancel an active in-flight live migration / teleportation session.
+**Usage**: `vyoma cancel-teleport <ID>`
 
 ### `vyoma export`
 Export a snapshot to a tarball.
@@ -110,19 +194,37 @@ Import a VM from a snapshot tarball.
 
 ## Orchestration (Vyoma Compose)
 
+Vyoma automatically discovers compose files in the current working directory in priority order:
+`vyoma-compose.yml`, `vyoma-compose.yaml`, `compose.yaml`, `compose.yml`, `docker-compose.yml`, `docker-compose.yaml`.
+Existing `docker-compose.yml` stacks work completely unchanged!
+
 ### `vyoma up`
-Create and start resources from `vyoma-compose.yml`.
-**Usage**: `vyoma up [-d]`
-**Options**: `-d` (Detached mode).
+Create and start resources from a compose file.
+**Usage**: `vyoma up [OPTIONS]`
+**Options**:
+- `-f, --file <FILE>`: Explicit compose file path (auto-discovered if omitted).
+- `-d, --detach`: Run services in the background (detached mode).
+**Example**:
+```bash
+# docker-compose.yml works unchanged
+vyoma up -d
+```
 
 ### `vyoma down`
-Stop and remove resources defined in `vyoma-compose.yml`.
-**Usage**: `vyoma down`
+Stop and remove resources defined in the compose file.
+**Usage**: `vyoma down [-f <FILE>]`
+**Example**:
+```bash
+vyoma down
+```
 
 ### `vyoma scale`
 Scale a service to N replicas.
-**Usage**: `vyoma scale <SERVICE>=<COUNT>`
-**Example**: `vyoma scale web=3`
+**Usage**: `vyoma scale <SERVICE>=<COUNT> [-f <FILE>]`
+**Example**:
+```bash
+vyoma scale web=3
+```
 
 ## System
 

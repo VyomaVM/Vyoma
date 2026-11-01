@@ -27,6 +27,8 @@ impl VirtioFsManager {
             "/usr/lib/vyoma/virtiofsd"
         } else if Path::new("/usr/libexec/vyoma/virtiofsd").exists() {
             "/usr/libexec/vyoma/virtiofsd"
+        } else if Path::new("/usr/libexec/virtiofsd").exists() {
+            "/usr/libexec/virtiofsd"
         } else if Path::new("bin/virtiofsd").exists() {
             "bin/virtiofsd"
         } else {

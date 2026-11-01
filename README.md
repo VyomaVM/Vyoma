@@ -9,17 +9,19 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 
 ---
 
-## 🚀 Key Features (v2.1.2)
+## 🚀 Key Features (v3.0.0)
 
-*   **Docker UX**: Familiar commands: `run`, `ps`, `logs`, `exec`.
-*   **Vyoma Swarm**: Built-in clustering with **Mesh Networking** (VXLAN) and deterministic IP allocation.
-*   **Vyoma Compose**: Orchestrate stacks with `vyoma-compose.yml`.
-*   **Web Dashboard**: Built-in visual management UI (bundled in Daemon, accessible at `http://localhost:3000`).
-*   **VS Code Extension**: Manage VMs directly from VS Code.
-*   **Self-Contained**: `.deb` and `.rpm` packages bundle all dependencies (Cloud Hypervisor, CNI plugins, UI).
-*   **Persistence**: Volume mounts (`virtiofs`) and Port Mapping.
-*   **Snapshotting**: Instant VM snapshots and State Teleportation.
-*   **Secure by Default**: Daemon runs as `vyoma` user with kernel capabilities, socket permissions 0660.
+*   **Docker UX**: Familiar commands: `run`, `ps`, `logs`, `exec`, `inspect`.
+*   **Rootless Vsock Networking**: 100% rootless container port forwarding (`-p 8088:80`) via Vsock L4 stream splicing without `sudo`, host TAP interfaces, or iptables.
+*   **Human-Readable Memory**: Seamlessly specify `--memory 512M`, `1G`, `2GiB` or raw MiB digits.
+*   **4 Enterprise Security Pillars**: Hardware KVM isolation, least-privilege daemon (`privdrop`), TPM2 measured boot, and WireGuard/VXLAN encrypted mesh.
+*   **TimeMachine & QCOW2 Branching**: Instant MicroVM branching (`vyoma branch`) without duplicating disk space.
+*   **Scale-to-Zero Hibernation**: `vyoma hibernate` saves state and frees 100% of host RAM/vCPUs (0 vCPUs, 0 MB overhead); `vyoma resume` wakes in `<200ms`.
+*   **Smart Compose**: Seamless orchestration (`vyoma up -d`) with auto-discovery of `docker-compose.yml` and `compose.yaml`.
+*   **Python SDK & Kubernetes CRI (`vk8s`)**: Official `vyoma` Python SDK and CRI v1 plugin (`/var/run/vyoma-cri.sock`).
+*   **Vyoma Swarm & Teleportation**: Built-in clustering with sub-second live migration (`vyoma teleport --to <node>`).
+*   **Web Dashboard**: Built-in visual management UI (bundled in Daemon, accessible at `http://localhost:8080`).
+*   **Self-Contained**: `.deb` and `.rpm` packages bundle all dependencies (Cloud Hypervisor, CNI plugins, CRI shim, UI).
 
 ---
 
@@ -27,7 +29,7 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 
 ### Prerequisites
 - Linux kernel 5.10+ with KVM, cgroups v2, and TUN/TAP enabled.
-- A user with `sudo` access.
+- A user with `sudo` access (or run completely rootless in user mode).
 
 ### 1. Download Package
 Go to the [Releases Page](https://github.com/Subeshrock/vyoma/releases) and download the latest package for your distro.
@@ -36,12 +38,12 @@ Go to the [Releases Page](https://github.com/Subeshrock/vyoma/releases) and down
 
 **Debian/Ubuntu:**
 ```bash
-sudo apt install ./vyoma_2.8.0_amd64.deb
+sudo apt install ./vyoma_3.0.0_amd64.deb
 ```
 
 **Fedora/RHEL/CentOS:**
 ```bash
-sudo rpm -i vyoma-2.8.0-1.x86_64.rpm
+sudo rpm -i vyoma-3.0.0-1.x86_64.rpm
 ```
 
 ### 3. Post-Install Group Setup
@@ -78,15 +80,17 @@ For a complete reference of all 20+ commands, see [COMMANDS.md](COMMANDS.md).
 ### Lifecycle
 *   **Run a VM**:
     ```bash
-    vyoma run ubuntu:latest --vcpu 2 --memory 1024 -p 8080:80 -v /host/path:/vm/path
+    vyoma run ubuntu:latest --vcpu 2 --memory 1G -p 8080:80 -v /host/path:/vm/path
     ```
     > **Note for Volume Mounts**: The host directory must be readable (and writable, if needed) by the `vyoma` user, as the daemon runs under this unprivileged user. You can use `chown vyoma:vyoma /host/path` or `chmod o+r /host/path` to grant access.
 *   **List VMs**: `vyoma ps`
+*   **Inspect VM**: `vyoma inspect <vm_id>` (View complete VM configuration and state in JSON)
 *   **VM Stats**: `vyoma stats <vm_id>` (View real-time CPU and Memory usage)
 *   **Logs**: `vyoma logs -f <vm_id>`
 *   **Shell Access**: `vyoma exec <vm_id> /bin/bash` (Uses a secure, agent-based HTTP channel—no SSH required)
 *   **Stop/Remove**: `vyoma stop <vm_id>`, `vyoma rm <vm_id>`
-*   **Pause/Resume**: `vyoma pause <vm_id>`, `vyoma resume <vm_id>`
+*   **Pause/Resume & Hibernation**: `vyoma pause <vm_id>`, `vyoma hibernate <vm_id>` (scale-to-zero: 0 vCPUs, 0 MB overhead), `vyoma resume <vm_id>` (resumes in ~180ms)
+*   **Snapshots & Branching**: `vyoma snapshot <id> --name <tag>`, `vyoma restore <id> --from <tag>`, `vyoma branch <id> --from <tag> <new_name>`
 
 ### Networking
 Vyoma uses CNI for robust networking.

@@ -21,6 +21,8 @@ Technical internals and design of the core subsystems:
 - **[Storage Engine](architecture/storage-engine.md)**: OCI-to-Block JIT conversion, Device Mapper instant clones (`dm-snapshot`), sparse CoW deltas, and VirtioFS.
 - **[Networking Subsystem](architecture/networking.md)**: Linux bridges, TAP interfaces, IPAM, embedded UDP DNS server, and WireGuard mesh.
 - **[Security & Privilege Model](architecture/privilege-model.md)**: Unprivileged `vyoma` service user, Linux Ambient Capabilities, and socket permission enforcement.
+- **[The 4 Enterprise Security Pillars](architecture/security-pillars.md)**: Hardware MicroVM Isolation, Least-Privilege Daemon, Measured Boot & Attestation, Encrypted Mesh.
+- **[Vyoma Hub & Kernel Catalog](architecture/vyoma-hub-and-kernel-catalog.md)**: Workload-tuned guest kernels, VMIF appliance format, Ed25519 signing supply chain, and Hub App Store architecture.
 - **[Initramfs Agent Injection](architecture/initramfs-injection.md)**: Dynamic in-memory CPIO archive generation replacing slow and race-prone host disk mounts.
 - **[Crash Recovery & WAL](architecture/crash-recovery-wal.md)**: Sled-backed Write-Ahead Log, startup recovery sequence, and zombie process cleanup.
 - **[Trusted Boot Architecture](architecture/trusted-boot-architecture.md)**: vTPM (`swtpm`), OVMF UEFI Secure Boot, PCR measurements, and remote attestation.
@@ -50,6 +52,7 @@ Operator procedures, diagnostics, and deployment:
 
 ### 📐 [Specifications & Roadmap](specifications/)
 Technical blueprints and development milestones:
+- **[Cloud Hypervisor v54.0 Upgrade Specification](specifications/cloud-hypervisor-v54-upgrade.md)**: Architectural analysis, migration roadmap, and implementation plan for upgrading to Cloud Hypervisor v54.0.
 - **[Engineering Specification v2.0](specifications/technical-spec-v2.md)**: Complete 2,400+ line implementation guide spanning Phase 1 to Phase 4.
 - **[Project Roadmap](roadmap.md)**: Version milestones tracking completed features from v0.1.0 to upcoming goals.
 

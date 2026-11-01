@@ -11,14 +11,14 @@ else
     exit 1
 fi
 
-VERSION="2.9.0"
+VERSION="3.0.0"
 ARCH="amd64"
 PKG_NAME="vyoma"
 WORK_DIR="target/debian/${PKG_NAME}_${VERSION}_${ARCH}"
 
 # Hardcoded checksums for binary verification
 # Computed from official release sources
-CLOUD_HYPERVISOR_CHECKSUM="8a013003ae29f59da7b2d7ac67f19eea3ea535166dac00ff5e8c2c27ac643f8a"
+CLOUD_HYPERVISOR_CHECKSUM="4f4f98a3d661a40f3e5272627cc895a1b2e525f2f6bedf5f895f9cd21ba5c65b"
 CNI_PLUGINS_CHECKSUM="77baa2f669980a82255ffa2f2717de823992480271ee778aa51a9c60ae89ff9b"
 
 # Verify checksum of a downloaded file
@@ -69,8 +69,8 @@ echo "Fetching dependencies..."
 
 # Fetch Cloud Hypervisor with checksum verification
 if [ ! -f "cloud-hypervisor" ]; then
-    echo "Downloading cloud-hypervisor v41.0..."
-    wget -q -O cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v41.0/cloud-hypervisor
+    echo "Downloading cloud-hypervisor v54.0 static binary..."
+    wget -q -O cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-static
     chmod +x cloud-hypervisor
 fi
 
@@ -159,6 +159,9 @@ fi
 # 4. Copy Assets
 cp target/release/vyomad "${WORK_DIR}/usr/bin/"
 cp target/release/vyoma "${WORK_DIR}/usr/bin/"
+if [ -f "bin/vyoma-cri" ]; then
+    cp bin/vyoma-cri "${WORK_DIR}/usr/bin/vyoma-cri"
+fi
 cp target/x86_64-unknown-linux-musl/release/vyoma-agent-vm "${WORK_DIR}/usr/bin/vyoma-agent-vm"
 cp cloud-hypervisor "${WORK_DIR}/usr/bin/cloud-hypervisor"
 cp packaging/systemd/vyomad.service "${WORK_DIR}/etc/systemd/system/"
@@ -181,10 +184,9 @@ cp kernel.bzimage "$KERNEL_DEST"
 chmod 644 "$KERNEL_DEST"
 echo "Kernel binary bundled"
 
-# Also place Cloud Hypervisor where the daemon expects it
-cp cloud-hypervisor "${WORK_DIR}/var/lib/vyoma/bin/cloud-hypervisor"
-chmod 755 "${WORK_DIR}/var/lib/vyoma/bin/cloud-hypervisor"
-echo "Cloud Hypervisor bundled to /var/lib/vyoma/bin"
+# Link Cloud Hypervisor to where the daemon expects it without duplicating binary size
+ln -sf /usr/bin/cloud-hypervisor "${WORK_DIR}/var/lib/vyoma/bin/cloud-hypervisor"
+echo "Cloud Hypervisor linked to /var/lib/vyoma/bin"
 
 # Bundle virtiofsd (from system or project bin)
 if [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
@@ -308,7 +310,6 @@ dpkg-deb --build "${WORK_DIR}" "dist/${PKG_NAME}_${VERSION}_${ARCH}.deb"
 
 # 9. Cleanup
 rm -f cloud-hypervisor cloud-hypervisor.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
-rm -rf release-v1.7.0-x86_64
 rm -rf "${WORK_DIR}"
 
 echo "Package created at dist/${PKG_NAME}_${VERSION}_${ARCH}.deb"

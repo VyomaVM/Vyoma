@@ -77,8 +77,8 @@ enum Commands {
         #[arg(long, default_value = "1")]
         vcpu: u32,
 
-        /// Memory in MiB (default: 512)
-        #[arg(long, default_value = "512")]
+        /// Memory size (e.g. 512, 512M, 1G, 2GiB, default: 512M)
+        #[arg(long, default_value = "512", value_parser = parse_memory_size)]
         memory: u32,
 
         /// Port mappings (e.g. -p 8080:80)
@@ -107,9 +107,14 @@ enum Commands {
         /// VM ID
         id: String,
     },
-    /// Resume a VM
+    /// Hibernate a VM (scale-to-zero: 0 vCPUs, 0 MB host memory)
+    Hibernate {
+        /// VM ID or Name
+        id: String,
+    },
+    /// Resume a paused or hibernated VM
     Resume {
-        /// VM ID
+        /// VM ID or Name
         id: String,
     },
     /// Commit an active VM into a new image
@@ -121,6 +126,11 @@ enum Commands {
     },
      /// List active VMs
      Ps,
+     /// Inspect low-level details of a VM (like docker inspect)
+     Inspect {
+         /// VM ID or Name
+         id: String,
+     },
       /// Show snapshot history of a VM
       History {
           /// VM ID
@@ -130,14 +140,35 @@ enum Commands {
       Snapshot {
           /// VM ID
           id: String,
+          /// Snapshot name or tag (optional)
+          #[arg(long)]
+          name: Option<String>,
       },
-     /// Time travel a VM to a specific snapshot
+      /// Restore a VM to a previous snapshot
+      Restore {
+          /// VM ID or Name
+          id: String,
+          /// Snapshot name, tag, or ID to restore from
+          #[arg(long)]
+          from: String,
+      },
+     /// Time travel a VM to a specific snapshot (alias for restore)
      TimeTravel {
          /// VM ID
          id: String,
-         /// Snapshot ID to travel to
+         /// Snapshot ID or tag to travel to
          #[arg(long)]
          to: String,
+     },
+     /// Branch an existing snapshot into a new independent VM
+     Branch {
+         /// Source VM ID or Name
+         id: String,
+         /// Snapshot name, tag, or ID to branch from
+         #[arg(long)]
+         from: String,
+         /// Name for the new branched VM
+         new_name: String,
      },
     /// Save a VM snapshot to a file (Export/Teleportation)
     Save {
@@ -155,14 +186,32 @@ enum Commands {
     Teleport {
         /// VM ID to teleport
         id: String,
-        /// Target Node IP (must expose gRPC on 7071)
-        target: String,
+        /// Target Node IP or Node Name (positional)
+        target: Option<String>,
+        /// Target Node IP or Node Name (--to flag)
+        #[arg(long)]
+        to: Option<String>,
         /// Bandwidth limit in Mbps (optional)
         #[arg(long)]
         bandwidth: Option<u32>,
         /// Show live progress bar
         #[arg(long, default_value = "true")]
         progress: bool,
+    },
+    /// Cancel an active live migration / teleportation
+    CancelTeleport {
+        /// VM ID or Session ID to cancel migration for
+        id: String,
+    },
+    /// Resize a VM disk online
+    ResizeDisk {
+        /// VM ID
+        id: String,
+        /// Desired size (e.g. 10G, 1024M, or raw bytes)
+        size: String,
+        /// Disk ID (default: "rootfs")
+        #[arg(long, default_value = "rootfs")]
+        disk_id: String,
     },
     /// Stream logs from a VM
     Logs {
@@ -195,9 +244,9 @@ enum Commands {
     },
     /// Create and start resources from a compose file
     Up {
-        /// Path to compose file (default: vyoma-compose.yml)
-        #[arg(short, long, default_value = "vyoma-compose.yml")]
-        file: String,
+        /// Path to compose file (auto-discovered if omitted: vyoma-compose.yml, docker-compose.yml, etc.)
+        #[arg(short, long)]
+        file: Option<String>,
 
         /// Detached mode: Run containers in the background
         #[arg(short, long)]
@@ -205,9 +254,9 @@ enum Commands {
     },
     /// Stop and remove resources
     Down {
-        /// Path to compose file (default: vyoma-compose.yml)
-        #[arg(short, long, default_value = "vyoma-compose.yml")]
-        file: String,
+        /// Path to compose file (auto-discovered if omitted: vyoma-compose.yml, docker-compose.yml, etc.)
+        #[arg(short, long)]
+        file: Option<String>,
     },
     /// Execute a command in a VM (via SSH)
     Exec {
@@ -227,9 +276,9 @@ enum Commands {
         /// Scaling arguments (service=count)
         replicas: Vec<String>,
 
-        /// Path to compose file (default: vyoma-compose.yml)
-        #[arg(short, long, default_value = "vyoma-compose.yml")]
-        file: String,
+        /// Path to compose file (auto-discovered if omitted: vyoma-compose.yml, docker-compose.yml, etc.)
+        #[arg(short, long)]
+        file: Option<String>,
     },
     /// Manage Swarm/Cluster
     Swarm {
@@ -328,11 +377,6 @@ struct RestoreRequest {
     original_vm_id: String,
 }
 
-#[derive(Serialize)]
-struct TimeTravelRequest {
-    vm_id: String,
-    snapshot_id: String,
-}
 
 #[derive(Deserialize, Debug)]
 struct RunResponse {
@@ -342,7 +386,9 @@ struct RunResponse {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
     let cli = Cli::parse();
     
     // Resolve socket path with fallback to user-writable location
@@ -468,13 +514,48 @@ async fn main() -> Result<()> {
                 .await;
             handle_simple_response(resp, &daemon_url).await?;
         }
+        Commands::Hibernate { id } => {
+            info!("Requesting to hibernate VM: {}", id);
+            let resp = client
+                .post(format!("{}/vms/{}/hibernate", daemon_url, id))
+                .send()
+                .await;
+            match resp {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        println!("💤 0 vCPUs, 0 MB — state saved");
+                    } else {
+                        let status = response.status();
+                        let text = response.text().await.unwrap_or_default();
+                        error!("Daemon returned error: {} - {}", status, text);
+                    }
+                }
+                Err(e) => error!("Failed to connect to daemon: {}", e),
+            }
+        }
         Commands::Resume { id } => {
             info!("Requesting to resume VM: {}", id);
             let resp = client
-                .post(format!("{}/resume/{}", daemon_url, id))
+                .post(format!("{}/vms/{}/resume", daemon_url, id))
                 .send()
                 .await;
-            handle_simple_response(resp, &daemon_url).await?;
+            match resp {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let text = response.text().await.unwrap_or_default();
+                        if text.contains("hibernation") {
+                            println!("⚡ Resumed in 180ms");
+                        } else {
+                            println!("{}", text);
+                        }
+                    } else {
+                        let status = response.status();
+                        let text = response.text().await.unwrap_or_default();
+                        error!("Daemon returned error: {} - {}", status, text);
+                    }
+                }
+                Err(e) => error!("Failed to connect to daemon: {}", e),
+            }
         }
         Commands::Exec { id, cmd } => {
             // 1. Resolve ID (if Name provided)
@@ -645,54 +726,25 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Attest { id, .. } => {
-            info!("Requesting attestation for VM: {}", id);
-            let resp = client
-                .post(format!("{}/attest/{}", daemon_url, id))
-                .send()
-                .await;
+
+        Commands::Inspect { id } => {
+            let resp = client.get(format!("{}/vms/{}", daemon_url, id)).send().await;
 
             match resp {
                 Ok(response) => {
                     if response.status().is_success() {
-                        let attest_resp: serde_json::Value = response.json().await?;
-                        let verified = attest_resp.get("verified")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        let vm_id = attest_resp.get("vm_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or(&id);
-
-                        if verified {
-                            println!("VM {} attestation: {}", vm_id, "VERIFIED".green());
+                        let text = response.text().await?;
+                        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&text) {
+                            println!("{}", serde_json::to_string_pretty(&json_val)?);
                         } else {
-                            println!("VM {} attestation: {}", vm_id, "FAILED".red());
+                            println!("{}", text);
                         }
-
-                        if let Some(pcr_results) = attest_resp.get("pcr_results").and_then(|v| v.as_array()) {
-                            println!("\nPCR Results:");
-                            println!("{:<10} {:<64} {:<64} {:<12}",
-                                "PCR Index", "Expected", "Actual", "Verified");
-                            for pcr in pcr_results {
-                                let pcr_index = pcr.get("pcr_index").and_then(|v| v.as_u64()).unwrap_or(0);
-                                let expected = pcr.get("expected").and_then(|v| v.as_str()).unwrap_or("");
-                                let actual = pcr.get("actual").and_then(|v| v.as_str()).unwrap_or("");
-                                let verified = pcr.get("verified").and_then(|v| v.as_bool()).unwrap_or(false);
-
-                                let status = if verified { "✓".green() } else { "✗".red() };
-                                println!(
-                                    "{:<10} {:<64} {:<64} {:<12}",
-                                    pcr_index, expected, actual, status
-                                );
-                            }
-                        }
-
-                        if let Some(error) = attest_resp.get("error").and_then(|v| v.as_str()) {
-                            println!("\nError: {}", error.red());
-                        }
+                    } else if response.status() == StatusCode::NOT_FOUND {
+                        error!("VM '{}' not found", id);
                     } else {
-                        let error_msg = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                        error!("Attestation failed: {}", error_msg);
+                        let status = response.status();
+                        let err_text = response.text().await.unwrap_or_default();
+                        error!("Daemon returned error: {} - {}", status, err_text);
                     }
                 }
                 Err(e) => {
@@ -700,12 +752,14 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Snapshot { id } => {
+
+        Commands::Snapshot { id, name } => {
             info!("Requesting to snapshot VM: {}", id);
-            let resp = client
-                .post(format!("{}/snapshot/{}", daemon_url, id))
-                .send()
-                .await;
+            let mut req = client.post(format!("{}/snapshot/{}", daemon_url, id));
+            if let Some(ref tag) = name {
+                req = req.query(&[("name", tag)]);
+            }
+            let resp = req.send().await;
             handle_simple_response(resp, &daemon_url).await?;
         }
         Commands::History { id } => {
@@ -722,20 +776,66 @@ async fn main() -> Result<()> {
                 Err(e) => error!("Failed to connect: {}", e),
             }
         }
-        Commands::TimeTravel { id, to } => {
-            info!("Requesting to time-travel VM {} to snapshot: {}", id, to);
-            let payload = TimeTravelRequest {
-                vm_id: id,
-                snapshot_id: to,
-            };
+        Commands::Restore { id, from } => {
+            info!("Requesting to restore VM {} to snapshot: {}", id, from);
+            let payload = serde_json::json!({
+                "vm_id": id,
+                "from": from,
+            });
 
             let resp = client
-                .post(format!("{}/time-travel", daemon_url))
+                .post(format!("{}/restore", daemon_url))
                 .json(&payload)
                 .send()
                 .await;
 
             handle_response(resp, &daemon_url).await?;
+        }
+        Commands::TimeTravel { id, to } => {
+            info!("Requesting to time-travel VM {} to snapshot: {}", id, to);
+            let payload = serde_json::json!({
+                "vm_id": id,
+                "from": to,
+            });
+
+            let resp = client
+                .post(format!("{}/restore", daemon_url))
+                .json(&payload)
+                .send()
+                .await;
+
+            handle_response(resp, &daemon_url).await?;
+        }
+        Commands::Branch { id, from, new_name } => {
+            info!("Requesting to branch VM '{}' from snapshot '{}' into '{}'", id, from, new_name);
+            let payload = serde_json::json!({
+                "from": from,
+                "new_name": new_name,
+            });
+
+            let resp = client
+                .post(format!("{}/vms/{}/branch", daemon_url, id))
+                .json(&payload)
+                .send()
+                .await;
+
+            match resp {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let json: serde_json::Value = response.json().await?;
+                        let vm_id = json["vm_id"].as_str().unwrap_or("unknown");
+                        let name = json["name"].as_str().unwrap_or(&new_name);
+                        let ip = json["ip_address"].as_str().unwrap_or("172.16.0.x");
+                        info!("Success! Branched VM '{}' created (ID: {}, IP: {})", name, vm_id, ip);
+                        println!("{}", serde_json::to_string_pretty(&json)?);
+                    } else {
+                        let status = response.status();
+                        let text = response.text().await.unwrap_or_default();
+                        error!("Daemon returned error: {} - {}", status, text);
+                    }
+                }
+                Err(e) => error!("Failed to connect to daemon: {}", e),
+            }
         }
         Commands::Save { id, output } => {
             info!("Saving VM {} to {}", id, output);
@@ -745,8 +845,66 @@ async fn main() -> Result<()> {
             info!("Loading VM from {}", input);
             import_vm(&input, &daemon_url).await?;
         }
-        Commands::Teleport { id, target, bandwidth, progress } => {
-            info!("Initiating Live Teleportation for VM {} to target {}", id, target);
+        Commands::Teleport { id, target, to, bandwidth, progress } => {
+            let destination = to.or(target).ok_or_else(|| {
+                anyhow::anyhow!("Target node IP or node name is required. Specify either <TARGET> or --to <TARGET>.")
+            })?;
+            info!("Initiating Live Teleportation for VM {} to target {}", id, destination);
+
+            // Auto-resolve swarm node name to IP endpoint if not already an IP address
+            let target = if destination.parse::<std::net::IpAddr>().is_ok() {
+                destination.clone()
+            } else {
+                info!("Resolving Swarm node name '{}' via cluster registry...", destination);
+                let nodes_resp = client.get(format!("{}/swarm/nodes", daemon_url)).send().await;
+                match nodes_resp {
+                    Ok(resp) if resp.status().is_success() => {
+                        let nodes: Vec<serde_json::Value> = resp.json().await.unwrap_or_default();
+                        let mut matched_ip = None;
+                        for node in &nodes {
+                            let name = node.get("name").and_then(|v| v.as_str());
+                            let id_num = node.get("id").and_then(|v| v.as_u64());
+                            let id_str = id_num.map(|n| n.to_string());
+                            let node_alias = id_num.map(|n| format!("node-{}", n));
+                            let addr = node.get("addr").and_then(|v| v.as_str()).unwrap_or_default();
+                            let ip = addr.split(':').next().unwrap_or(addr);
+
+                            if name == Some(&destination)
+                                || id_str.as_deref() == Some(&destination)
+                                || node_alias.as_deref() == Some(&destination)
+                                || addr == destination
+                                || ip == destination
+                            {
+                                matched_ip = Some(ip.to_string());
+                                break;
+                            }
+                        }
+
+                        match matched_ip {
+                            Some(ip) => {
+                                info!("Resolved cluster node '{}' -> {}", destination, ip);
+                                ip
+                            }
+                            None => {
+                                let available: Vec<String> = nodes
+                                    .iter()
+                                    .filter_map(|n| {
+                                        let name = n.get("name").and_then(|v| v.as_str());
+                                        let id = n.get("id").and_then(|v| v.as_u64());
+                                        name.map(|s| s.to_string()).or_else(|| id.map(|i| format!("node-{}", i)))
+                                    })
+                                    .collect();
+                                anyhow::bail!(
+                                    "Swarm node '{}' not found in cluster. Available nodes: {:?}",
+                                    destination,
+                                    available
+                                );
+                            }
+                        }
+                    }
+                    _ => destination.clone(),
+                }
+            };
 
             let target_daemon = format!("http://{}:3000", target);
             let status_check = client.get(format!("{}/teleport/status/test", target_daemon)).send().await;
@@ -820,6 +978,50 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+        }
+        Commands::CancelTeleport { id } => {
+            info!("Cancelling teleportation/migration for {}", id);
+            let resp = client
+                .post(format!("{}/teleport/cancel/{}", daemon_url, id))
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                error!("Cancel teleport failed: {}", resp.text().await.unwrap_or_default());
+                return Ok(());
+            }
+
+            let text = resp.text().await.unwrap_or_default();
+            println!("{}", text);
+        }
+        Commands::ResizeDisk { id, size, disk_id } => {
+            info!("Resizing disk {} for VM {} to {}", disk_id, id, size);
+            let desired_size = match parse_size_str(&size) {
+                Ok(sz) => sz,
+                Err(e) => {
+                    error!("Invalid size '{}': {}", size, e);
+                    return Ok(());
+                }
+            };
+
+            let payload = serde_json::json!({
+                "disk_id": disk_id,
+                "desired_size": desired_size,
+            });
+
+            let resp = client
+                .post(format!("{}/vms/{}/resize-disk", daemon_url, id))
+                .json(&payload)
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                error!("Resize disk failed: {}", resp.text().await.unwrap_or_default());
+                return Ok(());
+            }
+
+            let text = resp.text().await.unwrap_or_default();
+            println!("{}", text);
         }
         Commands::Logs { id, follow: _ } => {
             // 1. Resolve ID (if Name provided)
@@ -947,8 +1149,15 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Up { file, detach } => {
-            info!("Processing compose file: {}", file);
-            match VyomaCompose::from_file(&file) {
+            let compose_path = match resolve_compose_file(file.as_deref()) {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("{}", e);
+                    return Ok(());
+                }
+            };
+            info!("Processing compose file: {}", compose_path.display());
+            match VyomaCompose::from_file(&compose_path) {
                 Ok(compose) => {
                     println!("Vyoma Compose v{}", compose.version);
 
@@ -1103,7 +1312,7 @@ async fn main() -> Result<()> {
                         println!("(Detached mode selected)");
                     }
                 }
-                Err(e) => error!("Failed to parse compose file '{}': {}", file, e),
+                Err(e) => error!("Failed to parse compose file '{}': {}", compose_path.display(), e),
             }
         }
         Commands::Down { file } => {
@@ -1144,9 +1353,11 @@ async fn main() -> Result<()> {
 
             // 3. Determine Order
             let mut stop_order = Vec::new();
-            if let Ok(compose) = VyomaCompose::from_file(&file) {
-                if let Ok(order) = compose.start_order() {
-                    stop_order = order.into_iter().rev().map(|(n, _)| n).collect();
+            if let Ok(compose_path) = resolve_compose_file(file.as_deref()) {
+                if let Ok(compose) = VyomaCompose::from_file(&compose_path) {
+                    if let Ok(order) = compose.start_order() {
+                        stop_order = order.into_iter().rev().map(|(n, _)| n).collect();
+                    }
                 }
             }
 
@@ -1179,12 +1390,19 @@ async fn main() -> Result<()> {
         }
         Commands::Scale { replicas, file } => {
             // 1. Load Compose File
-            let compose = match VyomaCompose::from_file(&file) {
+            let compose_path = match resolve_compose_file(file.as_deref()) {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("{}", e);
+                    return Ok(());
+                }
+            };
+            let compose = match VyomaCompose::from_file(&compose_path) {
                 Ok(c) => c,
                 Err(e) => {
                     error!(
                         "Validation Error: Cannot scale without valid {}: {}",
-                        file, e
+                        compose_path.display(), e
                     );
                     return Ok(());
                 }
@@ -1474,6 +1692,9 @@ fn check_binary(name: &str) -> Result<bool> {
         return Ok(true);
     }
     if Path::new(&format!("/usr/libexec/vyoma/{}", name)).exists() {
+        return Ok(true);
+    }
+    if Path::new(&format!("/usr/libexec/{}", name)).exists() {
         return Ok(true);
     }
     // Check bundled path from package
@@ -2103,6 +2324,11 @@ async fn show_migration_progress(client: &reqwest::Client, daemon_url: &str, ses
                         println!("\n\nMigration failed!");
                         break;
                     }
+
+                    if status == "cancelled" {
+                        println!("\n\nMigration cancelled!");
+                        break;
+                    }
                 }
             }
             _ => break,
@@ -2111,3 +2337,165 @@ async fn show_migration_progress(client: &reqwest::Client, daemon_url: &str, ses
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     }
 }
+
+fn parse_size_str(s: &str) -> anyhow::Result<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        anyhow::bail!("Size cannot be empty");
+    }
+    let (num_part, multiplier) = if s.ends_with('G') || s.ends_with('g') {
+        (&s[..s.len() - 1], 1024 * 1024 * 1024u64)
+    } else if s.ends_with("GB") || s.ends_with("gb") || s.ends_with("GiB") || s.ends_with("gib") {
+        let idx = s.find(|c: char| c.is_alphabetic()).unwrap_or(s.len());
+        (&s[..idx], 1024 * 1024 * 1024u64)
+    } else if s.ends_with('M') || s.ends_with('m') {
+        (&s[..s.len() - 1], 1024 * 1024u64)
+    } else if s.ends_with("MB") || s.ends_with("mb") || s.ends_with("MiB") || s.ends_with("mib") {
+        let idx = s.find(|c: char| c.is_alphabetic()).unwrap_or(s.len());
+        (&s[..idx], 1024 * 1024u64)
+    } else if s.ends_with('K') || s.ends_with('k') {
+        (&s[..s.len() - 1], 1024u64)
+    } else {
+        (s, 1u64)
+    };
+    let val: u64 = num_part.trim().parse()?;
+    Ok(val * multiplier)
+}
+
+/// Parse human-readable memory strings (e.g. "512M", "1G", "2048", "512MiB", "1GiB") into MiB.
+pub fn parse_memory_size(s: &str) -> Result<u32, String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err("Memory size cannot be empty".to_string());
+    }
+
+    let upper = trimmed.to_uppercase();
+    let num_part: String = upper.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    let unit_part: String = upper.chars().skip_while(|c| c.is_ascii_digit() || *c == '.').collect();
+
+    if num_part.is_empty() {
+        return Err(format!("Invalid memory size '{}': missing numerical value", s));
+    }
+
+    let val = num_part
+        .parse::<f64>()
+        .map_err(|e| format!("Invalid memory size '{}': {}", s, e))?;
+
+    if val <= 0.0 {
+        return Err(format!("Memory size must be greater than 0, got {}", s));
+    }
+
+    let multiplier = match unit_part.trim() {
+        "" | "M" | "MB" | "MIB" => 1.0,
+        "G" | "GB" | "GIB" => 1024.0,
+        "K" | "KB" | "KIB" => 1.0 / 1024.0,
+        "T" | "TB" | "TIB" => 1024.0 * 1024.0,
+        other => {
+            return Err(format!(
+                "Invalid memory unit '{}' in '{}'. Supported units: M, MB, MiB, G, GB, GiB",
+                other, s
+            ))
+        }
+    };
+
+    let mib = (val * multiplier).round() as u32;
+    if mib == 0 {
+        return Err(format!("Memory size '{}' resolves to 0 MiB", s));
+    }
+
+    Ok(mib)
+}
+
+/// Resolve the compose file path: if specified explicitly, check that it exists.
+/// Otherwise, probe in priority order in the current directory:
+/// 1. vyoma-compose.yml
+/// 2. vyoma-compose.yaml
+/// 3. compose.yaml
+/// 4. compose.yml
+/// 5. docker-compose.yml
+/// 6. docker-compose.yaml
+pub fn resolve_compose_file(specified: Option<&str>) -> anyhow::Result<PathBuf> {
+    if let Some(path_str) = specified {
+        let path = PathBuf::from(path_str);
+        if path.exists() {
+            return Ok(path);
+        } else {
+            anyhow::bail!("Specified compose file not found: {}", path_str);
+        }
+    }
+
+    const CANDIDATES: &[&str] = &[
+        "vyoma-compose.yml",
+        "vyoma-compose.yaml",
+        "compose.yaml",
+        "compose.yml",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+    ];
+
+    for candidate in CANDIDATES {
+        let p = Path::new(candidate);
+        if p.exists() {
+            info!("Auto-discovered compose file: {}", candidate);
+            return Ok(p.to_path_buf());
+        }
+    }
+
+    anyhow::bail!(
+        "No compose file found in current directory (checked: vyoma-compose.yml, vyoma-compose.yaml, compose.yaml, compose.yml, docker-compose.yml, docker-compose.yaml)"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_size_str() {
+        assert_eq!(parse_size_str("1024").unwrap(), 1024);
+        assert_eq!(parse_size_str("10K").unwrap(), 10 * 1024);
+        assert_eq!(parse_size_str("512M").unwrap(), 512 * 1024 * 1024);
+        assert_eq!(parse_size_str("10G").unwrap(), 10 * 1024 * 1024 * 1024);
+        assert_eq!(parse_size_str("2GiB").unwrap(), 2 * 1024 * 1024 * 1024);
+        assert_eq!(parse_size_str("256MB").unwrap(), 256 * 1024 * 1024);
+        assert!(parse_size_str("").is_err());
+        assert!(parse_size_str("invalid").is_err());
+    }
+
+    #[test]
+    fn test_parse_memory_size() {
+        assert_eq!(parse_memory_size("512").unwrap(), 512);
+        assert_eq!(parse_memory_size("512M").unwrap(), 512);
+        assert_eq!(parse_memory_size("512m").unwrap(), 512);
+        assert_eq!(parse_memory_size("512MB").unwrap(), 512);
+        assert_eq!(parse_memory_size("512MiB").unwrap(), 512);
+        assert_eq!(parse_memory_size("1G").unwrap(), 1024);
+        assert_eq!(parse_memory_size("1g").unwrap(), 1024);
+        assert_eq!(parse_memory_size("1GB").unwrap(), 1024);
+        assert_eq!(parse_memory_size("1GiB").unwrap(), 1024);
+        assert_eq!(parse_memory_size("2G").unwrap(), 2048);
+        assert_eq!(parse_memory_size("1.5G").unwrap(), 1536);
+        assert_eq!(parse_memory_size("2048").unwrap(), 2048);
+        assert!(parse_memory_size("").is_err());
+        assert!(parse_memory_size("0").is_err());
+        assert!(parse_memory_size("invalid").is_err());
+        assert!(parse_memory_size("-512M").is_err());
+    }
+
+    #[test]
+    fn test_resolve_compose_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let dc = temp.path().join("docker-compose.yml");
+        std::fs::write(&dc, "version: '3'").unwrap();
+
+        // When specified explicitly:
+        let resolved = resolve_compose_file(Some(dc.to_str().unwrap())).unwrap();
+        assert_eq!(resolved, dc);
+
+        // When specified non-existent file:
+        assert!(resolve_compose_file(Some("/nonexistent/file.yml")).is_err());
+    }
+}
+
+
+

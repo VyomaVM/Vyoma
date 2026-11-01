@@ -74,6 +74,28 @@ The daemon manages process lifecycles, block devices, and network namespaces.
 | Client Interface | Transport | Target Path / Port | Purpose |
 |------------------|-----------|--------------------|---------|
 | **CLI (`vyoma`)** | Unix Socket | `/run/vyoma/vyoma.sock` | Fast, secure local administrative commands. |
-| **Web UI** | HTTP REST | `http://localhost:3000` | Browser dashboard management and metrics. |
+| **Web UI** | HTTP REST | `http://localhost:8080` | Browser dashboard management and metrics. |
 | **Kubernetes CRI (`vk8s`)** | gRPC | `localhost:7071` / Unix Socket | Pod sandbox lifecycle management. |
 | **In-VM Agent** | vsock / TCP | Vsock Port `9999` | Guest introspection without requiring SSH. |
+
+---
+
+## 4. Enterprise Security Pillars
+
+Vyoma implements **4 Enterprise Security Pillars** providing true defense-in-depth:
+1. **Hardware-Enforced MicroVM Isolation**: KVM ring-1 hardware virtualization with dedicated guest kernel and virtio-only devices.
+2. **Least-Privilege Host Daemon**: Root privilege dropped to `vyoma` user with minimal ambient capabilities (`CAP_NET_ADMIN`, `CAP_SYS_ADMIN`).
+3. **Measured Boot & Cryptographic Attestation**: TPM 2.0 PCR registers and remote attestation quotes.
+4. **Isolated Network Mesh & Authenticated Control Plane**: WireGuard / VXLAN encryption and Bearer token API authorization.
+
+See the complete specification in [The 4 Enterprise Security Pillars](file:///home/subesh/Startup_Projects/Vyoma/vyoma/docs/architecture/security-pillars.md).
+
+---
+
+## 5. Storage Branching & Hibernation
+
+- **QCOW2 Branching**: Instant MicroVM branching from snapshots without duplicating backing disks.
+- **Scale-to-Zero Hibernation**: Drops host RAM overhead to 0 MB and resumes in `<200ms`.
+
+See [QCOW2 Branching & Scale-to-Zero Hibernation](file:///home/subesh/Startup_Projects/Vyoma/vyoma/docs/architecture/hibernation-and-branching.md).
+

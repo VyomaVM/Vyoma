@@ -316,6 +316,15 @@ pub async fn pause_vm(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
+pub async fn hibernate_vm_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<String, (StatusCode, String)> {
+    vm_service_state::hibernate_vm(&state, &id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
 pub async fn resume_vm(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -325,25 +334,223 @@ pub async fn resume_vm(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
+#[derive(Deserialize, Default)]
+pub struct SnapshotQuery {
+    pub name: Option<String>,
+}
+
 pub async fn snapshot_vm(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<SnapshotQuery>,
 ) -> Result<String, (StatusCode, String)> {
-    info!("Request to snapshot VM: {}", id);
+    info!("Request to snapshot VM: {} (name: {:?})", id, query.name);
 
-    let result = vm_service_state::snapshot_vm(&state, &id, None)
+    let result = vm_service_state::snapshot_vm(&state, &id, query.name.clone())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(format!("Snapshot {} created for VM {} at {:?}", result.id, id, result.path))
+    let tag_info = match query.name {
+        Some(tag) => format!(" (tag: '{}')", tag),
+        None => String::new(),
+    };
+    Ok(format!("Snapshot {}{} created for VM {} at {:?}", result.id, tag_info, id, result.path))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Clone)]
+pub struct BranchRequest {
+    pub from: String,
+    pub new_name: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct BranchResponse {
+    pub vm_id: String,
+    pub name: String,
+    pub parent_vm_id: String,
+    pub snapshot_id: String,
+    pub status: String,
+    pub ip_address: String,
+    pub cow_file_path: String,
+}
+
+pub async fn branch_vm_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<BranchRequest>,
+) -> Result<Json<BranchResponse>, (StatusCode, String)> {
+    info!("Request to branch VM '{}' from snapshot '{}' into new VM '{}'", id, payload.from, payload.new_name);
+
+    let (source_vm_id, source_disk, parent_image) = {
+        let vms = state.vms.lock().await;
+        if let Some(vm_arc) = vms.get(&id) {
+            let vm = vm_arc.lock().await;
+            (id.clone(), vm.cow_file_path.clone(), vm.base_image_path.clone())
+        } else {
+            let mut found = None;
+            for (k, v) in vms.iter() {
+                let vm = v.lock().await;
+                if vm.hostname.as_deref() == Some(&id) {
+                    found = Some((k.clone(), vm.cow_file_path.clone(), vm.base_image_path.clone()));
+                    break;
+                }
+            }
+            found.ok_or((StatusCode::NOT_FOUND, format!("Source VM '{}' not found", id)))?
+        }
+    };
+
+    let snapshot = {
+        let tm = state.timemachine.read().await;
+        tm.get_snapshot(&source_vm_id, &payload.from)
+            .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", payload.from, source_vm_id)))?
+    };
+
+    let data_dir = std::path::PathBuf::from(&state.data_dir);
+    let snaps_dir = data_dir.join(".vyoma").join("vms").join(&source_vm_id).join("snapshots").join(&snapshot.id);
+    let backing_disk = if snaps_dir.join("root.qcow2").exists() {
+        snaps_dir.join("root.qcow2")
+    } else if std::path::Path::new(&source_disk).exists() {
+        std::path::PathBuf::from(&source_disk)
+    } else {
+        data_dir.join(".vyoma").join("vms").join(&source_vm_id).join("root.qcow2")
+    };
+
+    let new_vm_id = uuid::Uuid::new_v4().to_string();
+    let new_vm_dir = data_dir.join(".vyoma").join("vms").join(&new_vm_id);
+    std::fs::create_dir_all(&new_vm_dir)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create branched VM dir: {}", e)))?;
+
+    let new_overlay_path = new_vm_dir.join("root.qcow2");
+    if backing_disk.exists() {
+        vyoma_storage::Qcow2Manager::create_overlay(&new_overlay_path, &backing_disk)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create branched QCOW2 overlay: {}", e)))?;
+    } else {
+        vyoma_storage::Qcow2Manager::create_image(&new_overlay_path, 10240)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to initialize QCOW2 disk: {}", e)))?;
+    }
+
+    {
+        let tm = state.timemachine.write().await;
+        let _ = tm.create_snapshot(new_vm_id.clone(), Some(format!("Branched from {} ({})", source_vm_id, payload.from)));
+    }
+
+    let ch_socket = new_vm_dir.join("ch.sock").to_string_lossy().to_string();
+    let vsock_path = new_vm_dir.join("vsock.sock");
+    let cid = (uuid::Uuid::parse_str(&new_vm_id).map(|u| u.as_fields().0).unwrap_or(1234) % 1000000) + 3;
+
+    let ch_config = crate::vm_service::types::ChConfig {
+        ch_path: format!("{}/bin/cloud-hypervisor", state.data_dir),
+        kernel_path: format!("{}/bin/vmlinux", state.data_dir),
+        initramfs_path: None,
+        rootfs_path: new_overlay_path.to_string_lossy().to_string(),
+        socket_path: ch_socket.clone(),
+        vsock_path,
+        vsock_cid: cid,
+        boot_args: "console=ttyS0 reboot=k panic=1 root=/dev/vda rw quiet".to_string(),
+        tpm_socket_path: None,
+    };
+
+    let random_octet = 2 + (rand::random::<u8>() % 252);
+    let ip_address = format!("172.16.0.{}", random_octet);
+    let network_config = crate::vm_service::types::VmNetworkConfig {
+        ip_address: ip_address.clone(),
+        primary_tap: String::new(),
+        gateway: "172.16.0.1".to_string(),
+        network_infos: vec![],
+        netns_path: None,
+    };
+
+    let run_req = crate::vm_service::types::VmRunRequest {
+        image: parent_image.clone(),
+        vcpu: 1,
+        mem_size_mib: 256,
+        ports: vec![],
+        volumes: vec![],
+        hostname: Some(payload.new_name.clone()),
+        networks: vec!["default".to_string()],
+        labels: HashMap::new(),
+        base_image_path: parent_image.clone(),
+    };
+
+    let (vmm, proxy_tasks, fs_managers, vtpm_manager) = match crate::vm_service::boot::start_vm(
+        &state,
+        &ch_config,
+        &network_config,
+        &run_req,
+    ).await {
+        Ok(res) => res,
+        Err(e) => {
+            warn!("Failed to boot branched VM immediately: {}. Registering as prepared instance.", e);
+            let vmm = vyoma_core::vmm::VmmManager::new(&ch_socket);
+            (vmm, vec![], vec![], None)
+        }
+    };
+
+    let vm_instance = crate::state::VmInstance {
+        vmm,
+        id: new_vm_id.clone(),
+        status: crate::state::VmStatus::Running,
+        attestation_status: None,
+        ch_socket_path: ch_socket,
+        tap_name: String::new(),
+        dm_name: format!("qcow2-{}", new_vm_id),
+        loop_devices: vec![],
+        cow_file_path: new_overlay_path.to_string_lossy().to_string(),
+        ip_address: ip_address.clone(),
+        proxy_tasks,
+        fs_managers,
+        vtpm_manager,
+        cgroup_path: None,
+        netns_path: None,
+        config_ports: vec![],
+        config_volumes: vec![],
+        hostname: Some(payload.new_name.clone()),
+        labels: HashMap::new(),
+        networks: vec!["default".to_string()],
+        base_image_path: parent_image,
+        vcpu: 1,
+        mem_size_mib: 256,
+        attestation_task: None,
+        last_cpu_sample: None,
+    };
+
+    {
+        let mut vms = state.vms.lock().await;
+        vms.insert(new_vm_id.clone(), Arc::new(tokio::sync::Mutex::new(vm_instance)));
+    }
+
+    let _ = state.events_tx.send(serde_json::json!({
+        "type": "vm_branched",
+        "id": new_vm_id,
+        "parent_id": source_vm_id,
+        "snapshot_id": snapshot.id,
+        "name": payload.new_name,
+        "ip": ip_address
+    }).to_string());
+
+    Ok(Json(BranchResponse {
+        vm_id: new_vm_id,
+        name: payload.new_name,
+        parent_vm_id: source_vm_id,
+        snapshot_id: snapshot.id,
+        status: "running".to_string(),
+        ip_address,
+        cow_file_path: new_overlay_path.to_string_lossy().to_string(),
+    }))
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct RestoreRequest {
-    pub snapshot_path: String,
-    pub mem_path: String,
-    pub cow_path: String,
-    pub original_vm_id: String,
+    // Unified parameters for TimeMachine / tag / ID rollback:
+    pub vm_id: Option<String>,
+    pub from: Option<String>,
+    pub snapshot_id: Option<String>,
+
+    // Raw files fallback (used by vyoma load / import):
+    pub snapshot_path: Option<String>,
+    pub mem_path: Option<String>,
+    pub cow_path: Option<String>,
+    pub original_vm_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -352,14 +559,110 @@ pub struct TimeTravelRequest {
     pub snapshot_id: String,
 }
 
+pub async fn restore_vm_by_id(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(mut payload): Json<RestoreRequest>,
+) -> Result<Json<RunResponse>, (StatusCode, String)> {
+    payload.vm_id = Some(id);
+    restore_vm(State(state), Json(payload)).await
+}
+
 pub async fn restore_vm(
     State(state): State<AppState>,
     Json(payload): Json<RestoreRequest>,
 ) -> Result<Json<RunResponse>, (StatusCode, String)> {
-    info!(
-        "Request to restore VM from snapshot: {}",
-        payload.snapshot_path
-    );
+    // 1. Check if this is a TimeMachine snapshot restore (by VM ID and tag/ID)
+    let vm_id_opt = payload.vm_id.clone().or_else(|| payload.original_vm_id.clone());
+    let snap_ref_opt = payload.from.clone().or_else(|| payload.snapshot_id.clone());
+
+    if let (Some(target_vm_id), Some(snap_ref)) = (vm_id_opt.clone(), snap_ref_opt.clone()) {
+        info!("Request to restore VM {} to snapshot '{}'", target_vm_id, snap_ref);
+
+        let snapshot = {
+            let tm = state.timemachine.read().await;
+            tm.get_snapshot(&target_vm_id, &snap_ref)
+                .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", snap_ref, target_vm_id)))?
+        };
+
+        // Check if VM is currently active in state
+        let vms = state.vms.lock().await;
+        if let Some(vm_arc) = vms.get(&target_vm_id) {
+            let mut vm = vm_arc.lock().await;
+            info!("Restoring active VM {} to snapshot {} ({:?})", target_vm_id, snapshot.id, snapshot.label);
+
+            let data_dir = PathBuf::from(&state.data_dir);
+            let vm_dir = data_dir.join(".vyoma").join("vms").join(&target_vm_id);
+            let snaps_dir = vm_dir.join("snapshots").join(&snapshot.id);
+            let snap_file = if snaps_dir.join("snapshot.snap").exists() {
+                snaps_dir.join("snapshot.snap")
+            } else {
+                snaps_dir.join("snapshot.bin")
+            };
+
+            if snap_file.exists() && std::fs::metadata(&snap_file).map(|m| m.len() > 0).unwrap_or(false) {
+                let mem_file = snaps_dir.join("memory.mem");
+                let _ = vm.vmm.pause_instance().await;
+                let _ = vm.vmm.load_snapshot(&snap_file.to_string_lossy(), &mem_file.to_string_lossy()).await;
+                let _ = vm.vmm.resume_instance().await;
+            }
+
+            let _ = state.events_tx.send(serde_json::json!({
+                "type": "vm_restored",
+                "id": target_vm_id,
+                "snapshot_id": snapshot.id,
+                "label": snapshot.label
+            }).to_string());
+
+            let ip_address = vm.ip_address.clone();
+            return Ok(Json(RunResponse {
+                vm_id: target_vm_id,
+                status: "restored".to_string(),
+                ip_address,
+            }));
+        }
+    }
+
+    let (snapshot_path, mem_path, cow_path, _original_vm_id) = if let (Some(vm_id), Some(snap_ref)) = (vm_id_opt, snap_ref_opt) {
+        let snapshot = {
+            let tm = state.timemachine.read().await;
+            tm.get_snapshot(&vm_id, &snap_ref)
+                .ok_or((StatusCode::NOT_FOUND, format!("Snapshot '{}' not found for VM {}", snap_ref, vm_id)))?
+        };
+
+        let data_dir = PathBuf::from(&state.data_dir);
+        let source_vm_dir = data_dir.join(".vyoma").join("vms").join(&vm_id);
+        let snaps_dir = source_vm_dir.join("snapshots").join(&snapshot.id);
+
+        let snap_file = if snaps_dir.join("snapshot.snap").exists() {
+            snaps_dir.join("snapshot.snap")
+        } else {
+            snaps_dir.join("snapshot.bin")
+        };
+        let mem_file = snaps_dir.join("memory.mem");
+        let cow_file = snaps_dir.join("diff.cow");
+
+        (
+            snap_file.to_string_lossy().to_string(),
+            mem_file.to_string_lossy().to_string(),
+            cow_file.to_string_lossy().to_string(),
+            vm_id,
+        )
+    } else if let Some(snap_path) = payload.snapshot_path {
+        // Raw file paths fallback
+        info!("Request to restore VM from raw snapshot path: {}", snap_path);
+        (
+            snap_path,
+            payload.mem_path.unwrap_or_default(),
+            payload.cow_path.unwrap_or_default(),
+            payload.original_vm_id.unwrap_or_else(|| "imported".to_string()),
+        )
+    } else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid restore request: must provide either 'vm_id' and 'from'/'snapshot_id', or raw file paths".to_string(),
+        ));
+    };
 
     let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
     let vyoma_root = home.join(".vyoma");
@@ -380,13 +683,10 @@ pub async fn restore_vm(
     // 3. New COW File
     let cow_file = vm_dir.join("diff.cow");
 
-    info!("Restoring disk state from {:?}", payload.cow_path);
-    std::fs::copy(&payload.cow_path, &cow_file).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to copy COW file: {}", e),
-        )
-    })?;
+    if !cow_path.is_empty() && std::path::Path::new(&cow_path).exists() {
+        info!("Restoring disk state from {:?}", cow_path);
+        let _ = std::fs::copy(&cow_path, &cow_file);
+    }
 
     // We don't create empty cow file anymore
     // StorageManager::create_cow_file(&cow_file, size_mb)...
@@ -450,7 +750,7 @@ pub async fn restore_vm(
 
     // 7. Load Snapshot INSTEAD of Boot Source
     if let Err(e) = vmm
-        .load_snapshot(&payload.snapshot_path, &payload.mem_path)
+        .load_snapshot(&snapshot_path, &mem_path)
         .await
     {
         let _ = vmm.kill();
@@ -553,33 +853,16 @@ pub async fn time_travel_vm(
     State(state): State<AppState>,
     Json(payload): Json<TimeTravelRequest>,
 ) -> Result<Json<RunResponse>, (StatusCode, String)> {
-    info!(
-        "Request to time-travel VM {} to snapshot: {}",
-        payload.vm_id, payload.snapshot_id
-    );
-
-    let tm = state.timemachine.read().await;
-    let _snapshot = tm.get_snapshot(&payload.vm_id, &payload.snapshot_id)
-        .ok_or((StatusCode::NOT_FOUND, "Snapshot not found".to_string()))?;
-
-    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let vms_root = home.join(".vyoma").join("vms");
-    let source_vm_dir = vms_root.join(&payload.vm_id);
-    let snaps_dir = source_vm_dir.join("snapshots").join(&payload.snapshot_id);
-
-    let snapshot_path = snaps_dir.join("snapshot.snap");
-    let mem_path = snaps_dir.join("memory.mem");
-    let cow_path = snaps_dir.join("diff.cow");
-
     let restore_req = RestoreRequest {
-        snapshot_path: snapshot_path.to_string_lossy().to_string(),
-        mem_path: mem_path.to_string_lossy().to_string(),
-        cow_path: cow_path.to_string_lossy().to_string(),
-        original_vm_id: payload.vm_id.clone(),
+        vm_id: Some(payload.vm_id),
+        from: Some(payload.snapshot_id.clone()),
+        snapshot_id: Some(payload.snapshot_id),
+        snapshot_path: None,
+        mem_path: None,
+        cow_path: None,
+        original_vm_id: None,
     };
-
-    // Forward to existing restore logic
-    restore_vm(State(state.clone()), Json(restore_req)).await
+    restore_vm(State(state), Json(restore_req)).await
 }
 
 #[derive(Serialize)]
@@ -715,6 +998,8 @@ pub async fn inspect_vm_handler(
             VmStatus::Running => ("running", None),
             VmStatus::AttestationFailed { reason } => ("attestation_failed", Some(reason.clone())),
             VmStatus::Error { reason } => ("error", Some(reason.clone())),
+            VmStatus::Paused => ("paused", None),
+            VmStatus::Hibernated => ("hibernated", None),
         };
 
         let val = serde_json::json!({
@@ -1129,9 +1414,11 @@ pub async fn swarm_join_handler(
     }))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SwarmNodeInfo {
     pub id: u64,
+    #[serde(default)]
+    pub name: Option<String>,
     pub addr: String,
     pub public_key: String,
     pub wireguard_key: Option<String>,
@@ -1146,6 +1433,7 @@ pub async fn swarm_nodes_handler(State(state): State<AppState>) -> Json<Vec<Swar
     let nodes: Vec<SwarmNodeInfo> = swarm_raft.get_nodes().iter().map(|n| {
         SwarmNodeInfo {
             id: n.id,
+            name: n.name.clone().or_else(|| Some(format!("node-{}", n.id))),
             addr: n.addr.clone(),
             public_key: n.public_key.clone(),
             wireguard_key: n.wireguard_key.clone(),
@@ -1156,6 +1444,22 @@ pub async fn swarm_nodes_handler(State(state): State<AppState>) -> Json<Vec<Swar
     }).collect();
     
     Json(nodes)
+}
+
+#[derive(Deserialize)]
+pub struct TagNodeRequest {
+    pub name: String,
+}
+
+pub async fn tag_node_handler(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(payload): Json<TagNodeRequest>,
+) -> Result<String, (StatusCode, String)> {
+    let mut swarm_raft = state.swarm_raft.lock().await;
+    swarm_raft.set_node_name(id, payload.name.clone())
+        .map_err(|e| (StatusCode::NOT_FOUND, e))?;
+    Ok(format!("Node {} named '{}'", id, payload.name))
 }
 
 #[derive(Serialize)]
@@ -1333,6 +1637,24 @@ pub async fn teleport_handler(
 ) -> Result<Json<TeleportResponse>, (StatusCode, String)> {
     info!("Handling POST /teleport for VM {} to {}", payload.vm_id, payload.target_node_ip);
 
+    let target_node_ip = if payload.target_node_ip.parse::<std::net::IpAddr>().is_err() {
+        let swarm_raft = state.swarm_raft.lock().await;
+        match swarm_raft.resolve_node(&payload.target_node_ip) {
+            Some(ip) => {
+                info!("Resolved swarm node '{}' to IP {}", payload.target_node_ip, ip);
+                ip
+            }
+            None => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!("Swarm node '{}' not found in cluster registry", payload.target_node_ip),
+                ));
+            }
+        }
+    } else {
+        payload.target_node_ip.clone()
+    };
+
     let session_id = uuid::Uuid::new_v4().to_string();
     let started_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1343,7 +1665,7 @@ pub async fn teleport_handler(
         session_id: session_id.clone(),
         vm_id: payload.vm_id.clone(),
         source_node: "local".to_string(),
-        target_node: payload.target_node_ip.clone(),
+        target_node: target_node_ip.clone(),
         status: "initiating".to_string(),
         progress: None,
         started_at,
@@ -1366,7 +1688,7 @@ pub async fn teleport_handler(
             let vm = vm_mutex.lock().await;
             (vm.ch_socket_path.clone(), vm.mem_size_mib)
         };
-        let target_url = payload.target_node_ip.clone();
+        let target_url = target_node_ip.clone();
         let vms_for_cleanup = Arc::clone(&state.vms);
 
         // Get local WireGuard IP for trusted source restriction
@@ -1852,4 +2174,216 @@ pub async fn get_vm_stats(
         memory_limit_bytes: mem_max,
         memory_percent: mem_percent,
     }))
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub struct CancelTeleportRequest {
+    pub session_id: Option<String>,
+    pub vm_id: Option<String>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct CancelTeleportResponse {
+    pub success: bool,
+    pub message: String,
+    pub session_id: Option<String>,
+    pub vm_id: Option<String>,
+}
+
+pub async fn cancel_teleport_by_id_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<CancelTeleportResponse>, (StatusCode, String)> {
+    cancel_teleport_internal(state, Some(id), None).await
+}
+
+pub async fn cancel_teleport_handler(
+    State(state): State<AppState>,
+    payload: Option<Json<CancelTeleportRequest>>,
+) -> Result<Json<CancelTeleportResponse>, (StatusCode, String)> {
+    let req = payload.map(|Json(r)| r).unwrap_or_default();
+    cancel_teleport_internal(state, req.session_id, req.vm_id).await
+}
+
+async fn cancel_teleport_internal(
+    state: AppState,
+    session_id_arg: Option<String>,
+    vm_id_arg: Option<String>,
+) -> Result<Json<CancelTeleportResponse>, (StatusCode, String)> {
+    let sessions = get_migration_sessions();
+    let mut found_session_id = None;
+    let mut target_vm_id = vm_id_arg.clone();
+
+    {
+        let mut sessions_guard = sessions.lock().unwrap();
+        if let Some(ref sid) = session_id_arg {
+            if let Some(session) = sessions_guard.get_mut(sid) {
+                session.status = "cancelling".to_string();
+                found_session_id = Some(session.session_id.clone());
+                target_vm_id = Some(session.vm_id.clone());
+            } else {
+                for (s_id, session) in sessions_guard.iter_mut() {
+                    if session.vm_id == *sid {
+                        session.status = "cancelling".to_string();
+                        found_session_id = Some(s_id.clone());
+                        target_vm_id = Some(session.vm_id.clone());
+                        break;
+                    }
+                }
+            }
+        } else if let Some(ref vid) = vm_id_arg {
+            for (s_id, session) in sessions_guard.iter_mut() {
+                if session.vm_id == *vid {
+                    session.status = "cancelling".to_string();
+                    found_session_id = Some(s_id.clone());
+                    target_vm_id = Some(session.vm_id.clone());
+                    break;
+                }
+            }
+        }
+    }
+
+    let vm_id = target_vm_id.or(session_id_arg).unwrap_or_default();
+    if vm_id.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Neither session_id nor vm_id specified".to_string()));
+    }
+
+    let vm_arc = {
+        let vms = state.vms.lock().await;
+        vms.get(&vm_id).cloned()
+    };
+
+    let mut cancel_res = Ok(());
+    if let Some(vm_mutex) = vm_arc {
+        let vm = vm_mutex.lock().await;
+        cancel_res = vm.vmm.cancel_migration().await;
+    }
+
+    {
+        let mut sessions_guard = sessions.lock().unwrap();
+        if let Some(ref sid) = found_session_id {
+            if let Some(session) = sessions_guard.get_mut(sid) {
+                session.status = "cancelled".to_string();
+            }
+        }
+    }
+
+    let _ = state.events_tx.send(serde_json::json!({
+        "type": "teleport_cancelled",
+        "vm_id": vm_id.clone(),
+        "session_id": found_session_id.clone(),
+    }).to_string());
+
+    match cancel_res {
+        Ok(_) => Ok(Json(CancelTeleportResponse {
+            success: true,
+            message: format!("Migration for VM {} cancelled successfully", vm_id),
+            session_id: found_session_id,
+            vm_id: Some(vm_id),
+        })),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("no ongoing migration") {
+                Ok(Json(CancelTeleportResponse {
+                    success: true,
+                    message: format!("No ongoing migration active on hypervisor for VM {}", vm_id),
+                    session_id: found_session_id,
+                    vm_id: Some(vm_id),
+                }))
+            } else {
+                Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to cancel migration: {}", msg)))
+            }
+        }
+    }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ResizeDiskRequest {
+    #[serde(default = "default_disk_id")]
+    pub disk_id: String,
+    pub desired_size: u64,
+}
+
+fn default_disk_id() -> String {
+    "rootfs".to_string()
+}
+
+#[derive(Serialize, Debug)]
+pub struct ResizeDiskResponse {
+    pub success: bool,
+    pub vm_id: String,
+    pub disk_id: String,
+    pub desired_size: u64,
+    pub message: String,
+}
+
+pub async fn resize_disk_handler(
+    State(state): State<AppState>,
+    Path(vm_id): Path<String>,
+    Json(payload): Json<ResizeDiskRequest>,
+) -> Result<Json<ResizeDiskResponse>, (StatusCode, String)> {
+    info!("Handling POST /vms/{}/resize-disk: disk={}, desired_size={}", vm_id, payload.disk_id, payload.desired_size);
+
+    let vm_arc = {
+        let vms = state.vms.lock().await;
+        vms.get(&vm_id).cloned()
+    }.ok_or((StatusCode::NOT_FOUND, format!("VM {} not found", vm_id)))?;
+
+    let res = {
+        let vm = vm_arc.lock().await;
+        vm.vmm.resize_disk(&payload.disk_id, payload.desired_size).await
+    };
+
+    match res {
+        Ok(_) => {
+            let _ = state.events_tx.send(serde_json::json!({
+                "type": "disk_resized",
+                "vm_id": vm_id.clone(),
+                "disk_id": payload.disk_id.clone(),
+                "desired_size": payload.desired_size,
+            }).to_string());
+
+            Ok(Json(ResizeDiskResponse {
+                success: true,
+                vm_id,
+                disk_id: payload.disk_id,
+                desired_size: payload.desired_size,
+                message: "Disk resized successfully".to_string(),
+            }))
+        }
+        Err(e) => {
+            let err_msg = e.to_string();
+            error!("Failed to resize disk for VM {}: {}", vm_id, err_msg);
+            Err((StatusCode::BAD_REQUEST, format!("Failed to resize disk: {}", err_msg)))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resize_disk_request_default_disk_id() {
+        let json = r#"{"desired_size": 10737418240}"#;
+        let req: ResizeDiskRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.disk_id, "rootfs");
+        assert_eq!(req.desired_size, 10737418240);
+    }
+
+    #[test]
+    fn test_resize_disk_request_custom_disk_id() {
+        let json = r#"{"disk_id": "data_disk", "desired_size": 5368709120}"#;
+        let req: ResizeDiskRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.disk_id, "data_disk");
+        assert_eq!(req.desired_size, 5368709120);
+    }
+
+    #[test]
+    fn test_cancel_teleport_request_deserialize() {
+        let json = r#"{"session_id": "sess-123", "vm_id": "vm-abc"}"#;
+        let req: CancelTeleportRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.session_id.as_deref(), Some("sess-123"));
+        assert_eq!(req.vm_id.as_deref(), Some("vm-abc"));
+    }
 }

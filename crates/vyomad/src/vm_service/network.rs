@@ -33,32 +33,37 @@ async fn setup_privileged_network(
     let tap_name = format!("tap{}", &vm_id[..8]);
     let bridge_name = "vyoma0";
 
-    // 1. Create TAP and attach to bridge (atomic via ip command)
-    let output = std::process::Command::new("ip")
-        .args(&["tuntap", "add", "dev", &tap_name, "mode", "tap", "user", "vyoma"])
-        .output()
-        .context("Failed to create TAP device")?;
-    if !output.status.success() {
-        anyhow::bail!("ip tuntap add failed: {}", String::from_utf8_lossy(&output.stderr));
-    }
+    let is_root = unsafe { libc::geteuid() == 0 };
+    let tap_created = if is_root {
+        // Attempt TAP creation only when running as root
+        let output = std::process::Command::new("ip")
+            .args(&["tuntap", "add", "dev", &tap_name, "mode", "tap", "user", "vyoma"])
+            .output();
 
-    // 2. Set TAP up
-    let output = std::process::Command::new("ip")
-        .args(&["link", "set", &tap_name, "up"])
-        .output()
-        .context("Failed to set TAP up")?;
-    if !output.status.success() {
-        anyhow::bail!("ip link set up failed: {}", String::from_utf8_lossy(&output.stderr));
-    }
-
-    // 3. Attach TAP to bridge
-    let output = std::process::Command::new("ip")
-        .args(&["link", "set", &tap_name, "master", bridge_name])
-        .output()
-        .context("Failed to attach TAP to bridge")?;
-    if !output.status.success() {
-        anyhow::bail!("ip link set master failed: {}", String::from_utf8_lossy(&output.stderr));
-    }
+        match output {
+            Ok(out) => {
+                if out.status.success() {
+                    let _ = std::process::Command::new("ip")
+                        .args(&["link", "set", &tap_name, "up"])
+                        .output();
+                    let _ = std::process::Command::new("ip")
+                        .args(&["link", "set", &tap_name, "master", bridge_name])
+                        .output();
+                    true
+                } else {
+                    warn!("ip tuntap add failed: {}. Continuing with rootless Vsock.", String::from_utf8_lossy(&out.stderr));
+                    false
+                }
+            }
+            Err(e) => {
+                warn!("Failed to execute ip command: {}. Continuing with rootless Vsock.", e);
+                false
+            }
+        }
+    } else {
+        info!("Running in rootless mode. MicroVM networking operating via Rootless Vsock L4 port forwarding.");
+        false
+    };
 
     // 4. Assign IP address to VM
     let random_octet = 2 + (rand::random::<u8>() % 252);
@@ -67,7 +72,7 @@ async fn setup_privileged_network(
 
     let network_infos = vec![NetworkInfo {
         ip: ip_address.clone(),
-        tap_name: tap_name.clone(),
+        tap_name: if tap_created { tap_name.clone() } else { String::new() },
         gateway: Some(gateway.clone()),
         interface_name: "eth0".to_string(),
         network_name: "default".to_string(),
@@ -75,7 +80,7 @@ async fn setup_privileged_network(
 
     Ok(VmNetworkConfig {
         ip_address,
-        primary_tap: tap_name,
+        primary_tap: if tap_created { tap_name } else { String::new() },
         gateway,
         network_infos,
         netns_path: None,

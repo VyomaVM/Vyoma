@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"google.golang.org/grpc/codes"
 	pb "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	vyomav1 "github.com/vyoma/vk8s/pkg/vyoma/proto"
@@ -20,7 +21,7 @@ func (s *VyomaCriServer) RunPodSandbox(ctx context.Context, req *pb.RunPodSandbo
 	s.logger.Printf("RunPodSandbox: name=%s namespace=%s", metadata.GetName(), metadata.GetNamespace())
 
 	image := "vyoma/alpine:latest"
-	if img := req.GetConfig().GetImage().GetImage(); img != "" {
+	if img, ok := config.GetAnnotations()["vyoma.image"]; ok && img != "" {
 		image = img
 	}
 
@@ -41,7 +42,7 @@ func (s *VyomaCriServer) RunPodSandbox(ctx context.Context, req *pb.RunPodSandbo
 				}
 			}
 			if memLimit := resources.GetMemoryLimitInBytes(); memLimit > 0 {
-				vmReq.MemoryMb = memLimit / 1024 / 1024
+				vmReq.MemoryMb = uint64(memLimit / 1024 / 1024)
 				if vmReq.MemoryMb < 128 {
 					vmReq.MemoryMb = 128
 				}
@@ -51,15 +52,8 @@ func (s *VyomaCriServer) RunPodSandbox(ctx context.Context, req *pb.RunPodSandbo
 
 	for _, port := range config.GetPortMappings() {
 		vmReq.Ports = append(vmReq.Ports, &vyomav1.PortMapping{
-			Host: port.GetHostPort(),
-			Vm:   port.GetContainerPort(),
-		})
-	}
-
-	for _, mount := range config.GetMounts() {
-		vmReq.Volumes = append(vmReq.Volumes, &vyomav1.VolumeMapping{
-			HostPath: mount.GetHostPath(),
-			VmPath:   mount.GetContainerPath(),
+			Host: uint32(port.GetHostPort()),
+			Vm:   uint32(port.GetContainerPort()),
 		})
 	}
 
@@ -72,7 +66,7 @@ func (s *VyomaCriServer) RunPodSandbox(ctx context.Context, req *pb.RunPodSandbo
 	vmID := vmResp.GetVmId()
 	s.logger.Printf("VM created: %s", vmID)
 
-	if err := s.grpcClient.StartVm(ctx, &vyomav1.VmIdRequest{VmId: vmID}); err != nil {
+	if _, err := s.grpcClient.StartVm(ctx, &vyomav1.VmIdRequest{VmId: vmID}); err != nil {
 		s.logError(ctx, "RunPodSandbox.StartVm", err)
 		s.grpcClient.DeleteVm(ctx, &vyomav1.VmIdRequest{VmId: vmID})
 		return nil, errorf(codes.Internal, "start VM: %v", err)
@@ -110,7 +104,7 @@ func (s *VyomaCriServer) StopPodSandbox(ctx context.Context, req *pb.StopPodSand
 		return nil, errorf(codes.NotFound, "pod not found: %s", podID)
 	}
 
-	if err := s.grpcClient.StopVm(ctx, &vyomav1.VmIdRequest{VmId: pod.VMID}); err != nil {
+	if _, err := s.grpcClient.StopVm(ctx, &vyomav1.VmIdRequest{VmId: pod.VMID}); err != nil {
 		s.logError(ctx, "StopPodSandbox", err)
 	}
 
@@ -185,10 +179,10 @@ func (s *VyomaCriServer) ListPodSandbox(ctx context.Context, req *pb.ListPodSand
 			if filter.State != nil && pod.State != filter.State.State {
 				continue
 			}
-			if len(filter.LabelSelectors) > 0 {
+			if len(filter.LabelSelector) > 0 {
 				match := true
-				for _, selector := range filter.LabelSelectors {
-					if val, ok := pod.Labels[selector]; !ok || val == "" {
+				for k, v := range filter.LabelSelector {
+					if val, ok := pod.Labels[k]; !ok || val != v {
 						match = false
 						break
 					}
@@ -218,11 +212,11 @@ func (s *VyomaCriServer) UpdateRuntimeConfig(ctx context.Context, req *pb.Update
 
 func (s *VyomaCriServer) Status(ctx context.Context, req *pb.StatusRequest) (*pb.StatusResponse, error) {
 	return &pb.StatusResponse{
-		Enabled:    true,
-		ApiVersion: "v1",
-		Conditions: []*pb.RuntimeCondition{
-			{Type: "RuntimeReady", Status: true, Reason: "ok"},
-			{Type: "NetworkReady", Status: true, Reason: "ok"},
+		Status: &pb.RuntimeStatus{
+			Conditions: []*pb.RuntimeCondition{
+				{Type: "RuntimeReady", Status: true, Reason: "ok"},
+				{Type: "NetworkReady", Status: true, Reason: "ok"},
+			},
 		},
 	}, nil
 }

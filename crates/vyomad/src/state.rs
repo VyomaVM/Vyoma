@@ -75,6 +75,8 @@ pub enum VmStatus {
     Running,
     AttestationFailed { reason: String },
     Error { reason: String },
+    Paused,
+    Hibernated,
 }
 
 impl Default for VmStatus {
@@ -90,6 +92,8 @@ impl std::fmt::Display for VmStatus {
             VmStatus::Running => write!(f, "Running"),
             VmStatus::AttestationFailed { reason } => write!(f, "AttestationFailed: {}", reason),
             VmStatus::Error { reason } => write!(f, "Error: {}", reason),
+            VmStatus::Paused => write!(f, "Paused"),
+            VmStatus::Hibernated => write!(f, "Hibernated"),
         }
     }
 }

@@ -26,11 +26,31 @@ export function TopologyPage() {
   useEffect(() => {
     if (!vmsData?.vms || !netsData) return;
 
-    const topoNodes: TopologyNode[] = [
-      ...vmsData.vms.map((v) => ({ id: v.id, type: 'vm' as const, label: v.labels['vyoma.service'] || v.id.slice(0, 8) })),
-      ...netsData.map((n) => ({ id: n, type: 'network' as const, label: n })),
-    ];
-    const topoLinks: TopologyLink[] = vmsData.vms.map((v) => ({ source: v.id, target: v.labels['network'] || 'default' }));
+    const availableNetworks = Array.isArray(netsData) ? netsData : [];
+    const defaultNetName = availableNetworks[0] || 'vyoma-net';
+
+    const netNodes: TopologyNode[] = (availableNetworks.length > 0 ? availableNetworks : [defaultNetName]).map((n) => ({
+      id: n,
+      type: 'network' as const,
+      label: n,
+    }));
+
+    const vmNodes: TopologyNode[] = (vmsData.vms || []).map((v) => ({
+      id: v.id,
+      type: 'vm' as const,
+      label: v.labels?.['vyoma.service'] || v.id.slice(0, 8),
+    }));
+
+    const topoNodes: TopologyNode[] = [...vmNodes, ...netNodes];
+    const nodeIds = new Set(topoNodes.map((n) => n.id));
+
+    // Ensure link targets exist in nodeIds so D3 forceLink never throws "node not found"
+    const topoLinks: TopologyLink[] = (vmsData.vms || [])
+      .map((v) => {
+        const net = v.labels?.['network'] || defaultNetName;
+        return { source: v.id, target: net };
+      })
+      .filter((l) => nodeIds.has(l.source) && nodeIds.has(l.target));
 
     setNodes(topoNodes);
     setLinks(topoLinks);
@@ -103,6 +123,10 @@ export function TopologyPage() {
 
       node.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
     });
+
+    return () => {
+      simulation.stop();
+    };
   }, [nodes, links]);
 
   return (

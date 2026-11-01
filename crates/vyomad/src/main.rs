@@ -286,13 +286,22 @@ async fn async_main(args: Args) {
 
             let vmm = vyoma_core::vmm::VmmManager::new(&ch_socket);
 
+            let vsock_path = vm_dir.join("vsock.sock");
             let mut proxy_tasks = Vec::new();
             for port in &rvm.state.ports {
-                let task = ProxyManager::start_proxy(
-                    port.host_port,
-                    rvm.state.ip_address.clone(),
-                    port.vm_port,
-                );
+                let task = if vsock_path.exists() {
+                    ProxyManager::start_vsock_proxy(
+                        port.host_port,
+                        vsock_path.clone(),
+                        port.vm_port,
+                    )
+                } else {
+                    ProxyManager::start_proxy(
+                        port.host_port,
+                        rvm.state.ip_address.clone(),
+                        port.vm_port,
+                    )
+                };
                 proxy_tasks.push(task);
             }
 
@@ -347,6 +356,9 @@ async fn async_main(args: Args) {
         .route("/stop/:id", post(handlers::stop_vm))
         .route("/pause/:id", post(handlers::pause_vm))
         .route("/resume/:id", post(handlers::resume_vm))
+        .route("/vms/:id/resume", post(handlers::resume_vm))
+        .route("/hibernate/:id", post(handlers::hibernate_vm_handler))
+        .route("/vms/:id/hibernate", post(handlers::hibernate_vm_handler))
         .route("/ps", get(handlers::list_vms))
         .route("/exec/:id", post(handlers::exec_in_vm))
         .route("/commit/:id", post(handlers::commit_vm))
@@ -354,6 +366,9 @@ async fn async_main(args: Args) {
         .route("/history/:id", get(handlers::history_vm))
         .route("/time-travel", post(handlers::time_travel_vm))
         .route("/restore", post(handlers::restore_vm))
+        .route("/vms/:id/restore", post(handlers::restore_vm_by_id))
+        .route("/vms/:id/branch", post(handlers::branch_vm_handler))
+        .route("/branch/:id", post(handlers::branch_vm_handler))
         .route("/logs/:id", get(handlers::stream_logs))
         .route("/build", post(handlers::build_image))
         .route("/images", get(handlers::list_images_handler))
@@ -368,16 +383,22 @@ async fn async_main(args: Args) {
         )
         .route("/events", get(handlers::events_handler))
         .route("/vms/:id", get(handlers::inspect_vm_handler))
+        .route("/inspect/:id", get(handlers::inspect_vm_handler))
         .route("/swarm/init", post(handlers::swarm_init_handler))
         .route("/swarm/join", post(handlers::swarm_join_handler))
         .route("/swarm/nodes", get(handlers::swarm_nodes_handler))
+        .route("/swarm/nodes/:id/name", post(handlers::tag_node_handler))
         .route("/teleport", post(handlers::teleport_handler))
         .route("/teleport/status/:session_id", get(handlers::teleport_status_handler))
+        .route("/teleport/cancel/:id", post(handlers::cancel_teleport_by_id_handler))
+        .route("/teleport/cancel", post(handlers::cancel_teleport_handler))
         .route("/receive-teleport", post(handlers::receive_teleport_handler))
         .route("/adopt-teleported-vm", post(handlers::adopt_teleported_vm))
         .route("/policy", get(handlers::get_policy_handler).post(handlers::set_policy_handler))
         .route("/attest/:id", post(handlers::attest_vm_handler))
         .route("/vms/:id/stats", get(handlers::get_vm_stats))
+        .route("/vms/:id/resize-disk", post(handlers::resize_disk_handler))
+        .route("/vms/:id/resize", post(handlers::resize_disk_handler))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth::auth_middleware));
 
     // Health check and UI are public (no auth required)

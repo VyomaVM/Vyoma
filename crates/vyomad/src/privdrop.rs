@@ -38,6 +38,12 @@ fn get_pwentry(username: &str) -> Result<*const passwd> {
 }
 
 pub fn drop_privileges() -> Result<()> {
+    let current_uid = unsafe { libc::getuid() };
+    if current_uid != 0 {
+        info!("Already running as non-root user (uid={}), skipping privilege drop", current_uid);
+        return Ok(());
+    }
+
     let pw = get_pwentry(TARGET_USER)
         .context("Failed to resolve vyoma user")?;
 

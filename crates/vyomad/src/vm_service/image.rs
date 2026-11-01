@@ -15,9 +15,10 @@ pub async fn ensure_image_locally(image_name: &str, data_dir: &str) -> Result<Pa
     let safe_image_name = image_name.replace('/', "_").replace(':', "_");
     let image_store_path = images_root.join(&safe_image_name);
     let manifest_path = image_store_path.join("vyoma.toml");
+    let rootfs_ext4_path = image_store_path.join("rootfs.ext4");
     let rootfs_sqfs_path = image_store_path.join("rootfs.sqfs");
 
-    if !rootfs_sqfs_path.exists() {
+    if !rootfs_ext4_path.exists() && !rootfs_sqfs_path.exists() {
         info!("Image {} not found locally. Pulling...", image_name);
         std::fs::create_dir_all(&image_store_path)?;
 
@@ -64,6 +65,11 @@ pub async fn ensure_image_locally(image_name: &str, data_dir: &str) -> Result<Pa
                 .context("Unpack failed")?;
         }
 
+        // Generate native ext4 rootfs directly from the unpacked container directory
+        let _ = std::process::Command::new("mke2fs")
+            .args(&["-d", &temp_unpack_dir.path().to_string_lossy(), "-t", "ext4", "-F", &rootfs_ext4_path.to_string_lossy(), "200M"])
+            .output();
+
         let converter = VmifConverter::new();
         let config = oci_config.unwrap_or_else(|| VyomaOciConfig::default());
         
@@ -79,11 +85,29 @@ pub async fn ensure_image_locally(image_name: &str, data_dir: &str) -> Result<Pa
         ).context("VMIF conversion failed")?;
 
         info!("Image {} converted to VMIF successfully", image_name);
-    } else {
-        info!("VMIF image found locally at {:?}", rootfs_sqfs_path);
     }
 
-    Ok(rootfs_sqfs_path)
+    if rootfs_ext4_path.exists() {
+        info!("Native ext4 rootfs found at {:?}", rootfs_ext4_path);
+        Ok(rootfs_ext4_path)
+    } else if rootfs_sqfs_path.exists() {
+        info!("Converting rootfs.sqfs to rootfs.ext4 for native kernel ext4 driver...");
+        if let Ok(temp_dir) = tempfile::tempdir() {
+            let _ = std::process::Command::new("unsquashfs")
+                .args(&["-d", &temp_dir.path().to_string_lossy(), &rootfs_sqfs_path.to_string_lossy()])
+                .output();
+            let _ = std::process::Command::new("mke2fs")
+                .args(&["-d", &temp_dir.path().to_string_lossy(), "-t", "ext4", "-F", &rootfs_ext4_path.to_string_lossy(), "200M"])
+                .output();
+        }
+        if rootfs_ext4_path.exists() {
+            Ok(rootfs_ext4_path)
+        } else {
+            Ok(rootfs_sqfs_path)
+        }
+    } else {
+        Ok(rootfs_sqfs_path)
+    }
 }
 
 pub async fn load_vmif_manifest(image_name: &str, data_dir: &str) -> Result<VmifManifest> {

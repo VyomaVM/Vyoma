@@ -66,8 +66,10 @@ pub async fn start_vm(
     vmm.add_drive("rootfs", &ch_config.rootfs_path, true).await
         .context("Add drive")?;
 
-    vmm.add_network_interface("eth0", &network_config.primary_tap, None).await
-        .context("Add net (primary)")?;
+    if !network_config.primary_tap.is_empty() {
+        vmm.add_network_interface("eth0", &network_config.primary_tap, None).await
+            .context("Add net (primary)")?;
+    }
 
     for (idx, network_info) in network_config.network_infos.iter().enumerate().skip(1) {
         let ifname = format!("eth{}", idx);
@@ -122,9 +124,9 @@ pub async fn start_vm(
 
     let mut proxy_tasks = Vec::new();
     for mapping in &request.ports {
-        let handle = ProxyManager::start_proxy(
+        let handle = ProxyManager::start_vsock_proxy(
             mapping.host_port,
-            network_config.ip_address.clone(),
+            ch_config.vsock_path.clone(),
             mapping.vm_port,
         );
         proxy_tasks.push(handle);

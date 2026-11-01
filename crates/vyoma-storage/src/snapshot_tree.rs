@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, error};
+use tracing::info;
 use serde::{Deserialize, Serialize};
 use sled::Tree;
 
@@ -72,7 +72,6 @@ pub struct DiffEntry {
 pub struct SnapshotTree {
     snapshots: Tree,
     tags: Tree,
-    base_path: PathBuf,
 }
 
 impl SnapshotTree {
@@ -90,7 +89,6 @@ impl SnapshotTree {
         Ok(Self {
             snapshots,
             tags,
-            base_path: base_path.to_path_buf(),
         })
     }
     
@@ -155,7 +153,7 @@ impl SnapshotTree {
     pub fn branch(&self, snap_id: &str, new_vm_id: &str) -> Result<SnapshotNode> {
         info!("Branching from snapshot {} to new VM {}", snap_id, new_vm_id);
         
-        let parent = self.get(snap_id)?;
+        let _parent = self.get(snap_id)?;
         
         let new_node = SnapshotNode::new(new_vm_id, Some(snap_id.to_string()))
             .with_label(&format!("branched-from-{}", snap_id));

@@ -85,6 +85,13 @@ func (c *Client) Close() error {
 	return nil
 }
 
+func (c *Client) Write(p []byte) (n int, err error) {
+	if c.conn != nil {
+		return c.conn.Write(p)
+	}
+	return 0, net.ErrClosed
+}
+
 func (c *Client) sendRequest(ctx context.Context, req Request) (Response, error) {
 	if c.conn == nil {
 		if err := c.Connect(ctx); err != nil {

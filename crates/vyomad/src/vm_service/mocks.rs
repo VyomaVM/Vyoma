@@ -26,6 +26,8 @@ impl From<MockPreparedStorage> for PreparedStorage {
             loop_devices: m.loop_devices,
             cow_file_path: m.cow_file_path,
             dm_name: m.dm_name,
+            is_qcow2: false,
+            qcow2_path: None,
         }
     }
 }

@@ -60,7 +60,7 @@ if [ -f "${SRC_DIR}/bin/cloud-hypervisor" ]; then
     fi
 else
     log_warn "cloud-hypervisor not found in ${SRC_DIR}/bin/. Downloading..."
-    wget -q -O "${BIN_DIR}/cloud-hypervisor" https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v41.0/cloud-hypervisor
+    wget -q -O "${BIN_DIR}/cloud-hypervisor" https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-static
 fi
 chmod +x "${BIN_DIR}/cloud-hypervisor"
 

@@ -89,25 +89,49 @@ impl TimeMachine {
         if snaps.is_empty() { None } else { Some(snaps) }
     }
 
-    pub fn get_snapshot(&self, vm_id: &str, snapshot_id: &str) -> Option<SnapshotEntry> {
-        self.get_snapshots(vm_id)
-            .into_iter()
-            .find(|s| s.id == snapshot_id)
+    pub fn get_snapshot(&self, vm_id: &str, snapshot_ref: &str) -> Option<SnapshotEntry> {
+        let snaps = self.get_snapshots(vm_id);
+
+        // 1. Direct ID match
+        if let Some(s) = snaps.iter().find(|s| s.id == snapshot_ref) {
+            return Some(s.clone());
+        }
+
+        // 2. Direct label/tag match
+        if let Some(s) = snaps.iter().find(|s| s.label.as_deref() == Some(snapshot_ref)) {
+            return Some(s.clone());
+        }
+
+        // 3. snap:N format match (1-indexed or 0-indexed)
+        if let Ok(idx) = parse_snapshot_ref(snapshot_ref) {
+            if idx > 0 && idx <= snaps.len() {
+                return snaps.get(idx - 1).cloned();
+            } else if idx < snaps.len() {
+                return snaps.get(idx).cloned();
+            }
+        }
+
+        None
     }
 
     pub fn get_latest_snapshot(&self, vm_id: &str) -> Option<SnapshotEntry> {
         self.get_snapshots(vm_id).into_iter().last()
     }
 
-    pub fn delete_snapshot(&self, vm_id: &str, snapshot_id: &str) -> Result<(), String> {
+    pub fn delete_snapshot(&self, vm_id: &str, snapshot_ref: &str) -> Result<(), String> {
         let mut snapshots = self.get_snapshots(vm_id);
         if snapshots.is_empty() {
             return Err("VM not found".to_string());
         }
 
+        let target_id = self
+            .get_snapshot(vm_id, snapshot_ref)
+            .map(|s| s.id)
+            .ok_or_else(|| "Snapshot not found".to_string())?;
+
         let index = snapshots
             .iter()
-            .position(|s| s.id == snapshot_id)
+            .position(|s| s.id == target_id)
             .ok_or("Snapshot not found")?;
 
         snapshots.remove(index);
@@ -121,7 +145,7 @@ impl TimeMachine {
         }
 
         self.save_snapshots(vm_id, &snapshots);
-        info!("Deleted snapshot {} for VM {}", snapshot_id, vm_id);
+        info!("Deleted snapshot {} for VM {}", target_id, vm_id);
 
         Ok(())
     }
@@ -249,4 +273,31 @@ mod tests {
 
         assert_eq!(tm.get_snapshot_count("vm-1"), 2);
     }
+
+    #[test]
+    fn test_get_snapshot_by_name_and_ref() {
+        let tm = test_tm();
+        let snap1 = tm.create_snapshot("vm-1".to_string(), Some("before-deploy".to_string()));
+        let snap2 = tm.create_snapshot("vm-1".to_string(), Some("after-deploy".to_string()));
+
+        // Resolve by exact ID
+        assert_eq!(tm.get_snapshot("vm-1", &snap1.id).unwrap().id, snap1.id);
+
+        // Resolve by named tag
+        assert_eq!(tm.get_snapshot("vm-1", "before-deploy").unwrap().id, snap1.id);
+        assert_eq!(tm.get_snapshot("vm-1", "after-deploy").unwrap().id, snap2.id);
+
+        // Resolve by snap:N reference
+        assert_eq!(tm.get_snapshot("vm-1", "snap:1").unwrap().id, snap1.id);
+        assert_eq!(tm.get_snapshot("vm-1", "snap:2").unwrap().id, snap2.id);
+
+        // Non-existent tag
+        assert!(tm.get_snapshot("vm-1", "non-existent").is_none());
+
+        // Delete by tag
+        assert!(tm.delete_snapshot("vm-1", "before-deploy").is_ok());
+        assert_eq!(tm.get_snapshot_count("vm-1"), 1);
+        assert_eq!(tm.get_snapshot("vm-1", "after-deploy").unwrap().id, snap2.id);
+    }
 }
+

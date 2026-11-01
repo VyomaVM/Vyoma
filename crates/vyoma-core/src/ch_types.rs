@@ -85,7 +85,24 @@ pub struct DiskConfig {
     pub direct: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vhost_user: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_size: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_queues: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backing_files: Option<bool>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VmResizeDiskConfig {
+    pub id: String,
+    pub desired_size: u64,
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NetConfig {

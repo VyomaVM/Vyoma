@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use sysinfo::System;
 use tokio::fs;
-use vyoma_agent_protocol::{AgentRequest, AgentResponse, ProcessInfo, VmMetrics};
+use vyoma_agent_protocol::{ProcessInfo, VmMetrics};
 
 pub async fn collect_metrics() -> Result<VmMetrics> {
     let mut sys = System::new_all();
@@ -66,6 +66,7 @@ pub async fn execute_command(cmd: &[String]) -> Result<(Vec<u8>, Vec<u8>, i32)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vyoma_agent_protocol::{AgentRequest, AgentResponse};
 
     #[test]
     fn test_metrics_collection() {

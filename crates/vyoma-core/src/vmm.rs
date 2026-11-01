@@ -12,21 +12,41 @@ use reqwest::{Client, Method};
 
 use crate::ch_types::{
     VmConfig, CpusConfig, MemoryConfig, PayloadConfig, DiskConfig, NetConfig, FsConfig,
-    ConsoleConfig, VmSnapshotConfig, VmRestoreConfig, SendMigrationData, ReceiveMigrationData
+    ConsoleConfig, VmSnapshotConfig, VmRestoreConfig, SendMigrationData, ReceiveMigrationData,
+    VmResizeDiskConfig,
 };
 
 impl fmt::Debug for VmmManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("VmmManager")
          .field("socket_path", &self.socket_path)
+         .field("event_monitor_path", &self.event_monitor_path)
          .field("process", &if self.process.is_some() { "Some(Child)" } else { "None" })
          .finish()
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VmmTimestamp {
+    pub secs: u64,
+    pub nanos: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VmmEvent {
+    #[serde(default)]
+    pub timestamp: Option<VmmTimestamp>,
+    pub source: String,
+    pub event: String,
+    #[serde(default)]
+    pub properties: Option<serde_json::Value>,
+}
+
 /// Manages a Cloud Hypervisor process and its API interaction.
 pub struct VmmManager {
     socket_path: String,
+    event_monitor_path: Option<String>,
+    event_sender: broadcast::Sender<VmmEvent>,
     process: Option<Child>,
     log_sender: broadcast::Sender<String>,
     config: VmConfig,
@@ -36,6 +56,7 @@ pub struct VmmManager {
 impl VmmManager {
     pub fn new(socket_path: &str) -> Self {
         let (tx, _) = broadcast::channel(100);
+        let (event_tx, _) = broadcast::channel(100);
         
         let client = Client::builder()
             .unix_socket(socket_path)
@@ -44,6 +65,8 @@ impl VmmManager {
             
         Self {
             socket_path: socket_path.to_string(),
+            event_monitor_path: Some(format!("{}.events", socket_path)),
+            event_sender: event_tx,
             process: None,
             log_sender: tx,
             config: VmConfig::default(),
@@ -53,6 +76,18 @@ impl VmmManager {
     
     pub fn socket_path(&self) -> &str {
         &self.socket_path
+    }
+
+    pub fn event_monitor_path(&self) -> Option<&str> {
+        self.event_monitor_path.as_deref()
+    }
+
+    pub fn set_event_monitor_path(&mut self, path: Option<String>) {
+        self.event_monitor_path = path;
+    }
+
+    pub fn subscribe_events(&self) -> broadcast::Receiver<VmmEvent> {
+        self.event_sender.subscribe()
     }
 
     pub fn pid(&self) -> Option<u32> {
@@ -68,44 +103,42 @@ impl VmmManager {
     }
 
     pub fn start_daemon(&mut self, binary_path: &str, netns: Option<&str>, rootless: bool) -> Result<()> {
-        info!("Starting Cloud Hypervisor at {} (Socket: {}, NetNS: {:?}, Rootless: {})", binary_path, self.socket_path, netns, rootless);
+        info!("Starting Cloud Hypervisor at {} (Socket: {}, EventMonitor: {:?}, NetNS: {:?}, Rootless: {})", 
+            binary_path, self.socket_path, self.event_monitor_path, netns, rootless);
         
         if Path::new(&self.socket_path).exists() {
             std::fs::remove_file(&self.socket_path)?;
         }
 
-        let mut child = if rootless {
-             Command::new("unshare")
-                .arg("-r")
-                .arg("-n")
-                .arg(binary_path)
-                .arg("--api-socket")
-                .arg(&self.socket_path)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .map_err(|e| anyhow!("Failed to spawn cloud-hypervisor with unshare: {}", e))?
+        if let Some(ref ep) = self.event_monitor_path {
+            if Path::new(ep).exists() {
+                let _ = std::fs::remove_file(ep);
+            }
+        }
+
+        let mut cmd = if rootless {
+            let mut c = Command::new("unshare");
+            c.arg("-r").arg("-n").arg(binary_path);
+            c
         } else if let Some(ns) = netns {
-             Command::new("ip")
-                .arg("netns")
-                .arg("exec")
-                .arg(ns)
-                .arg(binary_path)
-                .arg("--api-socket")
-                .arg(&self.socket_path)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .map_err(|e| anyhow!("Failed to spawn cloud-hypervisor in netns: {}", e))?
+            let mut c = Command::new("ip");
+            c.arg("netns").arg("exec").arg(ns).arg(binary_path);
+            c
         } else {
-             Command::new(binary_path)
-                .arg("--api-socket")
-                .arg(&self.socket_path)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .map_err(|e| anyhow!("Failed to spawn cloud-hypervisor: {}", e))?
+            Command::new(binary_path)
         };
+
+        cmd.arg("--api-socket").arg(&self.socket_path);
+
+        if let Some(ref ep) = self.event_monitor_path {
+            cmd.arg("--event-monitor").arg(format!("path={}", ep));
+        }
+
+        let mut child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| anyhow!("Failed to spawn cloud-hypervisor: {}", e))?;
 
         let stdout = child.stdout.take().ok_or(anyhow!("Failed to capture stdout"))?;
         let stderr = child.stderr.take().ok_or(anyhow!("Failed to capture stderr"))?;
@@ -131,6 +164,65 @@ impl VmmManager {
                 }
             }
         });
+
+        if let Some(event_path) = self.event_monitor_path.clone() {
+            let tx_event = self.event_sender.clone();
+            thread::spawn(move || {
+                let path = Path::new(&event_path);
+                for _ in 0..30 {
+                    if path.exists() {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+
+                if let Ok(file) = std::fs::File::open(path) {
+                    use std::io::Read;
+                    let mut reader = BufReader::new(file);
+                    let mut buffer = String::new();
+                    let mut brace_depth = 0i32;
+                    let mut in_string = false;
+                    let mut escape = false;
+
+                    loop {
+                        let mut byte_buf = [0u8; 1];
+                        match reader.read(&mut byte_buf) {
+                            Ok(0) => {
+                                thread::sleep(Duration::from_millis(100));
+                            }
+                            Ok(_) => {
+                                let c = byte_buf[0] as char;
+                                buffer.push(c);
+                                if escape {
+                                    escape = false;
+                                } else if c == '\\' {
+                                    escape = true;
+                                } else if c == '"' {
+                                    in_string = !in_string;
+                                } else if !in_string {
+                                    if c == '{' {
+                                        brace_depth += 1;
+                                    } else if c == '}' {
+                                        brace_depth -= 1;
+                                        if brace_depth == 0 {
+                                            let trimmed = buffer.trim();
+                                            if !trimmed.is_empty() {
+                                                if let Ok(evt) = serde_json::from_str::<VmmEvent>(trimmed) {
+                                                    tracing::info!("[CH EVENT] {}: {}", evt.source, evt.event);
+                                                    let _ = tx_event.send(evt);
+                                                }
+                                            }
+                                            buffer.clear();
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                }
+            });
+        }
 
         self.process = Some(child);
         self.wait_for_socket(Duration::from_secs(5))?;
@@ -189,11 +281,31 @@ impl VmmManager {
     }
 
     pub async fn add_drive(&mut self, drive_id: &str, host_path: &str, is_root: bool) -> Result<()> {
+        let is_qcow2 = host_path.ends_with(".qcow2");
         let disk = DiskConfig {
             path: host_path.to_string(),
-            readonly: if is_root { Some(true) } else { None }, // Usually rootfs is readonly if there's a COW layer
+            readonly: if is_qcow2 {
+                Some(false) // QCOW2 overlays must be writable for guest state mutations
+            } else if is_root {
+                Some(true) // Traditional Device Mapper / loop base rootfs is readonly
+            } else {
+                None
+            },
             direct: None,
             vhost_user: None,
+            id: Some(drive_id.to_string()),
+            queue_size: None,
+            num_queues: None,
+            image_type: if is_qcow2 {
+                Some("Qcow2".to_string())
+            } else {
+                Some("Raw".to_string())
+            },
+            backing_files: if is_qcow2 {
+                Some(true)
+            } else {
+                None
+            },
         };
         
         if let Some(disks) = &mut self.config.disks {
@@ -338,6 +450,20 @@ impl VmmManager {
         self.api_request("/api/v1/vm.receive-migration", Method::PUT, Some(&config)).await
     }
 
+    pub async fn cancel_migration(&self) -> Result<()> {
+        info!("Cancelling migration for VM on socket {}", self.socket_path);
+        self.api_request::<()>("/api/v1/vm.cancel-migration", Method::PUT, None).await
+    }
+
+    pub async fn resize_disk(&self, disk_id: &str, desired_size: u64) -> Result<()> {
+        info!("Resizing disk {} to {} bytes via Cloud Hypervisor API", disk_id, desired_size);
+        let config = VmResizeDiskConfig {
+            id: disk_id.to_string(),
+            desired_size,
+        };
+        self.api_request::<VmResizeDiskConfig>("/api/v1/vm.resize-disk", Method::PUT, Some(&config)).await
+    }
+
     pub async fn enable_sev_snp(&mut self, policy: Option<&str>, guest_key_root: Option<&str>) -> Result<()> {
         let sev_snp = crate::ch_types::SevSnpConfig {
             enabled: true,
@@ -391,3 +517,52 @@ impl Drop for VmmManager {
         let _ = self.kill();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vmm_event_deserialization() {
+        let json_str = r#"{
+            "timestamp": {
+                "secs": 12,
+                "nanos": 345678
+            },
+            "source": "vmm",
+            "event": "started",
+            "properties": null
+        }"#;
+
+        let event: VmmEvent = serde_json::from_str(json_str).expect("Failed to parse event");
+        assert_eq!(event.source, "vmm");
+        assert_eq!(event.event, "started");
+        assert_eq!(event.timestamp, Some(VmmTimestamp { secs: 12, nanos: 345678 }));
+    }
+
+    #[test]
+    fn test_vmm_event_migration_cancelled() {
+        let json_str = r#"{
+            "source": "vm",
+            "event": "migration-cancelled"
+        }"#;
+
+        let event: VmmEvent = serde_json::from_str(json_str).expect("Failed to parse cancellation event");
+        assert_eq!(event.source, "vm");
+        assert_eq!(event.event, "migration-cancelled");
+        assert!(event.timestamp.is_none());
+    }
+
+    #[test]
+    fn test_resize_disk_config_serialization() {
+        let config = VmResizeDiskConfig {
+            id: "drive-root".to_string(),
+            desired_size: 10 * 1024 * 1024 * 1024,
+        };
+        let json = serde_json::to_string(&config).expect("serialization failed");
+        assert!(json.contains("\"id\":\"drive-root\""));
+        assert!(json.contains("\"desired_size\":10737418240"));
+    }
+}
+
+
