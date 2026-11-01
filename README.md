@@ -9,9 +9,10 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 
 ---
 
-## 🚀 Key Features (v2.9.0)
+## 🚀 Key Features (v3.0.0)
 
 *   **Docker UX**: Familiar commands: `run`, `ps`, `logs`, `exec`, `inspect`.
+*   **Rootless Vsock Networking**: 100% rootless container port forwarding (`-p 8088:80`) via Vsock L4 stream splicing without `sudo`, host TAP interfaces, or iptables.
 *   **Human-Readable Memory**: Seamlessly specify `--memory 512M`, `1G`, `2GiB` or raw MiB digits.
 *   **4 Enterprise Security Pillars**: Hardware KVM isolation, least-privilege daemon (`privdrop`), TPM2 measured boot, and WireGuard/VXLAN encrypted mesh.
 *   **TimeMachine & QCOW2 Branching**: Instant MicroVM branching (`vyoma branch`) without duplicating disk space.
@@ -28,7 +29,7 @@ Spin up secure, isolated VMs in milliseconds using standard OCI (Docker) images.
 
 ### Prerequisites
 - Linux kernel 5.10+ with KVM, cgroups v2, and TUN/TAP enabled.
-- A user with `sudo` access.
+- A user with `sudo` access (or run completely rootless in user mode).
 
 ### 1. Download Package
 Go to the [Releases Page](https://github.com/Subeshrock/vyoma/releases) and download the latest package for your distro.
@@ -37,12 +38,12 @@ Go to the [Releases Page](https://github.com/Subeshrock/vyoma/releases) and down
 
 **Debian/Ubuntu:**
 ```bash
-sudo apt install ./vyoma_2.9.0_amd64.deb
+sudo apt install ./vyoma_3.0.0_amd64.deb
 ```
 
 **Fedora/RHEL/CentOS:**
 ```bash
-sudo rpm -i vyoma-2.9.0-1.x86_64.rpm
+sudo rpm -i vyoma-3.0.0-1.x86_64.rpm
 ```
 
 ### 3. Post-Install Group Setup

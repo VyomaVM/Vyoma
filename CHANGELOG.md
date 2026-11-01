@@ -1,6 +1,16 @@
 # Changelog
 
-## [2.9.0] - Upcoming (The Polish Update)
+## [3.0.0] - 2026-11-01 (Cloud-Hypervisor v54 & Rootless Vsock Networking)
+- **Cloud-Hypervisor v54.0 Runtime**: Upgraded core virtualization engine to official Cloud-Hypervisor v54.0 with static packaging and SHA-256 checksum verification.
+- **Rootless MicroVM Networking (ADR-045)**: Implemented zero-privilege, 100% rootless container port forwarding using Vsock L4 stream splicing. Host `ProxyManager` dynamically tunnels incoming TCP traffic via Cloud-Hypervisor Unix domain vsock sockets to the guest microVM without requiring `sudo`, host TAP interfaces, or iptables manipulation.
+- **In-VM Guest Agent (`vyoma-agent-vm`)**: Multiplexed `AF_VSOCK` listener with port `10000` for high-throughput L4 stream forwarding to container services and port `9999` for in-VM management, metrics, and command execution.
+- **Native Ext4 RootFS & Automatic Conversion**: Added support for unprivileged native `rootfs.ext4` alongside `rootfs.sqfs`, automatically formatted via `mke2fs -d` to match native kernel ext4 drivers and ensure reliable container entrypoint execution.
+- **Web Dashboard Polish**: Resolved Topology visualization D3 crash, safeguarded VM label access across all dashboard views, and verified real-time metrics telemetry.
+- **Official Python SDK**: Published `vyoma-sdk` Python package with typed REST client, asynchronous helpers, and unit/integration test suites.
+- **vk8s CRI Server**: Added `vyoma-cri` binary supporting Kubernetes Container Runtime Interface (CRI v1) for seamless `crictl` and Kubernetes sandbox pod management.
+- **Technical Debt & Cleanup**: Removed obsolete and unintegrated slirp networking code (`crates/vyoma-core/src/slirp.rs`) and silenced noisy TAP warnings when running in user mode.
+
+## [2.9.0] - 2026-07-13 (The Polish Update)
 - **gRPC**: gRPC server now handles port conflicts gracefully. StreamLogs RPC implemented for real-time log streaming.
 - **Lifecycle**: `vyoma restart` (Stop/Run replacement), `vyoma exec` (Agent-based HTTP channel replacing SSH, using statically compiled musl agent).
 - **Monitoring**: Real-time metrics endpoint and `vyoma stats` CLI command to view live CPU and memory usage of running VMs.

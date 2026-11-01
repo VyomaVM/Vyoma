@@ -10,7 +10,7 @@ from .exceptions import (
 )
 from .models import Snapshot, SwarmNode, VmInstance
 
-__version__ = "2.9.0"
+__version__ = "3.0.0"
 
 __all__ = [
     "VyomaClient",

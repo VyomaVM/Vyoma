@@ -243,7 +243,7 @@ class VyomaClient:
         conn = self._get_connection()
         headers = {
             "Accept": "application/json",
-            "User-Agent": "vyoma-python-sdk/2.9.0",
+            "User-Agent": "vyoma-python-sdk/3.0.0",
         }
         body = None
         if json_data is not None:
