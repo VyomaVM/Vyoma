@@ -11,6 +11,16 @@ else
     exit 1
 fi
 
+# Setup local environment if user has tools in ~/.local or nvm
+[ -d "$HOME/.nvm/versions/node/v24.21.0/bin" ] && export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"
+[ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH"
+[ -d "$HOME/.local/lib/pkgconfig" ] && export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+[ -d "$HOME/.local/lib" ] && export LD_LIBRARY_PATH="$HOME/.local/lib:${LD_LIBRARY_PATH:-}"
+[ -f "$HOME/.local/bin/protoc" ] && export PROTOC="$HOME/.local/bin/protoc"
+[ -d "$HOME/.local/include" ] && export PROTOC_INCLUDE="$HOME/.local/include"
+[ -d "/usr/lib/gcc/x86_64-linux-gnu/15/include" ] && export BINDGEN_EXTRA_CLANG_ARGS="-I/usr/lib/gcc/x86_64-linux-gnu/15/include"
+[ -d "$HOME/.local/lib" ] && export RUSTFLAGS="-L $HOME/.local/lib ${RUSTFLAGS:-}"
+
 VERSION="3.0.0"
 ARCH="amd64"
 PKG_NAME="vyoma"
@@ -53,6 +63,15 @@ verify_checksum() {
 
 echo "Building Vyoma v${VERSION} for Debian..."
 
+# 0. Build UI (must be before vyomad compilation for RustEmbed)
+echo "Building UI..."
+mkdir -p ui/dist
+if command -v npm &> /dev/null; then
+    (cd ui && npm run build) || echo "Notice: npm run build had warnings, using existing ui/dist"
+else
+    echo "Skipping UI build (npm not found)"
+fi
+
 # 1. Build Binaries
 "$CARGO" build --release --bin vyomad --bin vyoma
 rustup target add x86_64-unknown-linux-musl
@@ -86,9 +105,9 @@ CNI_VERSION="v1.5.1"
 CNI_DIR="${WORK_DIR}/usr/lib/vyoma/cni"
 echo "Fetching CNI plugins..."
 mkdir -p "${CNI_DIR}/bin"
-if [ ! -f "cni-plugins.tgz" ]; then
+if [ ! -s "cni-plugins.tgz" ]; then
     echo "Downloading CNI plugins ${CNI_VERSION}..."
-    wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz"
+    curl -fL -o cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" || wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz"
 fi
 
 echo "Verifying CNI plugins checksum..."
@@ -106,19 +125,11 @@ VIRTIOFSD_DIR="${WORK_DIR}/usr/lib/vyoma"
 
 echo "Fetching virtiofsd..."
 
-# Build UI (optional - requires Node.js)
-echo "Building UI..."
-if command -v npm &> /dev/null; then
-    cd ui
-    npm install
-    npm run build
-    cd ..
-    mkdir -p "${WORK_DIR}/usr/lib/vyoma"
-    cp -r ui/dist "${WORK_DIR}/usr/lib/vyoma/ui"
-    echo "UI bundled successfully"
-else
-    echo "Skipping UI build (npm not found)"
-fi
+# Bundle UI to data directory
+mkdir -p "${WORK_DIR}/usr/lib/vyoma"
+cp -r ui/dist "${WORK_DIR}/usr/lib/vyoma/ui"
+echo "UI bundled successfully"
+
 # Check if virtiofsd is already available on system or project bin
 if [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
     cp bin/virtiofsd virtiofsd_bin
@@ -137,7 +148,7 @@ fi
 if [ ! -f "virtiofsd_bin" ]; then
     # Primary: GitLab releases
     PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-x86_64-musl.zip"
-    if wget -q -O virtiofsd.zip "$PRIMARY_URL" 2>/dev/null; then
+    if curl -fL -m 5 -o virtiofsd.zip "$PRIMARY_URL" 2>/dev/null || wget -q --timeout=5 -O virtiofsd.zip "$PRIMARY_URL" 2>/dev/null; then
         unzip -q -o virtiofsd.zip
         mv virtiofsd virtiofsd_bin 2>/dev/null || true
         chmod +x virtiofsd_bin 2>/dev/null || true
@@ -147,7 +158,7 @@ fi
 # Fallback 1: Try QEMU GitHub raw
 if [ ! -f "virtiofsd_bin" ]; then
     FALLBACK_URL1="https://github.com/qemu/qemu/raw/main/contrib/virtiofsd/virtiofsd-x86_64"
-    if wget -q -O virtiofsd "$FALLBACK_URL1" 2>/dev/null; then
+    if curl -fL -m 5 -o virtiofsd "$FALLBACK_URL1" 2>/dev/null || wget -q --timeout=5 -O virtiofsd "$FALLBACK_URL1" 2>/dev/null; then
         mv virtiofsd virtiofsd_bin
         chmod +x virtiofsd_bin
     fi
@@ -156,7 +167,7 @@ fi
 # Fallback 2: Try another mirror
 if [ ! -f "virtiofsd_bin" ]; then
     FALLBACK_URL2="https://raw.githubusercontent.com/qemu/qemu/master/contrib/virtiofsd/virtiofsd-x86_64"
-    if wget -q -O virtiofsd "$FALLBACK_URL2" 2>/dev/null; then
+    if curl -fL -m 5 -o virtiofsd "$FALLBACK_URL2" 2>/dev/null || wget -q --timeout=5 -O virtiofsd "$FALLBACK_URL2" 2>/dev/null; then
         mv virtiofsd virtiofsd_bin
         chmod +x virtiofsd_bin
     fi
@@ -226,8 +237,11 @@ EOF
 
 # 6. Create Post-Install Script
 # $2 = previous version (empty if fresh install)
-cat <<'POSTINST' > "${WORK_DIR}/DEBIAN/postinst"
+cat <<EOF > "${WORK_DIR}/DEBIAN/postinst"
 #!/bin/bash
+VERSION="${VERSION}"
+EOF
+cat <<'POSTINST' >> "${WORK_DIR}/DEBIAN/postinst"
 set -e
 
 # Create vyoma user (for socket ownership) - idempotent
@@ -269,6 +283,10 @@ mkdir -p /var/lib/vyoma/.vyoma/cni
 rm -rf /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
 ln -sf /usr/lib/vyoma/cni/bin /var/lib/vyoma/.vyoma/cni/bin
 
+# Ensure /var/lib/vyoma is owned by vyoma:vyoma so daemon can write state and CNI configs
+chown -R vyoma:vyoma /var/lib/vyoma 2>/dev/null || true
+chmod 0755 /var/lib/vyoma 2>/dev/null || true
+
 # Setup Vyoma network bridge (for VM networking)
 if ! ip link show vyoma0 >/dev/null 2>&1; then
     ip link add vyoma0 type bridge
@@ -288,6 +306,12 @@ if [ -z "$2" ]; then
 else
     # Upgrade - restart only if already running (won't disrupt if stopped)
     systemctl try-restart vyomad.service 2>/dev/null || true
+fi
+
+if systemctl is-active --quiet vyomad.service; then
+    echo "vyomad daemon is running."
+else
+    echo "Notice: vyomad.service is not active yet. Check 'systemctl status vyomad' or verify /dev/kvm permissions."
 fi
 
 echo "Vyoma v${VERSION} installed successfully!"

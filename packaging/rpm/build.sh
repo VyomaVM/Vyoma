@@ -11,6 +11,16 @@ else
     exit 1
 fi
 
+# Setup local environment if user has tools in ~/.local or nvm
+[ -d "$HOME/.nvm/versions/node/v24.21.0/bin" ] && export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"
+[ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH"
+[ -d "$HOME/.local/lib/pkgconfig" ] && export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+[ -d "$HOME/.local/lib" ] && export LD_LIBRARY_PATH="$HOME/.local/lib:${LD_LIBRARY_PATH:-}"
+[ -f "$HOME/.local/bin/protoc" ] && export PROTOC="$HOME/.local/bin/protoc"
+[ -d "$HOME/.local/include" ] && export PROTOC_INCLUDE="$HOME/.local/include"
+[ -d "/usr/lib/gcc/x86_64-linux-gnu/15/include" ] && export BINDGEN_EXTRA_CLANG_ARGS="-I/usr/lib/gcc/x86_64-linux-gnu/15/include"
+[ -d "$HOME/.local/lib" ] && export RUSTFLAGS="-L $HOME/.local/lib ${RUSTFLAGS:-}"
+
 VERSION="3.0.0"
 WORK_DIR="target/rpm"
 SOURCES_DIR="${WORK_DIR}/SOURCES/vyoma-${VERSION}"
@@ -326,6 +336,10 @@ mkdir -p /var/lib/vyoma/.vyoma/cni 2>/dev/null || true
 rm -rf /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
 ln -sf /usr/lib/vyoma/cni/bin /var/lib/vyoma/.vyoma/cni/bin 2>/dev/null || true
 
+# Ensure /var/lib/vyoma is owned by vyoma:vyoma so daemon can write state and CNI configs
+chown -R vyoma:vyoma /var/lib/vyoma 2>/dev/null || true
+chmod 0755 /var/lib/vyoma 2>/dev/null || true
+
 # Setup Vyoma network bridge (for VM networking)
 if ! ip link show vyoma0 >/dev/null 2>&1; then
     ip link add vyoma0 type bridge
@@ -343,6 +357,16 @@ if [ \$1 -eq 1 ]; then
 else
     systemctl try-restart vyomad.service 2>/dev/null || true
 fi
+
+if systemctl is-active --quiet vyomad.service; then
+    echo "vyomad daemon is running."
+else
+    echo "Notice: vyomad.service is not active yet. Check 'systemctl status vyomad' or verify /dev/kvm permissions."
+fi
+
+echo "Vyoma v${VERSION} installed successfully!"
+echo "Open http://localhost:8080 for the dashboard"
+echo "Run 'vyoma run nginx:latest' to start your first VM"
 
 %postun
 # \$1 = 0: package removal, \$1 = 1: upgrade
