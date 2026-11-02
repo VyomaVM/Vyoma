@@ -19,7 +19,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev build-essential rpm libssl-dev protobuf-compiler libdevmapper-dev
+          sudo apt-get install -y dpkg-dev build-essential rpm libssl-dev protobuf-compiler libdevmapper-dev virtiofsd
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -48,28 +48,23 @@ jobs:
             npm run build
             cd ..
 
-      - name: Install Packaging Tools
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deb,cargo-generate-rpm
-
       - name: Build Debian Package
-        run: make deb
+        run: ./packaging/deb/build.sh
 
       - name: Build RPM Package
-        run: make rpm
+        run: ./packaging/rpm/build.sh
 
       - name: Verify Packages
         run: |
-          echo "DEB files:" && ls -la target/debian/*.deb || echo "No DEB files found"
-          echo "RPM files:" && ls -la crates/vyomad/target/generate-rpm/*.rpm || echo "No RPM files found"
+          echo "DEB files:" && ls -la dist/*.deb || echo "No DEB files found"
+          echo "RPM files:" && ls -la dist/*.rpm || echo "No RPM files found"
 
       - name: Create Release & Upload Assets
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            target/debian/*.deb
-            crates/vyomad/target/generate-rpm/*.rpm
+            dist/*.deb
+            dist/*.rpm
           generate_release_notes: true
           draft: false
           prerelease: false

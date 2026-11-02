@@ -46,8 +46,8 @@ bundle_deps:
 
 deb: all
 	@echo "Building Debian package..."
-	cargo deb -p vyomad --no-build
+	./packaging/deb/build.sh
 
 rpm: all
 	@echo "Building RPM package..."
-	cd crates/vyomad && cargo generate-rpm
+	./packaging/rpm/build.sh

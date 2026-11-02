@@ -119,7 +119,22 @@ if command -v npm &> /dev/null; then
 else
     echo "Skipping UI build (npm not found)"
 fi
-if [ ! -f "virtiofsd" ]; then
+# Check if virtiofsd is already available on system or project bin
+if [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
+    cp bin/virtiofsd virtiofsd_bin
+    chmod +x virtiofsd_bin
+elif [ -f "/usr/libexec/virtiofsd" ]; then
+    cp /usr/libexec/virtiofsd virtiofsd_bin
+    chmod +x virtiofsd_bin
+elif [ -f "/usr/lib/qemu/virtiofsd" ]; then
+    cp /usr/lib/qemu/virtiofsd virtiofsd_bin
+    chmod +x virtiofsd_bin
+elif [ -f "/usr/bin/virtiofsd" ]; then
+    cp /usr/bin/virtiofsd virtiofsd_bin
+    chmod +x virtiofsd_bin
+fi
+
+if [ ! -f "virtiofsd_bin" ]; then
     # Primary: GitLab releases
     PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-x86_64-musl.zip"
     if wget -q -O virtiofsd.zip "$PRIMARY_URL" 2>/dev/null; then
@@ -151,19 +166,26 @@ fi
 if [ -f "virtiofsd_bin" ]; then
     echo "virtiofsd fetched successfully"
     cp virtiofsd_bin "${VIRTIOFSD_DIR}/virtiofsd"
-    chmod +x "${VIRTIOFSD_DIR}/virtiofsd"
+    chmod 755 "${VIRTIOFSD_DIR}/virtiofsd"
+    ln -sf /usr/lib/vyoma/virtiofsd "${WORK_DIR}/usr/bin/virtiofsd"
+    echo "virtiofsd linked to /usr/bin"
 else
     echo "Warning: virtiofsd not available - volume mounts may not work"
 fi
 
 # 4. Copy Assets
 cp target/release/vyomad "${WORK_DIR}/usr/bin/"
+chmod 755 "${WORK_DIR}/usr/bin/vyomad"
 cp target/release/vyoma "${WORK_DIR}/usr/bin/"
+chmod 755 "${WORK_DIR}/usr/bin/vyoma"
 if [ -f "bin/vyoma-cri" ]; then
     cp bin/vyoma-cri "${WORK_DIR}/usr/bin/vyoma-cri"
+    chmod 755 "${WORK_DIR}/usr/bin/vyoma-cri"
 fi
 cp target/x86_64-unknown-linux-musl/release/vyoma-agent-vm "${WORK_DIR}/usr/bin/vyoma-agent-vm"
+chmod 755 "${WORK_DIR}/usr/bin/vyoma-agent-vm"
 cp cloud-hypervisor "${WORK_DIR}/usr/bin/cloud-hypervisor"
+chmod 755 "${WORK_DIR}/usr/bin/cloud-hypervisor"
 cp packaging/systemd/vyomad.service "${WORK_DIR}/etc/systemd/system/"
 cp packaging/systemd/vyoma-net.service "${WORK_DIR}/etc/systemd/system/"
 
@@ -187,23 +209,6 @@ echo "Kernel binary bundled"
 # Link Cloud Hypervisor to where the daemon expects it without duplicating binary size
 ln -sf /usr/bin/cloud-hypervisor "${WORK_DIR}/var/lib/vyoma/bin/cloud-hypervisor"
 echo "Cloud Hypervisor linked to /var/lib/vyoma/bin"
-
-# Bundle virtiofsd (from system or project bin)
-if [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
-    cp bin/virtiofsd "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
-    chmod +x "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
-    echo "virtiofsd bundled from project bin"
-elif [ -f "/usr/libexec/virtiofsd" ]; then
-    cp /usr/libexec/virtiofsd "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
-    chmod +x "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
-    echo "virtiofsd bundled from system"
-elif [ -f "/usr/bin/virtiofsd" ]; then
-    cp /usr/bin/virtiofsd "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
-    chmod +x "${WORK_DIR}/usr/lib/vyoma/virtiofsd"
-    echo "virtiofsd bundled from /usr/bin"
-else
-    echo "Warning: virtiofsd not found - volume mounts may not work"
-fi
 
 # 5. Create Control File
 cat <<EOF > "${WORK_DIR}/DEBIAN/control"
