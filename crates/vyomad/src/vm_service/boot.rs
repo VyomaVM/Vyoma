@@ -26,6 +26,9 @@ pub async fn start_vm(
 
     let mut vmm = VmmManager::new(&ch_config.socket_path);
 
+    if !std::path::Path::new("/dev/kvm").exists() {
+        anyhow::bail!("KVM device /dev/kvm not found. Hardware virtualization (KVM) is required to run MicroVMs. If running inside VirtualBox or another hypervisor, please enable nested virtualization in your hypervisor settings.");
+    }
     if !std::path::Path::new(&ch_config.kernel_path).exists() {
         anyhow::bail!("Kernel binary not found at {}", ch_config.kernel_path);
     }

@@ -39,9 +39,9 @@ fn check_dependencies(data_dir: &str) -> Result<(), String> {
         }
     }
 
-    // Check for KVM device
+    // Check for KVM device (warn if missing so daemon can still start and serve API/dashboard)
     if !std::path::Path::new("/dev/kvm").exists() {
-        missing.push("/dev/kvm (KVM kernel module required for virtualization)");
+        tracing::warn!("WARNING: /dev/kvm not found! Hardware virtualization is unavailable. VM execution will require KVM (enable nested virtualization if in a VM).");
     }
 
     // Check for bundled cloud-hypervisor
