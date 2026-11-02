@@ -46,4 +46,6 @@ bin/
 __pycache__/
 *.py[cod]
 *$py.class
-*.egg-info/kernel.bzimage
+*.egg-info/
+kernel.bzimage
+*.deb
