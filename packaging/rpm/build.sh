@@ -201,7 +201,10 @@ tar -czf "vyoma-${VERSION}.tar.gz" "vyoma-${VERSION}"
 cd ../../..
 
 # 5. Create SPEC File
-SPEC_CONTENT="Name:       vyoma
+SPEC_FILE="${WORK_DIR}/SPECS/vyoma.spec"
+
+cat << EOF > "${SPEC_FILE}"
+Name:       vyoma
 Version:    ${VERSION}
 Release:    1%{?dist}
 Summary:    MicroVM Ecosystem
@@ -236,28 +239,32 @@ cp -r cni %{buildroot}/usr/lib/vyoma/cni
 # Install kernel binary
 mkdir -p %{buildroot}/var/lib/vyoma/bin
 install -m 644 bin/vmlinux %{buildroot}/var/lib/vyoma/bin/vmlinux
-ln -sf /usr/bin/cloud-hypervisor %{buildroot}/var/lib/vyoma/bin/cloud-hypervisor"
+ln -sf /usr/bin/cloud-hypervisor %{buildroot}/var/lib/vyoma/bin/cloud-hypervisor
+EOF
 
 if [ -f "${SOURCES_DIR}/vyoma-cri" ]; then
-    SPEC_CONTENT="$SPEC_CONTENT
+    cat << 'EOF' >> "${SPEC_FILE}"
 
-install -m 755 vyoma-cri %{buildroot}/usr/bin/vyoma-cri"
+install -m 755 vyoma-cri %{buildroot}/usr/bin/vyoma-cri
+EOF
 fi
 
 if [ "$UI_AVAILABLE" = true ]; then
-    SPEC_CONTENT="$SPEC_CONTENT
+    cat << 'EOF' >> "${SPEC_FILE}"
 
 # Install UI
-cp -r ui %{buildroot}/usr/lib/vyoma/ui"
+cp -r ui %{buildroot}/usr/lib/vyoma/ui
+EOF
 fi
 
 if [ -f "${SOURCES_DIR}/virtiofsd" ]; then
-    SPEC_CONTENT="$SPEC_CONTENT
+    cat << 'EOF' >> "${SPEC_FILE}"
 install -m 755 virtiofsd %{buildroot}/usr/lib/vyoma/virtiofsd
-ln -sf /usr/lib/vyoma/virtiofsd %{buildroot}/usr/bin/virtiofsd"
+ln -sf /usr/lib/vyoma/virtiofsd %{buildroot}/usr/bin/virtiofsd
+EOF
 fi
 
-SPEC_CONTENT="$SPEC_CONTENT
+cat << 'EOF' >> "${SPEC_FILE}"
 
 %files
 /usr/bin/vyomad
@@ -268,30 +275,30 @@ SPEC_CONTENT="$SPEC_CONTENT
 /etc/systemd/system/vyoma-net.service
 /usr/lib/vyoma/cni
 /var/lib/vyoma/bin/vmlinux
-/var/lib/vyoma/bin/cloud-hypervisor"
+/var/lib/vyoma/bin/cloud-hypervisor
+EOF
 
 if [ -f "${SOURCES_DIR}/vyoma-cri" ]; then
-    SPEC_CONTENT="$SPEC_CONTENT
-/usr/bin/vyoma-cri"
+    echo "/usr/bin/vyoma-cri" >> "${SPEC_FILE}"
 fi
 
 if [ "$UI_AVAILABLE" = true ]; then
-    SPEC_CONTENT="$SPEC_CONTENT
-/usr/lib/vyoma/ui"
+    echo "/usr/lib/vyoma/ui" >> "${SPEC_FILE}"
 fi
 
 if [ -f "${SOURCES_DIR}/virtiofsd" ]; then
-    SPEC_CONTENT="$SPEC_CONTENT
+    cat << 'EOF' >> "${SPEC_FILE}"
 /usr/lib/vyoma/virtiofsd
-/usr/bin/virtiofsd"
+/usr/bin/virtiofsd
+EOF
 fi
 
-SPEC_CONTENT="$SPEC_CONTENT
+cat << 'EOF' >> "${SPEC_FILE}"
 
 %preun
 # Stop service before package removal (not on upgrade)
-# \$1 = 0 means removal, \$1 = 1 means upgrade
-if [ \$1 -eq 0 ]; then
+# $1 = 0 means removal, $1 = 1 means upgrade
+if [ $1 -eq 0 ]; then
     systemctl stop vyomad.service 2>/dev/null || true
     systemctl disable vyomad.service 2>/dev/null || true
 fi
@@ -351,8 +358,8 @@ fi
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable vyomad.service 2>/dev/null || true
 
-# Only start on fresh install (\$1 = 1); on upgrade (\$1 = 2), try-restart if running
-if [ \$1 -eq 1 ]; then
+# Only start on fresh install ($1 = 1); on upgrade ($1 = 2), try-restart if running
+if [ $1 -eq 1 ]; then
     systemctl start vyomad.service 2>/dev/null || true
 else
     systemctl try-restart vyomad.service 2>/dev/null || true
@@ -363,7 +370,9 @@ if systemctl is-active --quiet vyomad.service; then
 else
     echo "Notice: vyomad.service is not active yet. Check 'systemctl status vyomad' or verify /dev/kvm permissions."
 fi
+EOF
 
+cat << EOF >> "${SPEC_FILE}"
 echo "Vyoma v${VERSION} installed successfully!"
 echo "Open http://localhost:8080 for the dashboard"
 echo "Run 'vyoma run nginx:latest' to start your first VM"
@@ -386,9 +395,7 @@ fi
 - Bundle CNI plugins for networking
 - Bundle UI in package
 - Fix /run/vyoma directory permissions (0775)
-"
-
-echo "$SPEC_CONTENT" > "${WORK_DIR}/SPECS/vyoma.spec"
+EOF
 
 # 6. Build RPM
 rpmbuild --define "_topdir $(pwd)/${WORK_DIR}" -bb "${WORK_DIR}/SPECS/vyoma.spec"
