@@ -64,6 +64,9 @@ rustup target add x86_64-unknown-linux-musl
 cp target/release/vyomad "${SOURCES_DIR}/"
 cp target/release/vyoma "${SOURCES_DIR}/"
 cp target/x86_64-unknown-linux-musl/release/vyoma-agent-vm "${SOURCES_DIR}/vyoma-agent-vm"
+if [ -f "bin/vyoma-cri" ]; then
+    cp bin/vyoma-cri "${SOURCES_DIR}/vyoma-cri"
+fi
 
 # 3. Fetch Dependencies with checksum verification
 echo "Fetching dependencies..."
@@ -137,6 +140,20 @@ echo "Kernel binary bundled"
 # Bundle virtiofsd
 VIRTIOFSD_VERSION="1.11.1"
 echo "Fetching virtiofsd..."
+if [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
+    cp bin/virtiofsd virtiofsd_bin
+    chmod +x virtiofsd_bin
+elif [ -f "/usr/libexec/virtiofsd" ]; then
+    cp /usr/libexec/virtiofsd virtiofsd_bin
+    chmod +x virtiofsd_bin
+elif [ -f "/usr/lib/qemu/virtiofsd" ]; then
+    cp /usr/lib/qemu/virtiofsd virtiofsd_bin
+    chmod +x virtiofsd_bin
+elif [ -f "/usr/bin/virtiofsd" ]; then
+    cp /usr/bin/virtiofsd virtiofsd_bin
+    chmod +x virtiofsd_bin
+fi
+
 if [ ! -f "virtiofsd_bin" ]; then
     PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-x86_64-musl.zip"
     if wget -q -O virtiofsd.zip "$PRIMARY_URL" 2>/dev/null; then
@@ -162,20 +179,8 @@ fi
 
 if [ -f "virtiofsd_bin" ]; then
     cp virtiofsd_bin "${SOURCES_DIR}/virtiofsd"
-    chmod +x "${SOURCES_DIR}/virtiofsd"
+    chmod 755 "${SOURCES_DIR}/virtiofsd"
     echo "virtiofsd fetched successfully"
-elif [ -f "bin/virtiofsd" ] && [ ! -L "bin/virtiofsd" ]; then
-    cp bin/virtiofsd "${SOURCES_DIR}/virtiofsd"
-    chmod +x "${SOURCES_DIR}/virtiofsd"
-    echo "virtiofsd bundled from project bin"
-elif [ -f "/usr/libexec/virtiofsd" ]; then
-    cp /usr/libexec/virtiofsd "${SOURCES_DIR}/virtiofsd"
-    chmod +x "${SOURCES_DIR}/virtiofsd"
-    echo "virtiofsd bundled from system"
-elif [ -f "/usr/bin/virtiofsd" ]; then
-    cp /usr/bin/virtiofsd "${SOURCES_DIR}/virtiofsd"
-    chmod +x "${SOURCES_DIR}/virtiofsd"
-    echo "virtiofsd bundled from /usr/bin"
 else
     echo "Warning: virtiofsd not found - volume mounts may not work"
 fi
@@ -223,6 +228,11 @@ mkdir -p %{buildroot}/var/lib/vyoma/bin
 install -m 644 bin/vmlinux %{buildroot}/var/lib/vyoma/bin/vmlinux
 ln -sf /usr/bin/cloud-hypervisor %{buildroot}/var/lib/vyoma/bin/cloud-hypervisor"
 
+if [ -f "${SOURCES_DIR}/vyoma-cri" ]; then
+    SPEC_CONTENT="$SPEC_CONTENT
+
+install -m 755 vyoma-cri %{buildroot}/usr/bin/vyoma-cri"
+fi
 
 if [ "$UI_AVAILABLE" = true ]; then
     SPEC_CONTENT="$SPEC_CONTENT
@@ -233,7 +243,8 @@ fi
 
 if [ -f "${SOURCES_DIR}/virtiofsd" ]; then
     SPEC_CONTENT="$SPEC_CONTENT
-install -m 755 virtiofsd %{buildroot}/usr/lib/vyoma/virtiofsd"
+install -m 755 virtiofsd %{buildroot}/usr/lib/vyoma/virtiofsd
+ln -sf /usr/lib/vyoma/virtiofsd %{buildroot}/usr/bin/virtiofsd"
 fi
 
 SPEC_CONTENT="$SPEC_CONTENT
@@ -249,6 +260,11 @@ SPEC_CONTENT="$SPEC_CONTENT
 /var/lib/vyoma/bin/vmlinux
 /var/lib/vyoma/bin/cloud-hypervisor"
 
+if [ -f "${SOURCES_DIR}/vyoma-cri" ]; then
+    SPEC_CONTENT="$SPEC_CONTENT
+/usr/bin/vyoma-cri"
+fi
+
 if [ "$UI_AVAILABLE" = true ]; then
     SPEC_CONTENT="$SPEC_CONTENT
 /usr/lib/vyoma/ui"
@@ -256,7 +272,8 @@ fi
 
 if [ -f "${SOURCES_DIR}/virtiofsd" ]; then
     SPEC_CONTENT="$SPEC_CONTENT
-/usr/lib/vyoma/virtiofsd"
+/usr/lib/vyoma/virtiofsd
+/usr/bin/virtiofsd"
 fi
 
 SPEC_CONTENT="$SPEC_CONTENT
