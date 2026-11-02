@@ -499,6 +499,7 @@ async fn main() -> Result<()> {
             handle_simple_response(resp, &daemon_url).await?;
         }
         Commands::Stop { id } => {
+            let id = id.trim_matches(|c: char| c == ',' || c == ';' || c.is_whitespace());
             info!("Requesting to stop VM: {}", id);
             let resp = client
                 .post(format!("{}/stop/{}", daemon_url, id))
@@ -507,6 +508,7 @@ async fn main() -> Result<()> {
             handle_simple_response(resp, &daemon_url).await?;
         }
         Commands::Pause { id } => {
+            let id = id.trim_matches(|c: char| c == ',' || c == ';' || c.is_whitespace());
             info!("Requesting to pause VM: {}", id);
             let resp = client
                 .post(format!("{}/pause/{}", daemon_url, id))
@@ -728,6 +730,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Inspect { id } => {
+            let id = id.trim_matches(|c: char| c == ',' || c == ';' || c.is_whitespace());
             let resp = client.get(format!("{}/vms/{}", daemon_url, id)).send().await;
 
             match resp {
