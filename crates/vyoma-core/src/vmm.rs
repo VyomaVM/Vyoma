@@ -12,7 +12,7 @@ use reqwest::{Client, Method};
 
 use crate::ch_types::{
     VmConfig, CpusConfig, MemoryConfig, PayloadConfig, DiskConfig, NetConfig, FsConfig,
-    ConsoleConfig, VmSnapshotConfig, VmRestoreConfig, SendMigrationData, ReceiveMigrationData,
+    VmSnapshotConfig, VmRestoreConfig, SendMigrationData, ReceiveMigrationData,
     VmResizeDiskConfig,
 };
 
@@ -167,61 +167,17 @@ impl VmmManager {
 
         if let Some(event_path) = self.event_monitor_path.clone() {
             let tx_event = self.event_sender.clone();
-            thread::spawn(move || {
-                let path = Path::new(&event_path);
-                for _ in 0..30 {
-                    if path.exists() {
-                        break;
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    stream_vmm_events(&event_path, tx_event).await;
+                });
+            } else {
+                thread::spawn(move || {
+                    if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                        rt.block_on(stream_vmm_events(&event_path, tx_event));
                     }
-                    thread::sleep(Duration::from_millis(100));
-                }
-
-                if let Ok(file) = std::fs::File::open(path) {
-                    use std::io::Read;
-                    let mut reader = BufReader::new(file);
-                    let mut buffer = String::new();
-                    let mut brace_depth = 0i32;
-                    let mut in_string = false;
-                    let mut escape = false;
-
-                    loop {
-                        let mut byte_buf = [0u8; 1];
-                        match reader.read(&mut byte_buf) {
-                            Ok(0) => {
-                                thread::sleep(Duration::from_millis(100));
-                            }
-                            Ok(_) => {
-                                let c = byte_buf[0] as char;
-                                buffer.push(c);
-                                if escape {
-                                    escape = false;
-                                } else if c == '\\' {
-                                    escape = true;
-                                } else if c == '"' {
-                                    in_string = !in_string;
-                                } else if !in_string {
-                                    if c == '{' {
-                                        brace_depth += 1;
-                                    } else if c == '}' {
-                                        brace_depth -= 1;
-                                        if brace_depth == 0 {
-                                            let trimmed = buffer.trim();
-                                            if !trimmed.is_empty() {
-                                                if let Ok(evt) = serde_json::from_str::<VmmEvent>(trimmed) {
-                                                    tracing::info!("[CH EVENT] {}: {}", evt.source, evt.event);
-                                                    let _ = tx_event.send(evt);
-                                                }
-                                            }
-                                            buffer.clear();
-                                        }
-                                    }
-                                }
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                }
-            });
+                });
+            }
         }
 
         self.process = Some(child);
@@ -439,6 +395,7 @@ impl VmmManager {
             destination_url: target_url.to_string(),
             local: None,
             bandwidth: bandwidth_mbps,
+            ..Default::default()
         };
         self.api_request("/api/v1/vm.send-migration", Method::PUT, Some(&config)).await
     }
@@ -446,6 +403,7 @@ impl VmmManager {
     pub async fn receive_migration(&self, receiver_url: &str) -> Result<()> {
         let config = ReceiveMigrationData {
             receiver_url: receiver_url.to_string(),
+            tls_dir: None,
         };
         self.api_request("/api/v1/vm.receive-migration", Method::PUT, Some(&config)).await
     }
@@ -512,6 +470,91 @@ impl VmmManager {
     }
 }
 
+#[derive(Default)]
+struct JsonStreamParser {
+    buffer: String,
+    brace_depth: i32,
+    in_string: bool,
+    escape: bool,
+}
+
+impl JsonStreamParser {
+    fn feed(&mut self, chunk: &str) -> Vec<VmmEvent> {
+        let mut events = Vec::new();
+        for c in chunk.chars() {
+            if self.brace_depth == 0 && c.is_whitespace() {
+                continue;
+            }
+            self.buffer.push(c);
+            if self.escape {
+                self.escape = false;
+            } else if c == '\\' && self.in_string {
+                self.escape = true;
+            } else if c == '"' {
+                self.in_string = !self.in_string;
+            } else if !self.in_string {
+                if c == '{' {
+                    self.brace_depth += 1;
+                } else if c == '}' {
+                    self.brace_depth -= 1;
+                    if self.brace_depth == 0 {
+                        let trimmed = self.buffer.trim();
+                        if !trimmed.is_empty() {
+                            if let Ok(evt) = serde_json::from_str::<VmmEvent>(trimmed) {
+                                events.push(evt);
+                            }
+                        }
+                        self.buffer.clear();
+                    } else if self.brace_depth < 0 {
+                        self.brace_depth = 0;
+                        self.buffer.clear();
+                    }
+                }
+            }
+        }
+        events
+    }
+}
+
+async fn stream_vmm_events(event_path: &str, tx_event: broadcast::Sender<VmmEvent>) {
+    use tokio::io::AsyncReadExt;
+
+    let path = Path::new(event_path);
+    for _ in 0..60 {
+        if path.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let mut file = match tokio::fs::File::open(path).await {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+
+    let mut parser = JsonStreamParser::default();
+    let mut buf = [0u8; 4096];
+
+    loop {
+        match file.read(&mut buf).await {
+            Ok(0) => {
+                if tx_event.receiver_count() == 0 && !path.exists() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Ok(n) => {
+                let chunk = String::from_utf8_lossy(&buf[..n]);
+                for evt in parser.feed(&chunk) {
+                    tracing::info!("[CH EVENT] {}: {}", evt.source, evt.event);
+                    let _ = tx_event.send(evt);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+}
+
 impl Drop for VmmManager {
     fn drop(&mut self) {
         let _ = self.kill();
@@ -562,6 +605,21 @@ mod tests {
         let json = serde_json::to_string(&config).expect("serialization failed");
         assert!(json.contains("\"id\":\"drive-root\""));
         assert!(json.contains("\"desired_size\":10737418240"));
+    }
+
+    #[test]
+    fn test_json_stream_parser_multiline_and_chunked() {
+        let mut parser = JsonStreamParser::default();
+        let part1 = "{\n  \"source\": \"vmm\",\n  \"event\": \"star";
+        let part2 = "ted\"\n}\n{\n  \"source\": \"vm\",\n  \"event\": \"resumed\"\n}\n";
+
+        assert!(parser.feed(part1).is_empty());
+        let events = parser.feed(part2);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].source, "vmm");
+        assert_eq!(events[0].event, "started");
+        assert_eq!(events[1].source, "vm");
+        assert_eq!(events[1].event, "resumed");
     }
 }
 

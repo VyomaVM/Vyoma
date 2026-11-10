@@ -15,8 +15,6 @@ fi
 [ -d "$HOME/.nvm/versions/node/v24.21.0/bin" ] && export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"
 [ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH"
 [ -d "$HOME/.local/lib" ] && export LD_LIBRARY_PATH="$HOME/.local/lib:${LD_LIBRARY_PATH:-}"
-[ -f "$HOME/.local/bin/protoc" ] && export PROTOC="$HOME/.local/bin/protoc"
-[ -d "$HOME/.local/include" ] && export PROTOC_INCLUDE="$HOME/.local/include"
 
 VERSION="3.0.0"
 WORK_DIR="target/rpm"
@@ -210,6 +208,7 @@ URL:        https://github.com/Subeshrock/micro-vm-ecosystem
 Source0:    vyoma-${VERSION}.tar.gz
 Requires:   iptables
 Requires:   kmod
+Recommends: qemu-img
 
 %description
 Vyoma is a lightweight MicroVM runtime for running containers
