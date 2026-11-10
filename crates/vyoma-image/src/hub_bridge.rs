@@ -60,11 +60,12 @@ impl HubBridge {
             .or_else(|| suggested_profile.as_ref().map(|p| p.name.clone()));
 
         let converter = VmifConverter::new();
+        let target_arch = vyoma_core::oci::host_oci_arch();
         let mut vmif_image = converter.convert_directory_to_vmif(
             &staging_dir,
             &image_dir,
             image_ref,
-            "amd64",
+            target_arch,
             config,
             effective_kernel,
             None,

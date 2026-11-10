@@ -21,22 +21,25 @@ use vyoma_core::proxy::ProxyManager;
 
 use clap::Parser;
 
+fn has_iptables() -> bool {
+    let in_path = std::process::Command::new("which")
+        .arg("iptables")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    in_path
+        || std::path::Path::new("/sbin/iptables").exists()
+        || std::path::Path::new("/usr/sbin/iptables").exists()
+}
+
 fn check_dependencies(data_dir: &str) -> Result<(), String> {
     let mut missing = Vec::new();
 
-    // Check for iptables
-    if std::process::Command::new("which")
-        .arg("iptables")
-        .output()
-        .map(|o| !o.status.success())
-        .unwrap_or(true)
-    {
-        // Try alternative paths
-        if !std::path::Path::new("/sbin/iptables").exists()
-            && !std::path::Path::new("/usr/sbin/iptables").exists()
-        {
-            missing.push("iptables (required for NAT networking)");
-        }
+    // Check for iptables (warn only so rootless Vsock L4 port forwarding can run without iptables/root)
+    if !has_iptables() {
+        tracing::warn!(
+            "WARNING: iptables not found! Rootless Vsock L4 port forwarding remains available, while legacy bridge/NAT networking requires iptables."
+        );
     }
 
     // Check for KVM device (warn if missing so daemon can still start and serve API/dashboard)
@@ -612,4 +615,19 @@ async fn async_main(args: Args) {
     }
     
     let _ = std::fs::remove_file(&socket_path);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_dependencies_allows_rootless_startup_without_iptables() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::write(bin_dir.join("cloud-hypervisor"), b"").unwrap();
+
+        assert!(check_dependencies(dir.path().to_str().unwrap()).is_ok());
+    }
 }
