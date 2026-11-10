@@ -18,36 +18,31 @@ Micro-VMs boot from raw block devices, whereas container registries store images
 
 ---
 
-## 2. Instant Clones via Device Mapper
+## 2. Instant Clones via Native QCOW2 Overlays
 
-Copying a 2GB base image for every VM is too slow. Vyoma instead leverages the Linux Device Mapper (`dm-snapshot`):
+Copying a 2GB base image for every VM is too slow. Rather than kernel Device Mapper (`dm-snapshot`) and loop devices (`/dev/loopX`), Vyoma v3.0+ uses **Cloud Hypervisor v54.0 native QCOW2 copy-on-write overlays**:
 
 ```
 ┌──────────────────────────────────────┐
-│       Base Image (Read-Only)         │
-│   e.g., ~/.vyoma/images/alpine.ext4  │
-│        (Mounted on /dev/loop0)       │
+│    Base Image (Read-Only ext4/sqfs)  │
+│  ~/.vyoma/images/<img_hash>/rootfs.* │
 └──────────────────┬───────────────────┘
-                   │
-                   │ (Read requests)
+                   │ (backing_file)
                    ▼
-┌──────────────────────────────────────┐        ┌─────────────────────────────┐
-│       Device Mapper Virtual Disk     │        │      Sparse CoW Delta       │
-│           /dev/mapper/vyoma-vm-123   │◄───────┤ ~/.vyoma/vms/vm-123/disk.cow│
-│        (Passed to Cloud Hypervisor)  │ (Write)│      (Initial size: 0 KB)   │
-└──────────────────────────────────────┘        └─────────────────────────────┘
+┌──────────────────────────────────────┐
+│       Thin QCOW2 Overlay Disk        │
+│    ~/.vyoma/vms/vm-123/root.qcow2    │
+│    (Initial size: ~196 KB, Rootless) │
+└──────────────────────────────────────┘
 ```
 
 ### Mechanism:
-1. The read-only base image is attached to a loop device (`/dev/loopX`).
-2. A sparse Copy-on-Write (CoW) delta file (`disk.cow`) is allocated for the specific VM.
-3. A Device Mapper table is constructed mapping the base loop device and the CoW device:
-   ```bash
-   dmsetup create vyoma-<id> --table "0 <sectors> snapshot /dev/loopX disk.cow P 8"
-   ```
-4. The resulting virtual block device (`/dev/mapper/vyoma-<id>`) is handed to Cloud Hypervisor as the root drive (`/dev/vda`).
+1. The unpacked OCI filesystem is formatted once into a read-only base image (`rootfs.ext4` or `rootfs.sqfs`).
+2. When launching a VM, `vyomad` creates a thin QCOW2 overlay (`root.qcow2`) referencing the base image as its backing file.
+3. Cloud Hypervisor attaches `root.qcow2` with `"image_type": "Qcow2"` and `"backing_files": true`, avoiding kernel loop devices, `dmsetup`, and `CAP_SYS_ADMIN`.
+4. Deleting a VM simply removes `root.qcow2`, leaving zero orphaned kernel block devices.
 
-**Result**: VM creation takes <10ms, and disk usage per VM starts at just a few kilobytes.
+See [QCOW2 Storage Engine Architecture](qcow2-storage-engine.md) for full details.
 
 ---
 

@@ -65,6 +65,6 @@ Vyoma v3.0.0 transitions the storage subsystem to **native QCOW2 copy-on-write o
 
 ---
 
-## 3. Resilience & Fallback
+## 3. Clean Userspace Lifecycle
 
-If `qemu-img` or userspace QCOW2 creation encounters an unexpected failure, `vyomad` automatically falls back to privileged Device Mapper snapshotting to ensure backward compatibility.
+Device Mapper (`dm-snapshot`) and loop devices (`/dev/loopX`) have been completely removed from `vyoma-storage` and `vyomad`. All VM provisioning, branching, and cleanup operate purely in userspace via QCOW2 overlays without requiring `CAP_SYS_ADMIN` or `/dev/mapper/control`.
