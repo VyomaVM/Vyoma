@@ -1,18 +1,14 @@
 //! vyoma-storage - Storage layer for Vyoma VM management
-//! 
-//! Provides Rust-native bindings for device mapper and loop device operations.
+//!
+//! Provides native QCOW2 backing-file storage, ext4 provisioning, and snapshot tree tracking.
 
 pub mod error;
-pub mod dm;
-pub mod cow;
 pub mod ext4;
 pub mod snapshot_tree;
 pub mod manager;
 pub mod qcow2;
 
 pub use error::{StorageError, Result};
-pub use dm::{DmManager, DmDevice};
-pub use cow::{LoopManager, LoopDevice};
 pub use ext4::Ext4Manager;
 pub use snapshot_tree::{SnapshotTree, SnapshotNode, SnapshotDiff, DiffEntry};
 pub use manager::StorageManager;

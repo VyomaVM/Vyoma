@@ -2,35 +2,22 @@
 
 ## Common Issues
 
-### 1. "Ghost Disks" / Leaked Loop Devices
+### 1. Lingering VMs / Runtime State Cleanup
 **Symptoms:**
-- After stopping `vyoma` or restarting your computer, you see many 2GB "Removable Disks" or icons in your file manager.
-- Running `losetup -a` shows many `/dev/loopX` devices attached to `.vyoma/images/...` or `.vyoma/vms/...`.
-
-**Cause:**
-- The `vyomad` daemon was force-killed (SIGKILL) or crashed before it could run its cleanup logic.
-- As a result, the loopback devices used to mount the VM's hard drives were not detached.
+- Orphaned `cloud-hypervisor` or `virtiofsd` processes remain after an unclean host shutdown or `SIGKILL`.
 
 **Resolution:**
-We provide a utility script to clean up these leaked resources.
-Run:
+Run the included cleanup utility:
 ```bash
-sudo ./cleanup_resources.sh
+sudo ./scripts/cleanup-all.sh
 ```
-This will:
-1. Kill any lingering Firecracker/VirtioFS processes.
-2. Remove Device Mapper snapshots.
-3. Detach all Vyoma-related loop devices.
-4. Clean up network namespaces and TAP interfaces.
+This cleans up lingering VMM/VirtioFS processes, any stale TAP/netns interfaces, and temporary VM state.
 
-### 2. Sudo Password Issues
+### 2. Permission Issues (`/dev/kvm` or Daemon Socket)
 **Symptoms:**
-- `vyomad` fails to start or commands fail with permission errors.
-**Cause:**
-- Vyoma currently requires root privileges for KVM, Networking, and Storage management.
+- `vyomad` logs `/dev/kvm` warnings or `vyoma run` reports `/dev/kvm not found` or permission denied.
+
 **Resolution:**
-- Ensure you run `vyomad` with `sudo`.
-- **Rootless Mode (v0.3+):** You can run `vyomad` as a standard user.
-  - Requires `slirp4netns` and `debugfs` (e2fsprogs) installed.
-  - Sudo is NOT required for basic runtime and image pulling.
-  - Note: Rootless mode uses User Networking (slirp), so VMs are not directly addressable from the host. Use port forwarding.
+- **Rootless Mode (v3.0+):** `vyomad` runs rootless using **QCOW2 overlays** and **Vsock L4 port forwarding** — `sudo`, `dmsetup`, `slirp4netns`, and `iptables` are **not** required for container port publishing (`-p 8080:80`).
+- Ensure your user (and the `vyoma` service user) is in the `kvm` group (`sudo usermod -aG kvm $USER`) and `/dev/kvm` has `0660` permissions.
+- If running inside a VM (e.g., VirtualBox/VMware/WSL2), enable **nested virtualization**.

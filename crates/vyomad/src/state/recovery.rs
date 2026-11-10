@@ -145,7 +145,6 @@ let state_file = vm_dir.join("state.json");
 
     pub async fn cleanup_orphaned_resources(vm_dir: &Path) -> Result<()> {
         use vyoma_core::network::NetworkManager;
-        use vyoma_core::storage::StorageManager;
         use vyoma_core::cgroups::CgroupManager;
 
         info!("Cleaning up orphaned resources in {:?}", vm_dir);
@@ -164,16 +163,8 @@ let state_file = vm_dir.join("state.json");
             }
         }
 
-        if !state.dm_name.is_empty() {
-            if let Err(e) = StorageManager::remove_dm_device(&state.dm_name) {
-                warn!("Failed to remove DM {}: {}", state.dm_name, e);
-            }
-        }
-
-        for dev in &state.loop_devices {
-            if let Err(e) = StorageManager::detach_loop_device(dev) {
-                warn!("Failed to detach loop {}: {}", dev, e);
-            }
+        if !state.cow_file_path.is_empty() && std::path::Path::new(&state.cow_file_path).exists() {
+            let _ = std::fs::remove_file(&state.cow_file_path);
         }
 
         if let Some(ref cgroup_path) = state.cgroup_path {

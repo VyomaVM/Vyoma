@@ -17,22 +17,16 @@ use crate::Instruction;
 use crate::{BuildResult, BuildError, Vyomafile};
 
 struct BuildResourceGuard {
-    loop_devices: Vec<vyoma_storage::cow::LoopDevice>,
-    dm_name: Option<String>,
     cgroup_vm_id: Option<String>,
     temp_dir: Option<TempDir>,
 }
 
 impl BuildResourceGuard {
     fn new(
-        loop_devices: Vec<vyoma_storage::cow::LoopDevice>,
-        dm_name: Option<String>,
         cgroup_vm_id: Option<String>,
         temp_dir: Option<TempDir>,
     ) -> Self {
         Self {
-            loop_devices,
-            dm_name,
             cgroup_vm_id,
             temp_dir,
         }
@@ -42,37 +36,6 @@ impl BuildResourceGuard {
 impl Drop for BuildResourceGuard {
     fn drop(&mut self) {
         info!("BuildResourceGuard: cleaning up build resources");
-
-        let loop_mgr = match vyoma_storage::cow::LoopManager::new() {
-            Ok(mgr) => mgr,
-            Err(e) => {
-                warn!("BuildResourceGuard: failed to create loop manager: {}", e);
-                return;
-            }
-        };
-
-        for device in self.loop_devices.drain(..) {
-            if let Err(e) = loop_mgr.detach(&device) {
-                warn!("BuildResourceGuard: failed to detach loop device {}: {}", device.path.display(), e);
-            } else {
-                info!("BuildResourceGuard: detached loop device {}", device.path.display());
-            }
-        }
-
-        if let Some(ref dm_name) = self.dm_name {
-            let dm_mgr = match vyoma_storage::dm::DmManager::new() {
-                Ok(mgr) => mgr,
-                Err(e) => {
-                    warn!("BuildResourceGuard: failed to create DM manager: {}", e);
-                    return;
-                }
-            };
-            if let Err(e) = dm_mgr.remove_snapshot(dm_name) {
-                warn!("BuildResourceGuard: failed to remove DM snapshot {}: {}", dm_name, e);
-            } else {
-                info!("BuildResourceGuard: removed DM snapshot {}", dm_name);
-            }
-        }
 
         if let Some(ref cgroup_vm_id) = self.cgroup_vm_id {
             let cgroup_mgr = CgroupManager::new();
@@ -427,33 +390,25 @@ impl BuildRunner {
             self.create_cached_ext4(base_squashfs, &cache_key).await?
         };
 
-        let cow_path = build_dir.join("cow.img");
-        let dm_name = format!("vyoma-build-{}", std::process::id());
+        let build_disk = build_dir.join("build.ext4");
         let new_layer_path = build_dir.join("layer.sqfs");
         let cgroup_vm_id = format!("vyoma-build-{}", std::process::id());
 
         info!("Using ext4 base: {:?}", ext4_path);
 
-        vyoma_storage::cow::LoopManager::create_cow_file(&cow_path, 1024)
-            .map_err(|e| BuildError::ExecutionError(format!("Failed to create COW file: {}", e)))?;
-
-        let loop_mgr = vyoma_storage::cow::LoopManager::new()
-            .map_err(|e| BuildError::ExecutionError(format!("Failed to create loop manager: {}", e)))?;
-        let base_loop = loop_mgr.attach(&ext4_path)
-            .map_err(|e| BuildError::ExecutionError(format!("Failed to attach base ext4: {}", e)))?;
-        let cow_loop = loop_mgr.attach(&cow_path)
-            .map_err(|e| BuildError::ExecutionError(format!("Failed to attach COW: {}", e)))?;
-
-        info!("Creating device mapper snapshot");
-        let dm_mgr = vyoma_storage::dm::DmManager::new()
-            .map_err(|e| BuildError::ExecutionError(format!("Failed to create DM manager: {}", e)))?;
-        let dm_dev = dm_mgr.create_snapshot(
-            &dm_name,
-            base_loop.path(),
-            cow_loop.path(),
-        ).map_err(|e| BuildError::ExecutionError(format!("Failed to create DM snapshot: {}", e)))?;
-
-        let loop_devices = vec![base_loop, cow_loop];
+        // Clone cached ext4 rootfs (uses reflink CoW when filesystem supports it, zero DM/loop needed)
+        let cp_out = Command::new("cp")
+            .args(["--reflink=auto"])
+            .arg(&ext4_path)
+            .arg(&build_disk)
+            .output();
+        match cp_out {
+            Ok(out) if out.status.success() => {}
+            _ => {
+                std::fs::copy(&ext4_path, &build_disk)
+                    .map_err(|e| BuildError::ExecutionError(format!("Failed to copy build ext4 disk: {}", e)))?;
+            }
+        }
 
         let cgroup_id = if self.cgroups.is_some() {
             Some(cgroup_vm_id.as_str())
@@ -461,7 +416,7 @@ impl BuildRunner {
             None
         };
 
-        let vm_result = self.run_command_in_ch(&dm_dev.path().to_path_buf(), command, build_dir, cgroup_id).await;
+        let vm_result = self.run_command_in_ch(&build_disk, command, build_dir, cgroup_id).await;
 
         let cgroup_id_to_store = if self.cgroups.is_some() {
             Some(cgroup_vm_id.clone())
@@ -470,22 +425,19 @@ impl BuildRunner {
         };
 
         let guard = BuildResourceGuard::new(
-            loop_devices,
-            Some(dm_name.clone()),
             cgroup_id_to_store,
             None,
         );
 
         let res = match vm_result {
             Ok((0, _)) => {
-                info!("Creating new squashfs layer from DM device");
-                let dm_device_path = PathBuf::from(format!("/dev/mapper/{}", dm_name));
-                if dm_device_path.exists() {
-                    self.ext4_to_squashfs(&dm_device_path, &new_layer_path).await?;
+                info!("Creating new squashfs layer from build ext4 disk");
+                if build_disk.exists() {
+                    self.ext4_to_squashfs(&build_disk, &new_layer_path).await?;
                     Ok(new_layer_path)
                 } else {
                     Err(BuildError::ExecutionError(
-                        "DM device not found for layer creation".to_string()
+                        "Build ext4 disk not found for layer creation".to_string()
                     ))
                 }
             }
@@ -495,11 +447,11 @@ impl BuildRunner {
             Err(e) => Err(e),
         };
 
-        // Explicitly drop guard here to clean up loops/dm before returning
+        // Explicitly drop guard here to clean up cgroups before returning
         drop(guard);
-        
-        let _ = std::fs::remove_file(&cow_path);
-        
+
+        let _ = std::fs::remove_file(&build_disk);
+
         res
     }
     
@@ -561,49 +513,36 @@ impl BuildRunner {
     }
     
     async fn ext4_to_squashfs(&self, ext4: &Path, squashfs: &Path) -> Result<(), BuildError> {
-        let mount_dir = tempfile::tempdir()
-            .map_err(|e| BuildError::ExecutionError(format!("Failed to create mount dir: {}", e)))?;
-        
-        let ext4_c = std::ffi::CString::new(ext4.to_string_lossy().as_bytes())
-            .map_err(|e| BuildError::ExecutionError(format!("CString error: {}", e)))?;
-        let mount_dir_c = std::ffi::CString::new(mount_dir.path().to_string_lossy().as_bytes())
-            .map_err(|e| BuildError::ExecutionError(format!("CString error: {}", e)))?;
-        let fstype_c = std::ffi::CString::new("ext4").unwrap();
-        
-        let res = unsafe {
-            libc::mount(
-                ext4_c.as_ptr(),
-                mount_dir_c.as_ptr(),
-                fstype_c.as_ptr(),
-                0,
-                std::ptr::null(),
-            )
-        };
-        if res != 0 {
-            return Err(BuildError::ExecutionError(format!("mount syscall failed: {}", std::io::Error::last_os_error())));
+        let extract_dir = tempfile::tempdir()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to create extract dir: {}", e)))?;
+
+        // Extract ext4 rootfs without requiring root privileges via debugfs rdump
+        let rdump_cmd = format!("rdump / {}", extract_dir.path().to_string_lossy());
+        let debugfs_out = Command::new("debugfs")
+            .args(["-R", &rdump_cmd])
+            .arg(ext4)
+            .output()
+            .map_err(|e| BuildError::ExecutionError(format!("Failed to execute debugfs: {}", e)))?;
+
+        if !debugfs_out.status.success() {
+            let stderr = String::from_utf8_lossy(&debugfs_out.stderr);
+            return Err(BuildError::ExecutionError(format!("debugfs rdump failed: {}", stderr)));
         }
-        
+
         let output = Command::new("mksquashfs")
-            .arg(mount_dir.path())
+            .arg(extract_dir.path())
             .arg(squashfs)
             .arg("-comp")
             .arg("zstd")
             .arg("-quiet")
             .output()
             .map_err(|e| BuildError::ExecutionError(format!("Failed to execute mksquashfs: {}", e)))?;
-        
-        let res_umount = unsafe {
-            libc::umount(mount_dir_c.as_ptr())
-        };
-        if res_umount != 0 {
-            tracing::warn!("umount syscall failed: {}", std::io::Error::last_os_error());
-        }
-        
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(BuildError::ExecutionError(format!("mksquashfs failed: {}", stderr)));
         }
-        
+
         Ok(())
     }
     

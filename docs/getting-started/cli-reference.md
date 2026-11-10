@@ -42,7 +42,7 @@ Perform a full reboot of the VM.
 List all active and monitored VMs with IP address and uptime.
 
 ### `vyoma rm <ID>`
-Remove VM, freeing Device Mapper snapshot, CoW sparse disk, and network interfaces.
+Remove VM, freeing its QCOW2 overlay disk and any attached network interfaces.
 
 ### `vyoma logs [-f] <ID>`
 Stream console and serial logs from the VM. Use `-f` to follow stream.

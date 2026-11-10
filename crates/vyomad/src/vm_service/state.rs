@@ -297,7 +297,7 @@ pub async fn commit_vm(
 ) -> Result<String> {
     info!("VmService: Committing VM {} to image {}", vm_id, new_image_name);
 
-    let dm_name = {
+    let (disk_path, base_image_path) = {
         let vm_arc = {
             let vms = state.vms.lock().await;
             vms.get(vm_id).cloned()
@@ -305,22 +305,29 @@ pub async fn commit_vm(
 
         if let Some(vm_mutex) = vm_arc {
             let vm = vm_mutex.lock().await;
-            vm.dm_name.clone()
+            (vm.cow_file_path.clone(), vm.base_image_path.clone())
         } else {
             anyhow::bail!("VM {} not found or not running", vm_id)
         }
     };
 
-    let src_device = PathBuf::from(format!("/dev/mapper/{}", dm_name));
-    
-    let data_dir = PathBuf::from(&state.data_dir);
-    let images_dir = data_dir.join(".vyoma").join("images").join(new_image_name);
-    
-    std::fs::create_dir_all(&images_dir).context("Failed to create images dir")?;
-    let dst_file = images_dir.join("root.ext4");
+    let src_disk = if !disk_path.is_empty() && std::path::Path::new(&disk_path).exists() {
+        PathBuf::from(&disk_path)
+    } else if !base_image_path.is_empty() && std::path::Path::new(&base_image_path).exists() {
+        PathBuf::from(&base_image_path)
+    } else {
+        anyhow::bail!("No disk image found for VM {}", vm_id)
+    };
 
-    commit_snapshot_native(&src_device, &dst_file)
-        .context("Failed to commit snapshot")?;
+    let data_dir = PathBuf::from(&state.data_dir);
+    let safe_image_name = new_image_name.replace('/', "_").replace(':', "_");
+    let images_dir = data_dir.join(".vyoma").join("images").join(safe_image_name);
+
+    std::fs::create_dir_all(&images_dir).context("Failed to create images dir")?;
+    let dst_file = images_dir.join("rootfs.ext4");
+
+    commit_disk_image(&src_disk, &dst_file)
+        .context("Failed to commit VM disk")?;
 
     let config = OciImageConfig::default();
     let config_path = images_dir.join("vyoma-config.json");
@@ -333,18 +340,37 @@ pub async fn commit_vm(
     Ok(format!("VM {} committed to image {}", vm_id, new_image_name))
 }
 
-fn commit_snapshot_native(src_device: &std::path::Path, dst_file: &std::path::Path) -> Result<()> {
-    info!("Committing snapshot from {:?} to {:?}", src_device, dst_file);
-    
-    let mut src = std::fs::File::open(src_device)
-        .with_context(|| format!("Failed to open source device {:?}", src_device))?;
+fn commit_disk_image(src_disk: &std::path::Path, dst_file: &std::path::Path) -> Result<()> {
+    info!("Committing disk from {:?} to {:?}", src_disk, dst_file);
+
+    if src_disk.extension().and_then(|e| e.to_str()) == Some("qcow2") {
+        let convert_out = std::process::Command::new("qemu-img")
+            .args(["convert", "-f", "qcow2", "-O", "raw"])
+            .arg(src_disk)
+            .arg(dst_file)
+            .output();
+        if let Ok(out) = convert_out {
+            if out.status.success() {
+                info!("Flattened QCOW2 image via qemu-img convert");
+                return Ok(());
+            }
+        }
+        // Fallback: preserve QCOW2 disk directly if qemu-img is not present
+        let qcow2_dst = dst_file.with_extension("qcow2");
+        std::fs::copy(src_disk, &qcow2_dst)
+            .with_context(|| format!("Failed to copy QCOW2 disk {:?} to {:?}", src_disk, qcow2_dst))?;
+        return Ok(());
+    }
+
+    let mut src = std::fs::File::open(src_disk)
+        .with_context(|| format!("Failed to open source disk {:?}", src_disk))?;
     let mut dst = std::fs::File::create(dst_file)
         .with_context(|| format!("Failed to create destination file {:?}", dst_file))?;
-    
+
     std::io::copy(&mut src, &mut dst)
-        .context("Failed to copy device contents")?;
-    
-    info!("Snapshot committed successfully: {} bytes", dst.metadata()?.len());
+        .context("Failed to copy disk contents")?;
+
+    info!("Disk committed successfully: {} bytes", dst.metadata()?.len());
     Ok(())
 }
 
@@ -379,7 +405,7 @@ assert_eq!(result.id, "snap-123");
 
     #[test]
     fn test_commit_result_message() {
-        let result = commit_snapshot_native;
+        let result = commit_disk_image;
         let _ = std::mem::size_of_val(&result);
     }
 }

@@ -53,7 +53,6 @@ pub fn drop_privileges() -> Result<()> {
     info!("Resolved vyoma user: uid={}, gid={}", vyoma_uid, vyoma_gid);
 
     let allowed_caps: CapsHashSet = [
-        Capability::CAP_SYS_ADMIN,
         Capability::CAP_NET_ADMIN,
         Capability::CAP_NET_RAW,
         Capability::CAP_SETUID,
@@ -68,7 +67,7 @@ pub fn drop_privileges() -> Result<()> {
         }
     }
 
-    // Note: Preserving supplementary groups (kvm, disk) for access to /dev/kvm and /dev/mapper/control
+    // Note: Preserving supplementary group (kvm) for access to /dev/kvm
     info!("Initializing supplementary groups for vyoma...");
     unsafe {
         let username_c = std::ffi::CString::new(TARGET_USER).unwrap();

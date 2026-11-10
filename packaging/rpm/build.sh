@@ -14,12 +14,9 @@ fi
 # Setup local environment if user has tools in ~/.local or nvm
 [ -d "$HOME/.nvm/versions/node/v24.21.0/bin" ] && export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"
 [ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH"
-[ -d "$HOME/.local/lib/pkgconfig" ] && export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 [ -d "$HOME/.local/lib" ] && export LD_LIBRARY_PATH="$HOME/.local/lib:${LD_LIBRARY_PATH:-}"
 [ -f "$HOME/.local/bin/protoc" ] && export PROTOC="$HOME/.local/bin/protoc"
 [ -d "$HOME/.local/include" ] && export PROTOC_INCLUDE="$HOME/.local/include"
-[ -d "/usr/lib/gcc/x86_64-linux-gnu/15/include" ] && export BINDGEN_EXTRA_CLANG_ARGS="-I/usr/lib/gcc/x86_64-linux-gnu/15/include"
-[ -d "$HOME/.local/lib" ] && export RUSTFLAGS="-L $HOME/.local/lib ${RUSTFLAGS:-}"
 
 VERSION="3.0.0"
 WORK_DIR="target/rpm"
@@ -309,29 +306,21 @@ if ! getent passwd vyoma > /dev/null 2>&1; then
     useradd -r -s /sbin/nologin -c 'Vyoma daemon' -d /var/lib/vyoma vyoma 2>/dev/null || true
 fi
 
-# Add vyoma daemon user to kvm and disk groups (for /dev/kvm and /dev/mapper/control access)
+# Add vyoma daemon user to kvm group (for /dev/kvm access)
 if getent group kvm > /dev/null 2>&1; then
     usermod -aG kvm vyoma 2>/dev/null || true
 fi
-if getent group disk > /dev/null 2>&1; then
-    usermod -aG disk vyoma 2>/dev/null || true
-fi
 
-# Add installing user to vyoma, kvm, disk groups
+# Add installing user to vyoma and kvm groups
 if [ -n "$SUDO_USER" ]; then
     usermod -aG vyoma "$SUDO_USER" 2>/dev/null || true
     usermod -aG kvm "$SUDO_USER" 2>/dev/null || true
-    usermod -aG disk "$SUDO_USER" 2>/dev/null || true
-    printf 'Added %s to vyoma, kvm, disk groups. Log out and back in to use CLI.\n' "$SUDO_USER"
+    printf 'Added %s to vyoma and kvm groups. Log out and back in to use CLI.\n' "$SUDO_USER"
 fi
 
 # Fix /dev/kvm permissions
 chmod 0660 /dev/kvm 2>/dev/null || true
 chown root:kvm /dev/kvm 2>/dev/null || true
-
-# Fix /dev/mapper/control permissions (for device mapper/DM)
-chmod 0660 /dev/mapper/control 2>/dev/null || true
-chown root:disk /dev/mapper/control 2>/dev/null || true
 
 # Create runtime directory - owned by root:vyoma, group writable (0775)
 mkdir -p /run/vyoma
