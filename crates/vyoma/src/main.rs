@@ -14,6 +14,9 @@ use tar::Archive; // Removed Builder since we will use tar::Builder inline
 use tracing::{error, info, warn};
 
 mod context;
+mod machine;
+mod paths;
+mod remote;
 
 use vyoma_api::PortMapping;
 use vyoma_api::VolumeMount;
@@ -336,6 +339,121 @@ enum Commands {
         #[command(subcommand)]
         command: ContextCommands,
     },
+    /// Manage local developer Linux VM backends (Windows WSL2, macOS M1/M2/M3+ Lima)
+    Machine {
+        #[command(subcommand)]
+        command: MachineCommands,
+    },
+    /// Connect Windows/macOS CLI to remote Linux KVM daemons directly or over SSH tunnels
+    Remote {
+        #[command(subcommand)]
+        command: RemoteCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum RemoteCommands {
+    /// Verify and save a direct remote http(s):// connection to a Linux KVM daemon
+    Connect {
+        /// Profile/context name (e.g. prod-kvm)
+        name: String,
+        /// Remote daemon host URL (e.g. http://192.168.1.50:8080 or https://vyoma.example.com)
+        #[arg(long)]
+        host: String,
+        /// Optional Bearer API token matching remote `vyomad --api-token`
+        #[arg(long)]
+        api_token: Option<String>,
+        /// Skip live /health & /ps reachability check before saving context
+        #[arg(long, default_value_t = false)]
+        no_verify: bool,
+        /// Do not immediately switch active context to this remote
+        #[arg(long, default_value_t = false)]
+        no_use: bool,
+    },
+    /// Open an SSH port-forwarding tunnel (using native OpenSSH on Windows/macOS/Linux) and activate a local context
+    Tunnel {
+        /// Tunnel / context name
+        name: String,
+        /// SSH target (e.g. ubuntu@192.168.1.50)
+        #[arg(long)]
+        ssh: String,
+        /// SSH server port
+        #[arg(long, default_value_t = 22)]
+        ssh_port: u16,
+        /// Local forwarded TCP port on Windows/macOS client
+        #[arg(long, default_value_t = 18080)]
+        local_port: u16,
+        /// Remote `vyomad` HTTP port on Linux host
+        #[arg(long, default_value_t = 8080)]
+        remote_port: u16,
+        /// Optional SSH private key path (`-i`)
+        #[arg(long)]
+        identity: Option<String>,
+        /// Optional Bearer API token matching remote `vyomad --api-token`
+        #[arg(long)]
+        api_token: Option<String>,
+        /// Run tunnel in the background and track PID for `vyoma remote disconnect`
+        #[arg(short, long, default_value_t = false)]
+        background: bool,
+    },
+    /// Stop a background SSH tunnel
+    Disconnect {
+        /// Tunnel name
+        name: String,
+    },
+    /// Show configured remote contexts and tracked SSH tunnels
+    Status {
+        /// Actively probe HTTP/HTTPS remote endpoints for /health and authentication
+        #[arg(long, default_value_t = false)]
+        probe: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum MachineCommands {
+    /// Initialize a managed Linux VM or WSL2 environment for running vyomad locally
+    Init {
+        /// Machine name
+        #[arg(default_value = "vyoma")]
+        name: String,
+        /// vCPU count assigned to the managed Linux VM
+        #[arg(long, default_value_t = 2)]
+        cpus: u32,
+        /// Memory allocated to the managed Linux VM (e.g. 2G, 4G)
+        #[arg(long, default_value = "2G")]
+        memory: String,
+        /// Disk size allocated to the managed Linux VM (e.g. 20GiB)
+        #[arg(long, default_value = "20GiB")]
+        disk: String,
+        /// Override guest CPU architecture (x86_64 or aarch64)
+        #[arg(long)]
+        arch: Option<String>,
+        /// Driver: auto, wsl2, lima-vz (M3+/Intel), lima-tcg (M1/M2), or linux
+        #[arg(long, default_value = "auto")]
+        driver: String,
+        /// Print generated configuration without writing state or running commands
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
+    /// Start a managed Linux VM
+    Start {
+        #[arg(default_value = "vyoma")]
+        name: String,
+    },
+    /// Stop a managed Linux VM
+    Stop {
+        #[arg(default_value = "vyoma")]
+        name: String,
+    },
+    /// Show host platform capabilities and configured machines
+    Status {
+        name: Option<String>,
+    },
+    /// Remove a managed Linux VM and its configuration
+    Rm {
+        #[arg(default_value = "vyoma")]
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -438,9 +556,16 @@ async fn main() -> Result<()> {
 
     let ctx_store_path = context::default_contexts_path();
 
-    // Handle offline context management commands before opening daemon transport
-    if let Commands::Context { command } = cli.command {
-        return handle_context_command(&ctx_store_path, command);
+    // Handle offline context, machine, and remote management commands before opening daemon transport
+    match cli.command {
+        Commands::Context { command } => return handle_context_command(&ctx_store_path, command),
+        Commands::Machine { command } => {
+            return handle_machine_command(command, cli.http_port);
+        }
+        Commands::Remote { command } => {
+            return handle_remote_command(command).await;
+        }
+        _ => {}
     }
 
     let store = context::load_store(&ctx_store_path).unwrap_or_default();
@@ -478,6 +603,7 @@ async fn main() -> Result<()> {
 
     let client = context::build_http_client(&conn)?;
     let daemon_url = conn.target.base_url().to_string();
+    let path_style = paths::HostPathStyle::detect(conn.active_context.as_deref(), &daemon_url);
 
     match cli.command {
         Commands::Pull { image } => {
@@ -520,19 +646,19 @@ async fn main() -> Result<()> {
 
             let mut volume_mounts = Vec::new();
             for v in volumes {
-                let parts: Vec<&str> = v.split(':').collect();
-                if parts.len() != 2 {
-                    error!(
-                        "Invalid volume format: {}. Use host:vm (e.g., /foo:/bar)",
-                        v
-                    );
-                    return Ok(());
+                match paths::parse_volume_spec(&v) {
+                    Ok(mount) => {
+                        let translated = paths::translate_volume_mount(mount, path_style);
+                        if translated.host_path != v.split(':').next().unwrap_or("") {
+                            info!("Translated host volume path -> {}", translated.host_path);
+                        }
+                        volume_mounts.push(translated);
+                    }
+                    Err(e) => {
+                        error!("{}", e);
+                        return Ok(());
+                    }
                 }
-                volume_mounts.push(VolumeMount {
-                    host_path: parts[0].to_string(),
-                    vm_path: parts[1].to_string(),
-                    read_only: false, // Default RW for now
-                });
             }
 
             let mut label_map = HashMap::new();
@@ -1342,13 +1468,10 @@ async fn main() -> Result<()> {
                         let mut volume_mounts = Vec::new();
                         if let Some(vols) = service.volumes {
                             for v in vols {
-                                let parts: Vec<&str> = v.split(':').collect();
-                                if parts.len() == 2 {
-                                    volume_mounts.push(VolumeMount {
-                                        host_path: parts[0].to_string(),
-                                        vm_path: parts[1].to_string(),
-                                        read_only: false,
-                                    });
+                                match paths::parse_volume_spec(&v) {
+                                    Ok(mount) => volume_mounts
+                                        .push(paths::translate_volume_mount(mount, path_style)),
+                                    Err(e) => warn!("Skipping invalid compose volume '{}': {}", v, e),
                                 }
                             }
                         }
@@ -1548,7 +1671,7 @@ async fn main() -> Result<()> {
 
                     for i in 0..needed {
                         info!("Starting replica {}/{}", i + 1, needed);
-                        start_service_helper(&client, &daemon_url, &stack_name, &svc_name, service)
+                        start_service_helper(&client, &daemon_url, &stack_name, &svc_name, service, path_style)
                             .await?;
                     }
                 } else if running_count > target_count {
@@ -1664,10 +1787,72 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Context { .. } => unreachable!("handled prior to daemon connection"),
+        Commands::Context { .. } | Commands::Machine { .. } | Commands::Remote { .. } => {
+            unreachable!("handled prior to daemon connection")
+        }
     }
 
     Ok(())
+}
+
+async fn handle_remote_command(command: RemoteCommands) -> Result<()> {
+    match command {
+        RemoteCommands::Connect {
+            name,
+            host,
+            api_token,
+            no_verify,
+            no_use,
+        } => remote::connect_remote(name, host, api_token, !no_verify, !no_use).await,
+        RemoteCommands::Tunnel {
+            name,
+            ssh,
+            ssh_port,
+            local_port,
+            remote_port,
+            identity,
+            api_token,
+            background,
+        } => remote::start_ssh_tunnel(
+            name,
+            ssh,
+            ssh_port,
+            local_port,
+            remote_port,
+            identity,
+            api_token,
+            background,
+        ),
+        RemoteCommands::Disconnect { name } => remote::disconnect_tunnel(&name),
+        RemoteCommands::Status { probe } => remote::list_remote_status(probe).await,
+    }
+}
+
+fn handle_machine_command(command: MachineCommands, default_http_port: u16) -> Result<()> {
+    match command {
+        MachineCommands::Init {
+            name,
+            cpus,
+            memory,
+            disk,
+            arch,
+            driver,
+            dry_run,
+        } => machine::init_machine(
+            name,
+            cpus,
+            memory,
+            disk,
+            arch,
+            &driver,
+            default_http_port,
+            dry_run,
+        ),
+        MachineCommands::Start { name } => machine::start_machine(&name),
+        MachineCommands::Stop { name } => machine::stop_machine(&name),
+        MachineCommands::Status { name } => machine::status_machines(name.as_deref()),
+        MachineCommands::Rm { name } => machine::remove_machine(&name),
+    }
 }
 
 fn handle_context_command(store_path: &Path, command: ContextCommands) -> Result<()> {
@@ -1727,75 +1912,181 @@ async fn run_doctor() -> Result<()> {
     );
     println!();
 
-    let mut all_passed = true;
+    #[cfg(not(target_os = "linux"))]
+    {
+        return run_cross_platform_doctor();
+    }
 
-    // Helper to print status
-    let check = |name: &str, result: Result<bool>, required: bool| -> bool {
-        match result {
-            Ok(true) => {
-                println!("{} {}", "[OK]".green().bold(), name);
-                true
-            }
-            Ok(false) => {
-                if required {
-                    println!("{} {}", "[FAIL]".red().bold(), name);
-                    false
-                } else {
-                    println!("{} {}", "[WARN]".yellow().bold(), name);
-                    true // Warn doesn't fail overall
-                }
-            }
-            Err(e) => {
-                if required {
-                    println!("{} {} ({})", "[FAIL]".red().bold(), name, e);
-                    false
-                } else {
-                    println!("{} {} ({})", "[WARN]".yellow().bold(), name, e);
+    #[cfg(target_os = "linux")]
+    {
+        let mut all_passed = true;
+
+        // Helper to print status
+        let check = |name: &str, result: Result<bool>, required: bool| -> bool {
+            match result {
+                Ok(true) => {
+                    println!("{} {}", "[OK]".green().bold(), name);
                     true
                 }
+                Ok(false) => {
+                    if required {
+                        println!("{} {}", "[FAIL]".red().bold(), name);
+                        false
+                    } else {
+                        println!("{} {}", "[WARN]".yellow().bold(), name);
+                        true // Warn doesn't fail overall
+                    }
+                }
+                Err(e) => {
+                    if required {
+                        println!("{} {} ({})", "[FAIL]".red().bold(), name, e);
+                        false
+                    } else {
+                        println!("{} {} ({})", "[WARN]".yellow().bold(), name, e);
+                        true
+                    }
+                }
+            }
+        };
+
+        // 1. KVM Access (optional if QEMU TCG fallback is installed)
+        let has_kvm = check_kvm().unwrap_or(false);
+        let qemu_bin = if std::env::consts::ARCH == "aarch64" {
+            "qemu-system-aarch64"
+        } else {
+            "qemu-system-x86_64"
+        };
+        let has_qemu = command_exists(qemu_bin);
+        if !check("KVM Device Access (/dev/kvm)", Ok(has_kvm), !has_qemu) {
+            all_passed = false;
+        }
+        if !has_kvm && has_qemu {
+            println!(
+                "{} QEMU TCG fallback available ({}); VMs will run in software emulation mode.",
+                "[INFO]".cyan().bold(),
+                qemu_bin
+            );
+        }
+
+        // 2. Cgroups
+        if !check("Cgroups v2 (/sys/fs/cgroup)", check_cgroups(), true) {
+            all_passed = false;
+        }
+
+        // 3. Binaries
+        if !check("Cloud Hypervisor Binary", check_binary("cloud-hypervisor"), !has_qemu) {
+            all_passed = false;
+        }
+        if !check("Virtiofsd Binary", check_binary("virtiofsd"), true) {
+            all_passed = false;
+        }
+
+        // 4. Networking
+        if !check("Vyoma Bridge (vyoma0)", check_bridge("vyoma0"), false) {} // Warn only
+
+        // 5. Rootless Tools
+        if !check("debugfs (e2fsprogs)", check_binary("debugfs"), false) {} // Needed for rootless build
+
+        println!();
+        if all_passed {
+            println!("{}", "Your system is ready for Vyoma!".green().bold());
+        } else {
+            println!(
+                "{}",
+                "Some checks failed. Please review the errors above."
+                    .red()
+                    .bold()
+            );
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_cross_platform_doctor() -> Result<()> {
+    let profile = machine::detect_host_profile();
+    println!("Platform Profile: {:?}", profile);
+
+    match profile {
+        machine::HostPlatformProfile::WindowsWsl2 {
+            wsl_installed,
+            nested_virt_configured,
+        } => {
+            println!(
+                "{} WSL2 availability: {}",
+                if wsl_installed { "[OK]".green().bold() } else { "[FAIL]".red().bold() },
+                wsl_installed
+            );
+            println!(
+                "{} %USERPROFILE%\\.wslconfig nestedVirtualization=true: {}",
+                if nested_virt_configured { "[OK]".green().bold() } else { "[WARN]".yellow().bold() },
+                nested_virt_configured
+            );
+            if !nested_virt_configured {
+                println!("    Run `vyoma machine init` to enable nestedVirtualization=true for WSL2 KVM.");
             }
         }
-    };
-
-    // 1. KVM Access
-    if !check("KVM Device Access (/dev/kvm)", check_kvm(), true) {
-        all_passed = false;
+        machine::HostPlatformProfile::MacAppleSiliconM3Plus {
+            chip,
+            macos_version,
+            supports_nested_vz,
+            limactl_installed,
+        } => {
+            println!("{} Detected {} (macOS {})", "[OK]".green().bold(), chip, macos_version);
+            println!(
+                "{} Nested Virtualization.framework (M3+ KVM): {}",
+                if supports_nested_vz { "[OK]".green().bold() } else { "[WARN]".yellow().bold() },
+                supports_nested_vz
+            );
+            println!(
+                "{} Lima (`limactl`) installed: {}",
+                if limactl_installed { "[OK]".green().bold() } else { "[WARN]".yellow().bold() },
+                limactl_installed
+            );
+        }
+        machine::HostPlatformProfile::MacAppleSiliconM1M2 {
+            chip,
+            macos_version,
+            limactl_installed,
+        } => {
+            println!("{} Detected {} (macOS {})", "[INFO]".cyan().bold(), chip, macos_version);
+            println!(
+                "{} Apple M1/M2 lacks hardware nested KVM; local VMs use QEMU TCG inside Lima (`vyoma machine init --driver lima-tcg`), or connect remotely to Linux KVM (`vyoma remote`).",
+                "[INFO]".cyan().bold()
+            );
+            println!(
+                "{} Lima (`limactl`) installed: {}",
+                if limactl_installed { "[OK]".green().bold() } else { "[WARN]".yellow().bold() },
+                limactl_installed
+            );
+        }
+        machine::HostPlatformProfile::MacIntel {
+            chip,
+            macos_version,
+            limactl_installed,
+        } => {
+            println!("{} Detected Intel Mac ({}, macOS {})", "[OK]".green().bold(), chip, macos_version);
+            println!(
+                "{} Lima (`limactl`) installed: {}",
+                if limactl_installed { "[OK]".green().bold() } else { "[WARN]".yellow().bold() },
+                limactl_installed
+            );
+        }
+        machine::HostPlatformProfile::LinuxNative { .. } => {}
     }
 
-    // 2. Cgroups
-    if !check("Cgroups v2 (/sys/fs/cgroup)", check_cgroups(), true) {
-        all_passed = false;
-    }
-
-    // 3. Binaries
-    if !check("Cloud Hypervisor Binary", check_binary("cloud-hypervisor"), true) {
-        all_passed = false;
-    }
-    if !check("Virtiofsd Binary", check_binary("virtiofsd"), true) {
-        all_passed = false;
-    }
-
-    // 4. Networking
-    if !check("Vyoma Bridge (vyoma0)", check_bridge("vyoma0"), false) {} // Warn only
-
-    // 5. Rootless Tools
-    if !check("debugfs (e2fsprogs)", check_binary("debugfs"), false) {} // Needed for rootless build
-
-    println!();
-    if all_passed {
-        println!("{}", "Your system is ready for Vyoma!".green().bold());
-    } else {
-        println!(
-            "{}",
-            "Some checks failed. Please review the errors above."
-                .red()
-                .bold()
-        );
-    }
+    let ssh_ok = command_exists("ssh");
+    println!(
+        "{} OpenSSH client (`ssh` for `vyoma remote tunnel`): {}",
+        if ssh_ok { "[OK]".green().bold() } else { "[WARN]".yellow().bold() },
+        ssh_ok
+    );
 
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn check_kvm() -> Result<bool> {
     use std::fs::OpenOptions;
     let path = Path::new("/dev/kvm");
@@ -1807,6 +2098,7 @@ fn check_kvm() -> Result<bool> {
     Ok(true)
 }
 
+#[cfg(target_os = "linux")]
 fn check_cgroups() -> Result<bool> {
     // Just check if mount point exists and is cgroup2
     // Simple check: /sys/fs/cgroup/cgroup.controllers should exist
@@ -1814,6 +2106,7 @@ fn check_cgroups() -> Result<bool> {
     Ok(path.exists())
 }
 
+#[cfg(target_os = "linux")]
 fn check_binary(name: &str) -> Result<bool> {
     use std::path::Path;
 
@@ -1853,13 +2146,19 @@ fn check_binary(name: &str) -> Result<bool> {
 }
 
 fn command_exists(name: &str) -> bool {
-    std::process::Command::new("which")
+    let checker = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+    std::process::Command::new(checker)
         .arg(name)
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
 
+#[cfg(target_os = "linux")]
 fn check_bridge(bridge_name: &str) -> Result<bool> {
     let output = std::process::Command::new("ip")
         .arg("link")
@@ -2333,6 +2632,7 @@ async fn start_service_helper(
     stack_name: &str,
     name: &str,
     service: &vyoma_compose::Service,
+    path_style: paths::HostPathStyle,
 ) -> Result<()> {
     let image_target = if let Some(ref build) = service.build {
         let context = match build {
@@ -2368,13 +2668,9 @@ async fn start_service_helper(
     let mut volume_mounts = Vec::new();
     if let Some(ref vols) = service.volumes {
         for v in vols {
-            let parts: Vec<&str> = v.split(':').collect();
-            if parts.len() == 2 {
-                volume_mounts.push(VolumeMount {
-                    host_path: parts[0].to_string(),
-                    vm_path: parts[1].to_string(),
-                    read_only: false,
-                });
+            match paths::parse_volume_spec(v) {
+                Ok(mount) => volume_mounts.push(paths::translate_volume_mount(mount, path_style)),
+                Err(e) => warn!("Skipping invalid compose volume '{}': {}", v, e),
             }
         }
     }

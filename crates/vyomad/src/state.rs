@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use vyoma_core::api::{PortMapping, VolumeMount};
 use vyoma_core::cgroups::CgroupManager;
 use vyoma_core::fs::VirtioFsManager;
-use vyoma_core::vmm::VmmManager;
+use vyoma_core::vmm::{AnyVmm, HypervisorMode};
 use vyoma_core::vtpm::VtpmManager;
 use vyoma_core::policy::PolicyManager;
 
@@ -29,6 +29,7 @@ pub struct AppState {
     pub timemachine: Arc<tokio::sync::RwLock<crate::timemachine::TimeMachine>>,
     pub policy_manager: Arc<std::sync::Mutex<PolicyManager>>,
     pub api_token: Option<String>,
+    pub hypervisor_mode: HypervisorMode,
 }
 
 impl AppState {
@@ -49,6 +50,7 @@ impl AppState {
             timemachine: Arc::new(tokio::sync::RwLock::new(crate::timemachine::TimeMachine::new_test())),
             policy_manager: Arc::new(std::sync::Mutex::new(PolicyManager::new())),
             api_token: None,
+            hypervisor_mode: HypervisorMode::Auto,
         }
     }
 
@@ -65,6 +67,7 @@ impl AppState {
             timemachine: self.timemachine.clone(),
             policy_manager: self.policy_manager.clone(),
             api_token: None,
+            hypervisor_mode: self.hypervisor_mode,
         }
     }
 }
@@ -99,7 +102,7 @@ impl std::fmt::Display for VmStatus {
 }
 
 pub struct VmInstance {
-    pub vmm: VmmManager,
+    pub vmm: AnyVmm,
     pub id: String,
     pub status: VmStatus,
     pub attestation_status: Option<String>,

@@ -1,16 +1,93 @@
 use anyhow::{Context, Result};
 use tokio::task::JoinHandle;
-use tracing::{info, error};
+use tracing::{error, info, warn};
 use vyoma_core::fs::VirtioFsManager;
 use vyoma_core::proxy::ProxyManager;
-use vyoma_core::vmm::VmmManager;
+use vyoma_core::qemu::{qemu_binary_name_for_arch, QemuTcgManager};
+use vyoma_core::vmm::{AnyVmm, HypervisorMode, VmmBackend, VmmManager};
 use vyoma_core::vtpm::VtpmManager;
 
 use super::types::{ChConfig, VmNetworkConfig, VmRunRequest};
 use crate::state::AppState;
 
+/// Selected hypervisor binary for a single VM launch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedHypervisor {
+    CloudHypervisor(String),
+    QemuTcg(String),
+}
+
+/// Locate an installed `qemu-system-{x86_64|aarch64}` binary if present.
+pub fn find_qemu_binary() -> Option<String> {
+    let bin = qemu_binary_name_for_arch(std::env::consts::ARCH);
+    for dir in ["/usr/bin", "/usr/local/bin", "/bin"] {
+        let p = format!("{}/{}", dir, bin);
+        if std::path::Path::new(&p).exists() {
+            return Some(p);
+        }
+    }
+    if std::process::Command::new("which")
+        .arg(bin)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return Some(bin.to_string());
+    }
+    None
+}
+
+/// Decide between Cloud Hypervisor KVM and QEMU TCG software emulation.
+pub fn select_hypervisor_runtime(
+    mode: HypervisorMode,
+    has_kvm: bool,
+    ch_path: &str,
+    ch_exists: bool,
+    qemu_bin: Option<String>,
+) -> Result<ResolvedHypervisor> {
+    match mode {
+        HypervisorMode::CloudHypervisor => {
+            if !has_kvm {
+                anyhow::bail!(
+                    "KVM device /dev/kvm not found and hypervisor=cloud-hypervisor requires hardware KVM. Enable nested virtualization (WSL2/Lima) or use --hypervisor=auto / qemu-tcg."
+                );
+            }
+            if !ch_exists {
+                anyhow::bail!("Cloud Hypervisor binary not found at {}", ch_path);
+            }
+            Ok(ResolvedHypervisor::CloudHypervisor(ch_path.to_string()))
+        }
+        HypervisorMode::QemuTcg => match qemu_bin {
+            Some(q) => Ok(ResolvedHypervisor::QemuTcg(q)),
+            None => anyhow::bail!(
+                "QEMU TCG mode requested, but '{}' was not found in PATH",
+                qemu_binary_name_for_arch(std::env::consts::ARCH)
+            ),
+        },
+        HypervisorMode::Auto => {
+            if has_kvm && ch_exists {
+                Ok(ResolvedHypervisor::CloudHypervisor(ch_path.to_string()))
+            } else if let Some(q) = qemu_bin {
+                if !has_kvm {
+                    warn!("No /dev/kvm found; falling back to QEMU TCG software emulation ({})", q);
+                } else {
+                    warn!("Cloud Hypervisor not found at {}; falling back to QEMU TCG ({})", ch_path, q);
+                }
+                Ok(ResolvedHypervisor::QemuTcg(q))
+            } else if !has_kvm {
+                anyhow::bail!(
+                    "KVM device /dev/kvm not found and no QEMU TCG binary ('{}') available. Enable nested virtualization (WSL2 or Apple M3+ Lima), install qemu-system, or connect via `vyoma remote` to a Linux KVM host.",
+                    qemu_binary_name_for_arch(std::env::consts::ARCH)
+                );
+            } else {
+                anyhow::bail!("Cloud Hypervisor binary not found at {}", ch_path);
+            }
+        }
+    }
+}
+
 /// Determines whether TPM is needed based on policy and request.
-fn needs_tpm(state: &AppState, request: &VmRunRequest) -> bool {
+fn needs_tpm(state: &AppState, _request: &VmRunRequest) -> bool {
     let policy = state.policy_manager.lock().unwrap();
     policy.must_verify_on_boot()
 }
@@ -20,21 +97,21 @@ pub async fn start_vm(
     ch_config: &ChConfig,
     network_config: &VmNetworkConfig,
     request: &VmRunRequest,
-) -> Result<(VmmManager, Vec<JoinHandle<()>>, Vec<VirtioFsManager>, Option<VtpmManager>)> {
+) -> Result<(AnyVmm, Vec<JoinHandle<()>>, Vec<VirtioFsManager>, Option<VtpmManager>)> {
     let use_tpm = needs_tpm(state, request);
     let mut vtpm_manager: Option<VtpmManager> = None;
 
-    let mut vmm = VmmManager::new(&ch_config.socket_path);
-
-    if !std::path::Path::new("/dev/kvm").exists() {
-        anyhow::bail!("KVM device /dev/kvm not found. Hardware virtualization (KVM) is required to run MicroVMs. If running inside VirtualBox or another hypervisor, please enable nested virtualization in your hypervisor settings.");
-    }
     if !std::path::Path::new(&ch_config.kernel_path).exists() {
         anyhow::bail!("Kernel binary not found at {}", ch_config.kernel_path);
     }
-    if !std::path::Path::new(&ch_config.ch_path).exists() {
-        anyhow::bail!("Cloud Hypervisor binary not found at {}", ch_config.ch_path);
-    }
+
+    let selection = select_hypervisor_runtime(
+        state.hypervisor_mode,
+        std::path::Path::new("/dev/kvm").exists(),
+        &ch_config.ch_path,
+        std::path::Path::new(&ch_config.ch_path).exists(),
+        find_qemu_binary(),
+    )?;
 
     // Start vTPM if needed for measured boot attestation
     if use_tpm {
@@ -58,10 +135,22 @@ pub async fn start_vm(
         }
     }
 
-    info!("Spawning Cloud Hypervisor in Privileged Mode...");
-
-    vmm.start_daemon(&ch_config.ch_path, None, false)
-        .context("Failed to start Cloud Hypervisor")?;
+    let mut vmm: AnyVmm = match &selection {
+        ResolvedHypervisor::CloudHypervisor(ch_bin) => {
+            info!("Spawning Cloud Hypervisor in KVM mode...");
+            let mut ch = VmmManager::new(&ch_config.socket_path);
+            ch.start_daemon(ch_bin, None, false)
+                .context("Failed to start Cloud Hypervisor")?;
+            AnyVmm::CloudHypervisor(ch)
+        }
+        ResolvedHypervisor::QemuTcg(qemu_bin) => {
+            info!("Configuring QEMU TCG software emulation backend ({})...", qemu_bin);
+            let mut qemu = QemuTcgManager::new(&ch_config.socket_path);
+            qemu.start_daemon(qemu_bin, None, false)
+                .context("Failed to configure QEMU TCG")?;
+            AnyVmm::QemuTcg(qemu)
+        }
+    };
 
     vmm.set_boot_source(&ch_config.kernel_path, &ch_config.boot_args, ch_config.initramfs_path.as_deref()).await
         .context("Boot source")?;
@@ -122,8 +211,14 @@ pub async fn start_vm(
         .join("serial.log");
     vmm.enable_serial(&serial_path.to_string_lossy()).await?;
 
-    vmm.start_instance().await
-        .context("Start instance")?;
+    match &mut vmm {
+        AnyVmm::CloudHypervisor(ch) => {
+            ch.start_instance().await.context("Start instance")?;
+        }
+        AnyVmm::QemuTcg(qemu) => {
+            qemu.spawn_configured().context("Start QEMU TCG instance")?;
+        }
+    }
 
     let mut proxy_tasks = Vec::new();
     for mapping in &request.ports {
@@ -136,4 +231,50 @@ pub async fn start_vm(
     }
 
     Ok((vmm, proxy_tasks, fs_managers, vtpm_manager))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hypervisor_selection_matrix() {
+        // 1. Native KVM -> prefers Cloud Hypervisor
+        let res = select_hypervisor_runtime(
+            HypervisorMode::Auto,
+            true,
+            "/var/lib/vyoma/bin/cloud-hypervisor",
+            true,
+            Some("/usr/bin/qemu-system-aarch64".to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            res,
+            ResolvedHypervisor::CloudHypervisor("/var/lib/vyoma/bin/cloud-hypervisor".to_string())
+        );
+
+        // 2. Non-KVM (Apple M1/M2 Lima VM) -> falls back to QEMU TCG
+        let res = select_hypervisor_runtime(
+            HypervisorMode::Auto,
+            false,
+            "/var/lib/vyoma/bin/cloud-hypervisor",
+            true,
+            Some("/usr/bin/qemu-system-aarch64".to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            res,
+            ResolvedHypervisor::QemuTcg("/usr/bin/qemu-system-aarch64".to_string())
+        );
+
+        // 3. Explicit cloud-hypervisor fails loudly if /dev/kvm is absent
+        assert!(select_hypervisor_runtime(
+            HypervisorMode::CloudHypervisor,
+            false,
+            "/var/lib/vyoma/bin/cloud-hypervisor",
+            true,
+            Some("/usr/bin/qemu-system-x86_64".to_string()),
+        )
+        .is_err());
+    }
 }
