@@ -18,6 +18,8 @@ futures = "0.3"
 
 [build-dependencies]
 tonic-build = "0.11"
+prost-build = "0.12"
+protox = "0.6"
 
 [dev-dependencies]
 tokio-test = "0.4"
