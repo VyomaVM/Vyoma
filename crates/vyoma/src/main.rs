@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use tar::Archive; // Removed Builder since we will use tar::Builder inline
 use tracing::{error, info, warn};
 
+mod context;
+
 use vyoma_api::PortMapping;
 use vyoma_api::VolumeMount;
 use vyoma_compose::VyomaCompose;
@@ -49,11 +51,19 @@ fn resolve_socket_path(default_path: &str) -> String {
 #[command(about = "Vyoma: Docker for Micro-VMs", long_about = None)]
 #[command(version)]
 struct Cli {
-    /// Socket path to daemon (Unix Socket)
-    #[arg(short, long, global = true, default_value = "/run/vyoma/vyoma.sock")]
-    socket_path: String,
+    /// Socket path to local daemon (Unix Socket, default on Unix: /run/vyoma/vyoma.sock)
+    #[arg(short, long, global = true)]
+    socket_path: Option<String>,
 
-    /// HTTP port of daemon (for HTTP requests through Unix Socket)
+    /// Remote or local daemon URL (e.g. http://10.0.1.5:8080, https://vyoma.example.com, or unix:///run/vyoma/vyoma.sock) [env: VYOMA_HOST]
+    #[arg(short = 'H', long, global = true)]
+    host: Option<String>,
+
+    /// Bearer API token for remote/authenticated daemon access [env: VYOMA_API_TOKEN]
+    #[arg(long, global = true)]
+    api_token: Option<String>,
+
+    /// HTTP port of daemon (used for local HTTP/Unix-socket base URL)
     #[arg(long, global = true, default_value_t = 8080)]
     http_port: u16,
 
@@ -321,6 +331,41 @@ enum Commands {
         #[arg(long)]
         no_stream: bool,
     },
+    /// Manage CLI connection contexts (local or remote daemons)
+    Context {
+        #[command(subcommand)]
+        command: ContextCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ContextCommands {
+    /// Create or update a named daemon connection context
+    Create {
+        /// Context name (e.g. prod, wsl, dev-mac)
+        name: String,
+        /// Daemon host URL (e.g. http://192.168.1.50:8080, https://vyoma.internal, or unix:///run/vyoma/vyoma.sock)
+        #[arg(long)]
+        host: String,
+        /// Optional Bearer API token stored in the context
+        #[arg(long)]
+        api_token: Option<String>,
+        /// Immediately switch active context to this entry
+        #[arg(long, default_value_t = false)]
+        r#use: bool,
+    },
+    /// Switch the active CLI context
+    Use {
+        /// Context name
+        name: String,
+    },
+    /// List configured CLI contexts
+    Ls,
+    /// Remove a configured CLI context
+    Rm {
+        /// Context name
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -390,18 +435,49 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
     let cli = Cli::parse();
-    
-    // Resolve socket path with fallback to user-writable location
-    let socket_path = resolve_socket_path(&cli.socket_path);
-    info!("Using socket path: {}", socket_path);
-    
-    // Connect via Unix Socket
-    let client = Client::builder()
-        .unix_socket(socket_path.as_str())
-        .build()?;
-    
-    // Daemon URL for HTTP requests (goes through Unix Socket proxy)
-    let daemon_url = format!("http://127.0.0.1:{}", cli.http_port);
+
+    let ctx_store_path = context::default_contexts_path();
+
+    // Handle offline context management commands before opening daemon transport
+    if let Commands::Context { command } = cli.command {
+        return handle_context_command(&ctx_store_path, command);
+    }
+
+    let store = context::load_store(&ctx_store_path).unwrap_or_default();
+    let env_host = std::env::var("VYOMA_HOST").ok();
+    let env_token = std::env::var("VYOMA_API_TOKEN").ok();
+
+    let conn = context::resolve_connection(
+        cli.host.as_deref(),
+        env_host.as_deref(),
+        cli.api_token.as_deref(),
+        env_token.as_deref(),
+        cli.socket_path.as_deref(),
+        "/run/vyoma/vyoma.sock",
+        cli.http_port,
+        &store,
+        resolve_socket_path,
+    )?;
+
+    match &conn.target {
+        #[cfg(unix)]
+        context::TransportTarget::UnixSocket { socket_path, .. } => {
+            info!("Using Unix socket: {}", socket_path);
+        }
+        context::TransportTarget::Tcp { base_url } => {
+            info!(
+                "Using remote/TCP daemon: {}{}",
+                base_url,
+                conn.active_context
+                    .as_deref()
+                    .map(|c| format!(" (context: {})", c))
+                    .unwrap_or_default()
+            );
+        }
+    }
+
+    let client = context::build_http_client(&conn)?;
+    let daemon_url = conn.target.base_url().to_string();
 
     match cli.command {
         Commands::Pull { image } => {
@@ -846,7 +922,7 @@ async fn main() -> Result<()> {
         }
         Commands::Load { input } => {
             info!("Loading VM from {}", input);
-            import_vm(&input, &daemon_url).await?;
+            import_vm(&input, &client, &daemon_url).await?;
         }
         Commands::Teleport { id, target, to, bandwidth, progress } => {
             let destination = to.or(target).ok_or_else(|| {
@@ -1588,8 +1664,59 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        Commands::Context { .. } => unreachable!("handled prior to daemon connection"),
     }
 
+    Ok(())
+}
+
+fn handle_context_command(store_path: &Path, command: ContextCommands) -> Result<()> {
+    match command {
+        ContextCommands::Create {
+            name,
+            host,
+            api_token,
+            r#use,
+        } => {
+            let store = context::create_context(store_path, name.clone(), host.clone(), api_token, r#use)?;
+            println!(
+                "Context '{}' saved ({}){}",
+                name,
+                host,
+                if store.current_context.as_deref() == Some(name.as_str()) {
+                    " [active]"
+                } else {
+                    ""
+                }
+            );
+        }
+        ContextCommands::Use { name } => {
+            context::use_context(store_path, &name)?;
+            println!("Switched active Vyoma context to '{}'", name);
+        }
+        ContextCommands::Ls => {
+            let store = context::load_store(store_path)?;
+            if store.contexts.is_empty() {
+                println!(
+                    "No contexts configured. Create one with `vyoma context create <name> --host http://<ip>:8080`."
+                );
+                return Ok(());
+            }
+            println!("{:<20} {:<10} {}", "NAME", "ACTIVE", "HOST");
+            for ctx in &store.contexts {
+                let active = if store.current_context.as_deref() == Some(ctx.name.as_str()) {
+                    "*"
+                } else {
+                    ""
+                };
+                println!("{:<20} {:<10} {}", ctx.name, active, ctx.host);
+            }
+        }
+        ContextCommands::Rm { name } => {
+            context::remove_context(store_path, &name)?;
+            println!("Removed context '{}'", name);
+        }
+    }
     Ok(())
 }
 
@@ -2054,7 +2181,7 @@ fn export_vm(vm_id: &str, output_path: &str) -> Result<()> {
     Ok(())
 }
 
-async fn import_vm(input_path: &str, daemon_url: &str) -> Result<()> {
+async fn import_vm(input_path: &str, client: &Client, daemon_url: &str) -> Result<()> {
     // 1. Unpack to temp dir
     let file = File::open(input_path)?;
     let tar = GzDecoder::new(file);
@@ -2078,7 +2205,6 @@ async fn import_vm(input_path: &str, daemon_url: &str) -> Result<()> {
 
     // 3. Call Restore API
     // Need absolute paths for Daemon to access them (Daemon must be on same FS)
-    let client = Client::new();
     let payload = RestoreRequest {
         snapshot_path: snap_path.to_string_lossy().to_string(),
         mem_path: mem_path.to_string_lossy().to_string(),
