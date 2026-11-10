@@ -14,6 +14,7 @@ use tar::Archive; // Removed Builder since we will use tar::Builder inline
 use tracing::{error, info, warn};
 
 mod context;
+mod paths;
 
 use vyoma_api::PortMapping;
 use vyoma_api::VolumeMount;
@@ -478,6 +479,7 @@ async fn main() -> Result<()> {
 
     let client = context::build_http_client(&conn)?;
     let daemon_url = conn.target.base_url().to_string();
+    let path_style = paths::HostPathStyle::detect(conn.active_context.as_deref(), &daemon_url);
 
     match cli.command {
         Commands::Pull { image } => {
@@ -520,19 +522,19 @@ async fn main() -> Result<()> {
 
             let mut volume_mounts = Vec::new();
             for v in volumes {
-                let parts: Vec<&str> = v.split(':').collect();
-                if parts.len() != 2 {
-                    error!(
-                        "Invalid volume format: {}. Use host:vm (e.g., /foo:/bar)",
-                        v
-                    );
-                    return Ok(());
+                match paths::parse_volume_spec(&v) {
+                    Ok(mount) => {
+                        let translated = paths::translate_volume_mount(mount, path_style);
+                        if translated.host_path != v.split(':').next().unwrap_or("") {
+                            info!("Translated host volume path -> {}", translated.host_path);
+                        }
+                        volume_mounts.push(translated);
+                    }
+                    Err(e) => {
+                        error!("{}", e);
+                        return Ok(());
+                    }
                 }
-                volume_mounts.push(VolumeMount {
-                    host_path: parts[0].to_string(),
-                    vm_path: parts[1].to_string(),
-                    read_only: false, // Default RW for now
-                });
             }
 
             let mut label_map = HashMap::new();
@@ -1342,13 +1344,10 @@ async fn main() -> Result<()> {
                         let mut volume_mounts = Vec::new();
                         if let Some(vols) = service.volumes {
                             for v in vols {
-                                let parts: Vec<&str> = v.split(':').collect();
-                                if parts.len() == 2 {
-                                    volume_mounts.push(VolumeMount {
-                                        host_path: parts[0].to_string(),
-                                        vm_path: parts[1].to_string(),
-                                        read_only: false,
-                                    });
+                                match paths::parse_volume_spec(&v) {
+                                    Ok(mount) => volume_mounts
+                                        .push(paths::translate_volume_mount(mount, path_style)),
+                                    Err(e) => warn!("Skipping invalid compose volume '{}': {}", v, e),
                                 }
                             }
                         }
@@ -1548,7 +1547,7 @@ async fn main() -> Result<()> {
 
                     for i in 0..needed {
                         info!("Starting replica {}/{}", i + 1, needed);
-                        start_service_helper(&client, &daemon_url, &stack_name, &svc_name, service)
+                        start_service_helper(&client, &daemon_url, &stack_name, &svc_name, service, path_style)
                             .await?;
                     }
                 } else if running_count > target_count {
@@ -2333,6 +2332,7 @@ async fn start_service_helper(
     stack_name: &str,
     name: &str,
     service: &vyoma_compose::Service,
+    path_style: paths::HostPathStyle,
 ) -> Result<()> {
     let image_target = if let Some(ref build) = service.build {
         let context = match build {
@@ -2368,13 +2368,9 @@ async fn start_service_helper(
     let mut volume_mounts = Vec::new();
     if let Some(ref vols) = service.volumes {
         for v in vols {
-            let parts: Vec<&str> = v.split(':').collect();
-            if parts.len() == 2 {
-                volume_mounts.push(VolumeMount {
-                    host_path: parts[0].to_string(),
-                    vm_path: parts[1].to_string(),
-                    read_only: false,
-                });
+            match paths::parse_volume_spec(v) {
+                Ok(mount) => volume_mounts.push(paths::translate_volume_mount(mount, path_style)),
+                Err(e) => warn!("Skipping invalid compose volume '{}': {}", v, e),
             }
         }
     }
