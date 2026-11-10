@@ -13,9 +13,9 @@ use std::path::{Path, PathBuf};
 use tar::Archive; // Removed Builder since we will use tar::Builder inline
 use tracing::{error, info, warn};
 
+use vyoma_api::PortMapping;
+use vyoma_api::VolumeMount;
 use vyoma_compose::VyomaCompose;
-use vyoma_core::api::PortMapping;
-use vyoma_core::api::VolumeMount;
 use vyoma_image::signing::TrustPolicy;
 use vyoma_image::SignedManifest;
 
@@ -1532,7 +1532,7 @@ async fn main() -> Result<()> {
                 let resp = client.get(&url).send().await;
                 if let Ok(r) = resp {
                     if r.status().is_success() {
-                        if let Ok(stats) = r.json::<vyoma_core::api::VmStatsResponse>().await {
+                        if let Ok(stats) = r.json::<vyoma_api::VmStatsResponse>().await {
                             println!("{:<15} {:<10} {:<25} {:<10}", "CONTAINER", "CPU %", "MEM USAGE / LIMIT", "MEM %");
                             
                             let limit_str = if stats.memory_limit_bytes > 0 {
@@ -1560,7 +1560,7 @@ async fn main() -> Result<()> {
                     let resp = client.get(&url).send().await;
                     if let Ok(r) = resp {
                         if r.status().is_success() {
-                            if let Ok(stats) = r.json::<vyoma_core::api::VmStatsResponse>().await {
+                            if let Ok(stats) = r.json::<vyoma_api::VmStatsResponse>().await {
                                 // Clear screen and move to top
                                 print!("\x1B[2J\x1B[1;1H");
                                 println!("{:<15} {:<10} {:<25} {:<10}", "CONTAINER", "CPU %", "MEM USAGE / LIMIT", "MEM %");

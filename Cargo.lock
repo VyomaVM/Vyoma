@@ -3674,8 +3674,8 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "vyoma-api",
  "vyoma-compose",
- "vyoma-core",
  "vyoma-image",
 ]
 
@@ -3740,7 +3740,6 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_yaml",
- "vyoma-core",
  "vyoma-proto",
 ]
 
@@ -3749,6 +3748,7 @@ name = "vyoma-core"
 version = "3.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "cpio",
  "dirs 6.0.0",
