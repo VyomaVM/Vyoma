@@ -3674,8 +3674,8 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "vyoma-api",
  "vyoma-compose",
- "vyoma-core",
  "vyoma-image",
 ]
 
@@ -3705,6 +3705,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vyoma-api"
+version = "3.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "vyoma-build"
 version = "3.0.0"
 dependencies = [
@@ -3731,7 +3740,6 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_yaml",
- "vyoma-core",
  "vyoma-proto",
 ]
 
@@ -3740,6 +3748,7 @@ name = "vyoma-core"
 version = "3.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "cpio",
  "dirs 6.0.0",
@@ -3755,6 +3764,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "vyoma-api",
  "vyoma-net",
  "vyoma-storage",
 ]
@@ -3947,6 +3957,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "vyoma-agent-protocol",
+ "vyoma-api",
  "vyoma-build",
  "vyoma-core",
  "vyoma-image",

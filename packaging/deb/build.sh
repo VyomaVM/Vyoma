@@ -17,14 +17,35 @@ fi
 [ -d "$HOME/.local/lib" ] && export LD_LIBRARY_PATH="$HOME/.local/lib:${LD_LIBRARY_PATH:-}"
 
 VERSION="3.0.0"
-ARCH="amd64"
+HOST_ARCH="${TARGET_ARCH:-$(uname -m)}"
+case "$HOST_ARCH" in
+    x86_64|amd64)
+        ARCH="amd64"
+        RUST_MUSL_TARGET="x86_64-unknown-linux-musl"
+        CH_ASSET="cloud-hypervisor-static"
+        CNI_ARCH="amd64"
+        VIRTIOFSD_ARCH="x86_64"
+        KERNEL_ASSET="bzImage-x86_64"
+        CLOUD_HYPERVISOR_CHECKSUM="${VYOMA_CH_SHA256:-4f4f98a3d661a40f3e5272627cc895a1b2e525f2f6bedf5f895f9cd21ba5c65b}"
+        CNI_PLUGINS_CHECKSUM="${VYOMA_CNI_SHA256:-77baa2f669980a82255ffa2f2717de823992480271ee778aa51a9c60ae89ff9b}"
+        ;;
+    aarch64|arm64)
+        ARCH="arm64"
+        RUST_MUSL_TARGET="aarch64-unknown-linux-musl"
+        CH_ASSET="cloud-hypervisor-static-aarch64"
+        CNI_ARCH="arm64"
+        VIRTIOFSD_ARCH="aarch64"
+        KERNEL_ASSET="Image"
+        CLOUD_HYPERVISOR_CHECKSUM="${VYOMA_CH_SHA256:-}"
+        CNI_PLUGINS_CHECKSUM="${VYOMA_CNI_SHA256:-}"
+        ;;
+    *)
+        echo "Unsupported target architecture: ${HOST_ARCH}"
+        exit 1
+        ;;
+esac
 PKG_NAME="vyoma"
 WORK_DIR="target/debian/${PKG_NAME}_${VERSION}_${ARCH}"
-
-# Hardcoded checksums for binary verification
-# Computed from official release sources
-CLOUD_HYPERVISOR_CHECKSUM="4f4f98a3d661a40f3e5272627cc895a1b2e525f2f6bedf5f895f9cd21ba5c65b"
-CNI_PLUGINS_CHECKSUM="77baa2f669980a82255ffa2f2717de823992480271ee778aa51a9c60ae89ff9b"
 
 # Verify checksum of a downloaded file
 # Usage: verify_checksum <file> <expected_sha256>
@@ -34,6 +55,11 @@ verify_checksum() {
 
     if [ "$VYOMA_SKIP_CHECKSUM" = "1" ]; then
         echo "Skipping checksum verification (VYOMA_SKIP_CHECKSUM=1)"
+        return 0
+    fi
+
+    if [ -z "$expected" ]; then
+        echo "Notice: no pinned SHA-256 checksum for ${file} on ${ARCH}; skipping verification (set VYOMA_CH_SHA256 / VYOMA_CNI_SHA256 to enforce)"
         return 0
     fi
 
@@ -69,8 +95,8 @@ fi
 
 # 1. Build Binaries
 "$CARGO" build --release --bin vyomad --bin vyoma
-rustup target add x86_64-unknown-linux-musl
-"$CARGO" build --release --target x86_64-unknown-linux-musl --bin vyoma-agent-vm
+rustup target add "${RUST_MUSL_TARGET}"
+"$CARGO" build --release --target "${RUST_MUSL_TARGET}" --bin vyoma-agent-vm
 
 # 2. Prepare Directory Structure
 mkdir -p "${WORK_DIR}/usr/bin"
@@ -83,8 +109,8 @@ echo "Fetching dependencies..."
 
 # Fetch Cloud Hypervisor with checksum verification
 if [ ! -f "cloud-hypervisor" ]; then
-    echo "Downloading cloud-hypervisor v54.0 static binary..."
-    wget -q -O cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-static
+    echo "Downloading cloud-hypervisor v54.0 static binary (${CH_ASSET})..."
+    wget -q -O cloud-hypervisor "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/${CH_ASSET}"
     chmod +x cloud-hypervisor
 fi
 
@@ -101,8 +127,8 @@ CNI_DIR="${WORK_DIR}/usr/lib/vyoma/cni"
 echo "Fetching CNI plugins..."
 mkdir -p "${CNI_DIR}/bin"
 if [ ! -s "cni-plugins.tgz" ]; then
-    echo "Downloading CNI plugins ${CNI_VERSION}..."
-    curl -fL -o cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" || wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz"
+    echo "Downloading CNI plugins ${CNI_VERSION} (${CNI_ARCH})..."
+    curl -fL -o cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-${CNI_ARCH}-${CNI_VERSION}.tgz" || wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-${CNI_ARCH}-${CNI_VERSION}.tgz"
 fi
 
 echo "Verifying CNI plugins checksum..."
@@ -142,7 +168,7 @@ fi
 
 if [ ! -f "virtiofsd_bin" ]; then
     # Primary: GitLab releases
-    PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-x86_64-musl.zip"
+    PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-${VIRTIOFSD_ARCH}-musl.zip"
     if curl -fL -m 5 -o virtiofsd.zip "$PRIMARY_URL" 2>/dev/null || wget -q --timeout=5 -O virtiofsd.zip "$PRIMARY_URL" 2>/dev/null; then
         unzip -q -o virtiofsd.zip
         mv virtiofsd virtiofsd_bin 2>/dev/null || true
@@ -152,7 +178,7 @@ fi
 
 # Fallback 1: Try QEMU GitHub raw
 if [ ! -f "virtiofsd_bin" ]; then
-    FALLBACK_URL1="https://github.com/qemu/qemu/raw/main/contrib/virtiofsd/virtiofsd-x86_64"
+    FALLBACK_URL1="https://github.com/qemu/qemu/raw/main/contrib/virtiofsd/virtiofsd-${VIRTIOFSD_ARCH}"
     if curl -fL -m 5 -o virtiofsd "$FALLBACK_URL1" 2>/dev/null || wget -q --timeout=5 -O virtiofsd "$FALLBACK_URL1" 2>/dev/null; then
         mv virtiofsd virtiofsd_bin
         chmod +x virtiofsd_bin
@@ -161,7 +187,7 @@ fi
 
 # Fallback 2: Try another mirror
 if [ ! -f "virtiofsd_bin" ]; then
-    FALLBACK_URL2="https://raw.githubusercontent.com/qemu/qemu/master/contrib/virtiofsd/virtiofsd-x86_64"
+    FALLBACK_URL2="https://raw.githubusercontent.com/qemu/qemu/master/contrib/virtiofsd/virtiofsd-${VIRTIOFSD_ARCH}"
     if curl -fL -m 5 -o virtiofsd "$FALLBACK_URL2" 2>/dev/null || wget -q --timeout=5 -O virtiofsd "$FALLBACK_URL2" 2>/dev/null; then
         mv virtiofsd virtiofsd_bin
         chmod +x virtiofsd_bin
@@ -188,7 +214,7 @@ if [ -f "bin/vyoma-cri" ]; then
     cp bin/vyoma-cri "${WORK_DIR}/usr/bin/vyoma-cri"
     chmod 755 "${WORK_DIR}/usr/bin/vyoma-cri"
 fi
-cp target/x86_64-unknown-linux-musl/release/vyoma-agent-vm "${WORK_DIR}/usr/bin/vyoma-agent-vm"
+cp "target/${RUST_MUSL_TARGET}/release/vyoma-agent-vm" "${WORK_DIR}/usr/bin/vyoma-agent-vm"
 chmod 755 "${WORK_DIR}/usr/bin/vyoma-agent-vm"
 cp cloud-hypervisor "${WORK_DIR}/usr/bin/cloud-hypervisor"
 chmod 755 "${WORK_DIR}/usr/bin/cloud-hypervisor"
@@ -197,7 +223,7 @@ cp packaging/systemd/vyoma-net.service "${WORK_DIR}/etc/systemd/system/"
 
 # Copy kernel and cloud-hypervisor to data directory
 mkdir -p "${WORK_DIR}/var/lib/vyoma/bin"
-KERNEL_URL="https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/bzImage-x86_64"
+KERNEL_URL="https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/${KERNEL_ASSET}"
 KERNEL_DEST="${WORK_DIR}/var/lib/vyoma/bin/vmlinux"
 if [ ! -f "kernel.bzimage" ]; then
     if [ -f "/tmp/vyoma-bzImage" ]; then

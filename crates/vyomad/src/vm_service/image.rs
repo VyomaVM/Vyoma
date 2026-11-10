@@ -72,12 +72,13 @@ pub async fn ensure_image_locally(image_name: &str, data_dir: &str) -> Result<Pa
 
         let converter = VmifConverter::new();
         let config = oci_config.unwrap_or_else(|| VyomaOciConfig::default());
-        
+        let target_arch = vyoma_core::oci::host_oci_arch();
+
         let _vmif_image = converter.convert_directory_to_vmif(
             temp_unpack_dir.path(),
             &image_store_path,
             image_name,
-            "amd64",
+            target_arch,
             config,
             None,
             None,

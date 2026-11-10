@@ -35,9 +35,13 @@ pub async fn prepare_agent(
     };
     
     // Static musl build (preferred for local dev)
+    let musl_rel_path = format!(
+        "{}-unknown-linux-musl/release/vyoma-agent-vm",
+        std::env::consts::ARCH
+    );
     let agent_binary_musl = std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().and_then(|parent| parent.parent().map(|target| target.join("x86_64-unknown-linux-musl/release/vyoma-agent-vm"))));
+        .and_then(|p| p.parent().and_then(|parent| parent.parent().map(|target| target.join(&musl_rel_path))));
 
     // Glibc build (fallback for local dev)
     let agent_binary_exe_dir = std::env::current_exe()

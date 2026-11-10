@@ -231,15 +231,16 @@ impl OciManager {
         let body = resp.text().await?;
 
         if content_type.contains("list") || content_type.contains("index") {
-             info!("Received Manifest List/Index. Resolving for linux/amd64...");
+             let target_arch = host_oci_arch();
+             info!("Received Manifest List/Index. Resolving for linux/{}...", target_arch);
              let list: ManifestList = serde_json::from_str(&body)?;
              
              let target = list.manifests.iter().find(|m| 
-                 (m.platform.architecture == "amd64" || m.platform.architecture == "x86_64") 
+                 oci_arch_matches(&m.platform.architecture, target_arch)
                  && m.platform.os == "linux"
-             ).ok_or_else(|| anyhow!("No linux/amd64 manifest found in list"))?;
+             ).ok_or_else(|| anyhow!("No linux/{} manifest found in list", target_arch))?;
              
-             info!("Resolved linux/amd64 digest: {}", target.digest);
+             info!("Resolved linux/{} digest: {}", target_arch, target.digest);
              
              let resolved_url = format!("{}://{}/v2/{}/manifests/{}", proto, registry, repository, target.digest);
              
@@ -373,4 +374,37 @@ fn extract_field(header: &str, key: &str) -> Option<String> {
                 None
             }
         })
+}
+
+/// Returns the canonical OCI architecture string (`"amd64"` or `"arm64"`) for the current host.
+pub fn host_oci_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "amd64",
+        other => other,
+    }
+}
+
+/// Matches OCI manifest platform architecture names (`amd64`/`x86_64`, `arm64`/`aarch64`).
+pub fn oci_arch_matches(manifest_arch: &str, target_arch: &str) -> bool {
+    match target_arch {
+        "amd64" | "x86_64" => matches!(manifest_arch, "amd64" | "x86_64"),
+        "arm64" | "aarch64" => matches!(manifest_arch, "arm64" | "aarch64"),
+        other => manifest_arch == other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_oci_arch_matching() {
+        assert!(oci_arch_matches("amd64", "amd64"));
+        assert!(oci_arch_matches("x86_64", "amd64"));
+        assert!(oci_arch_matches("arm64", "arm64"));
+        assert!(oci_arch_matches("aarch64", "arm64"));
+        assert!(!oci_arch_matches("amd64", "arm64"));
+        assert!(!host_oci_arch().is_empty());
+    }
 }

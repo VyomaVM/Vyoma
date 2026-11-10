@@ -1,21 +1,34 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
+#[cfg(target_os = "linux")]
+use anyhow::anyhow;
+use async_trait::async_trait;
 use serde::{Serialize, Deserialize};
+#[cfg(target_os = "linux")]
 use std::path::Path;
+#[cfg(target_os = "linux")]
 use std::process::{Command, Child, Stdio};
+#[cfg(target_os = "linux")]
 use std::time::Duration;
+#[cfg(target_os = "linux")]
 use std::fmt;
+#[cfg(target_os = "linux")]
 use std::thread;
+#[cfg(target_os = "linux")]
 use std::io::{BufRead, BufReader};
+#[cfg(target_os = "linux")]
 use tracing::{info, error};
 use tokio::sync::broadcast;
+#[cfg(target_os = "linux")]
 use reqwest::{Client, Method};
 
+#[cfg(target_os = "linux")]
 use crate::ch_types::{
     VmConfig, CpusConfig, MemoryConfig, PayloadConfig, DiskConfig, NetConfig, FsConfig,
     VmSnapshotConfig, VmRestoreConfig, SendMigrationData, ReceiveMigrationData,
     VmResizeDiskConfig,
 };
 
+#[cfg(target_os = "linux")]
 impl fmt::Debug for VmmManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("VmmManager")
@@ -42,7 +55,39 @@ pub struct VmmEvent {
     pub properties: Option<serde_json::Value>,
 }
 
+/// Platform-independent Virtual Machine Monitor backend abstraction.
+/// Implemented natively on Linux via [`VmmManager`] (Cloud Hypervisor)
+/// and extensible to WSL2 / macOS hypervisors in future cross-platform drivers.
+#[async_trait]
+pub trait VmmBackend: Send + Sync {
+    fn socket_path(&self) -> &str;
+    fn event_monitor_path(&self) -> Option<&str>;
+    fn subscribe_events(&self) -> broadcast::Receiver<VmmEvent>;
+    fn subscribe_logs(&self) -> broadcast::Receiver<String>;
+    fn pid(&self) -> Option<u32>;
+    fn start_daemon(&mut self, binary_path: &str, netns: Option<&str>, rootless: bool) -> Result<()>;
+    async fn check_alive(&self) -> bool;
+    async fn set_boot_source(&mut self, kernel_path: &str, boot_args: &str, initramfs: Option<&str>) -> Result<()>;
+    async fn add_drive(&mut self, drive_id: &str, host_path: &str, is_root: bool) -> Result<()>;
+    async fn set_machine_config(&mut self, vcpu_count: u32, mem_size_mib: u32) -> Result<()>;
+    async fn add_network_interface(&mut self, iface_id: &str, host_dev_name: &str, guest_mac: Option<&str>) -> Result<()>;
+    async fn add_file_system(&mut self, fs_id: &str, socket_path: &str, tag: &str) -> Result<()>;
+    async fn add_vsock(&mut self, cid: u32, socket_path: &str) -> Result<()>;
+    async fn enable_serial(&mut self, file_path: &str) -> Result<()>;
+    async fn start_instance(&self) -> Result<()>;
+    async fn pause_instance(&self) -> Result<()>;
+    async fn resume_instance(&self) -> Result<()>;
+    async fn create_snapshot(&self, snapshot_path: &str, mem_file_path: &str) -> Result<()>;
+    async fn load_snapshot(&self, snapshot_path: &str, mem_file_path: &str) -> Result<()>;
+    async fn send_migration(&self, target_url: &str, bandwidth_mbps: Option<u32>) -> Result<()>;
+    async fn receive_migration(&self, receiver_url: &str) -> Result<()>;
+    async fn cancel_migration(&self) -> Result<()>;
+    async fn resize_disk(&self, disk_id: &str, desired_size: u64) -> Result<()>;
+    fn kill(&mut self) -> Result<()>;
+}
+
 /// Manages a Cloud Hypervisor process and its API interaction.
+#[cfg(target_os = "linux")]
 pub struct VmmManager {
     socket_path: String,
     event_monitor_path: Option<String>,
@@ -53,6 +98,7 @@ pub struct VmmManager {
     client: Client,
 }
 
+#[cfg(target_os = "linux")]
 impl VmmManager {
     pub fn new(socket_path: &str) -> Self {
         let (tx, _) = broadcast::channel(100);
@@ -516,6 +562,7 @@ impl JsonStreamParser {
     }
 }
 
+#[cfg(target_os = "linux")]
 async fn stream_vmm_events(event_path: &str, tx_event: broadcast::Sender<VmmEvent>) {
     use tokio::io::AsyncReadExt;
 
@@ -555,6 +602,107 @@ async fn stream_vmm_events(event_path: &str, tx_event: broadcast::Sender<VmmEven
     }
 }
 
+#[cfg(target_os = "linux")]
+#[async_trait]
+impl VmmBackend for VmmManager {
+    fn socket_path(&self) -> &str {
+        self.socket_path()
+    }
+
+    fn event_monitor_path(&self) -> Option<&str> {
+        self.event_monitor_path()
+    }
+
+    fn subscribe_events(&self) -> broadcast::Receiver<VmmEvent> {
+        self.subscribe_events()
+    }
+
+    fn subscribe_logs(&self) -> broadcast::Receiver<String> {
+        self.subscribe_logs()
+    }
+
+    fn pid(&self) -> Option<u32> {
+        self.pid()
+    }
+
+    fn start_daemon(&mut self, binary_path: &str, netns: Option<&str>, rootless: bool) -> Result<()> {
+        self.start_daemon(binary_path, netns, rootless)
+    }
+
+    async fn check_alive(&self) -> bool {
+        self.check_alive().await
+    }
+
+    async fn set_boot_source(&mut self, kernel_path: &str, boot_args: &str, initramfs: Option<&str>) -> Result<()> {
+        self.set_boot_source(kernel_path, boot_args, initramfs).await
+    }
+
+    async fn add_drive(&mut self, drive_id: &str, host_path: &str, is_root: bool) -> Result<()> {
+        self.add_drive(drive_id, host_path, is_root).await
+    }
+
+    async fn set_machine_config(&mut self, vcpu_count: u32, mem_size_mib: u32) -> Result<()> {
+        self.set_machine_config(vcpu_count, mem_size_mib).await
+    }
+
+    async fn add_network_interface(&mut self, iface_id: &str, host_dev_name: &str, guest_mac: Option<&str>) -> Result<()> {
+        self.add_network_interface(iface_id, host_dev_name, guest_mac).await
+    }
+
+    async fn add_file_system(&mut self, fs_id: &str, socket_path: &str, tag: &str) -> Result<()> {
+        self.add_file_system(fs_id, socket_path, tag).await
+    }
+
+    async fn add_vsock(&mut self, cid: u32, socket_path: &str) -> Result<()> {
+        self.add_vsock(cid, socket_path).await
+    }
+
+    async fn enable_serial(&mut self, file_path: &str) -> Result<()> {
+        self.enable_serial(file_path).await
+    }
+
+    async fn start_instance(&self) -> Result<()> {
+        self.start_instance().await
+    }
+
+    async fn pause_instance(&self) -> Result<()> {
+        self.pause_instance().await
+    }
+
+    async fn resume_instance(&self) -> Result<()> {
+        self.resume_instance().await
+    }
+
+    async fn create_snapshot(&self, snapshot_path: &str, mem_file_path: &str) -> Result<()> {
+        self.create_snapshot(snapshot_path, mem_file_path).await
+    }
+
+    async fn load_snapshot(&self, snapshot_path: &str, mem_file_path: &str) -> Result<()> {
+        self.load_snapshot(snapshot_path, mem_file_path).await
+    }
+
+    async fn send_migration(&self, target_url: &str, bandwidth_mbps: Option<u32>) -> Result<()> {
+        self.send_migration(target_url, bandwidth_mbps).await
+    }
+
+    async fn receive_migration(&self, receiver_url: &str) -> Result<()> {
+        self.receive_migration(receiver_url).await
+    }
+
+    async fn cancel_migration(&self) -> Result<()> {
+        self.cancel_migration().await
+    }
+
+    async fn resize_disk(&self, disk_id: &str, desired_size: u64) -> Result<()> {
+        self.resize_disk(disk_id, desired_size).await
+    }
+
+    fn kill(&mut self) -> Result<()> {
+        self.kill()
+    }
+}
+
+#[cfg(target_os = "linux")]
 impl Drop for VmmManager {
     fn drop(&mut self) {
         let _ = self.kill();
@@ -598,6 +746,7 @@ mod tests {
 
     #[test]
     fn test_resize_disk_config_serialization() {
+        use crate::ch_types::VmResizeDiskConfig;
         let config = VmResizeDiskConfig {
             id: "drive-root".to_string(),
             desired_size: 10 * 1024 * 1024 * 1024,

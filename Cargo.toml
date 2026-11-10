@@ -3,6 +3,7 @@ members = [
     "crates/vyomad",
     "crates/vyoma",
     "crates/vyoma-core", "crates/vyoma-compose",
+    "crates/vyoma-api",
     "crates/vyoma-storage",
     "crates/vyoma-net",
     "crates/vyoma-teleport",

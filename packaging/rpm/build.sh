@@ -17,13 +17,35 @@ fi
 [ -d "$HOME/.local/lib" ] && export LD_LIBRARY_PATH="$HOME/.local/lib:${LD_LIBRARY_PATH:-}"
 
 VERSION="3.0.0"
+HOST_ARCH="${TARGET_ARCH:-$(uname -m)}"
+case "$HOST_ARCH" in
+    x86_64|amd64)
+        RPM_ARCH="x86_64"
+        RUST_MUSL_TARGET="x86_64-unknown-linux-musl"
+        CH_ASSET="cloud-hypervisor-static"
+        CNI_ARCH="amd64"
+        VIRTIOFSD_ARCH="x86_64"
+        KERNEL_ASSET="bzImage-x86_64"
+        CLOUD_HYPERVISOR_CHECKSUM="${VYOMA_CH_SHA256:-4f4f98a3d661a40f3e5272627cc895a1b2e525f2f6bedf5f895f9cd21ba5c65b}"
+        CNI_PLUGINS_CHECKSUM="${VYOMA_CNI_SHA256:-77baa2f669980a82255ffa2f2717de823992480271ee778aa51a9c60ae89ff9b}"
+        ;;
+    aarch64|arm64)
+        RPM_ARCH="aarch64"
+        RUST_MUSL_TARGET="aarch64-unknown-linux-musl"
+        CH_ASSET="cloud-hypervisor-static-aarch64"
+        CNI_ARCH="arm64"
+        VIRTIOFSD_ARCH="aarch64"
+        KERNEL_ASSET="Image"
+        CLOUD_HYPERVISOR_CHECKSUM="${VYOMA_CH_SHA256:-}"
+        CNI_PLUGINS_CHECKSUM="${VYOMA_CNI_SHA256:-}"
+        ;;
+    *)
+        echo "Unsupported target architecture: ${HOST_ARCH}"
+        exit 1
+        ;;
+esac
 WORK_DIR="target/rpm"
 SOURCES_DIR="${WORK_DIR}/SOURCES/vyoma-${VERSION}"
-
-# Hardcoded checksums for binary verification
-# Computed from official release sources
-CLOUD_HYPERVISOR_CHECKSUM="4f4f98a3d661a40f3e5272627cc895a1b2e525f2f6bedf5f895f9cd21ba5c65b"
-CNI_PLUGINS_CHECKSUM="77baa2f669980a82255ffa2f2717de823992480271ee778aa51a9c60ae89ff9b"
 
 # Verify checksum of a downloaded file
 # Usage: verify_checksum <file> <expected_sha256>
@@ -33,6 +55,11 @@ verify_checksum() {
 
     if [ "$VYOMA_SKIP_CHECKSUM" = "1" ]; then
         echo "Skipping checksum verification (VYOMA_SKIP_CHECKSUM=1)"
+        return 0
+    fi
+
+    if [ -z "$expected" ]; then
+        echo "Notice: no pinned SHA-256 checksum for ${file} on ${RPM_ARCH}; skipping verification (set VYOMA_CH_SHA256 / VYOMA_CNI_SHA256 to enforce)"
         return 0
     fi
 
@@ -62,13 +89,13 @@ mkdir -p "${SOURCES_DIR}"
 
 # 1. Build Binaries
 "$CARGO" build --release --bin vyomad --bin vyoma
-rustup target add x86_64-unknown-linux-musl
-"$CARGO" build --release --target x86_64-unknown-linux-musl --bin vyoma-agent-vm
+rustup target add "${RUST_MUSL_TARGET}"
+"$CARGO" build --release --target "${RUST_MUSL_TARGET}" --bin vyoma-agent-vm
 
 # 2. Copy binaries to source dir
 cp target/release/vyomad "${SOURCES_DIR}/"
 cp target/release/vyoma "${SOURCES_DIR}/"
-cp target/x86_64-unknown-linux-musl/release/vyoma-agent-vm "${SOURCES_DIR}/vyoma-agent-vm"
+cp "target/${RUST_MUSL_TARGET}/release/vyoma-agent-vm" "${SOURCES_DIR}/vyoma-agent-vm"
 if [ -f "bin/vyoma-cri" ]; then
     cp bin/vyoma-cri "${SOURCES_DIR}/vyoma-cri"
 fi
@@ -78,8 +105,8 @@ echo "Fetching dependencies..."
 
 # Fetch Cloud Hypervisor with checksum verification
 if [ ! -f "cloud-hypervisor" ]; then
-    echo "Downloading cloud-hypervisor v54.0 static binary..."
-    wget -q -O cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-static
+    echo "Downloading cloud-hypervisor v54.0 static binary (${CH_ASSET})..."
+    wget -q -O cloud-hypervisor "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/${CH_ASSET}"
     chmod +x cloud-hypervisor
 fi
 
@@ -100,8 +127,8 @@ CNI_DIR="${SOURCES_DIR}/cni/bin"
 echo "Fetching CNI plugins..."
 mkdir -p "${CNI_DIR}"
 if [ ! -f "cni-plugins.tgz" ]; then
-    echo "Downloading CNI plugins ${CNI_VERSION}..."
-    wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz"
+    echo "Downloading CNI plugins ${CNI_VERSION} (${CNI_ARCH})..."
+    wget -q -O cni-plugins.tgz "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-${CNI_ARCH}-${CNI_VERSION}.tgz"
 fi
 
 echo "Verifying CNI plugins checksum..."
@@ -127,7 +154,7 @@ fi
 
 # Copy kernel binary
 mkdir -p "${SOURCES_DIR}"
-KERNEL_URL="https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/bzImage-x86_64"
+KERNEL_URL="https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/${KERNEL_ASSET}"
 if [ ! -f "kernel.bzimage" ]; then
     if [ -f "/tmp/vyoma-bzImage" ]; then
         echo "Using locally compiled custom kernel from /tmp/vyoma-bzImage..."
@@ -160,7 +187,7 @@ elif [ -f "/usr/bin/virtiofsd" ]; then
 fi
 
 if [ ! -f "virtiofsd_bin" ]; then
-    PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-x86_64-musl.zip"
+    PRIMARY_URL="https://gitlab.com/virtio-fs/virtiofsd/-/releases/${VIRTIOFSD_VERSION}/downloads/virtiofsd-v${VIRTIOFSD_VERSION}-${VIRTIOFSD_ARCH}-musl.zip"
     if wget -q -O virtiofsd.zip "$PRIMARY_URL" 2>/dev/null; then
         unzip -q -o virtiofsd.zip
         mv virtiofsd virtiofsd_bin 2>/dev/null || true
@@ -168,14 +195,14 @@ if [ ! -f "virtiofsd_bin" ]; then
     fi
 fi
 if [ ! -f "virtiofsd_bin" ]; then
-    FALLBACK_URL1="https://github.com/qemu/qemu/raw/main/contrib/virtiofsd/virtiofsd-x86_64"
+    FALLBACK_URL1="https://github.com/qemu/qemu/raw/main/contrib/virtiofsd/virtiofsd-${VIRTIOFSD_ARCH}"
     if wget -q -O virtiofsd "$FALLBACK_URL1" 2>/dev/null; then
         mv virtiofsd virtiofsd_bin
         chmod +x virtiofsd_bin
     fi
 fi
 if [ ! -f "virtiofsd_bin" ]; then
-    FALLBACK_URL2="https://raw.githubusercontent.com/qemu/qemu/master/contrib/virtiofsd/virtiofsd-x86_64"
+    FALLBACK_URL2="https://raw.githubusercontent.com/qemu/qemu/master/contrib/virtiofsd/virtiofsd-${VIRTIOFSD_ARCH}"
     if wget -q -O virtiofsd "$FALLBACK_URL2" 2>/dev/null; then
         mv virtiofsd virtiofsd_bin
         chmod +x virtiofsd_bin
@@ -390,7 +417,7 @@ rpmbuild --define "_topdir $(pwd)/${WORK_DIR}" -bb "${WORK_DIR}/SPECS/vyoma.spec
 
 # 7. Move to dist
 mkdir -p dist
-mv ${WORK_DIR}/RPMS/x86_64/*.rpm dist/
+mv "${WORK_DIR}/RPMS/${RPM_ARCH}/"*.rpm dist/
 
 # 8. Cleanup
 rm -f cloud-hypervisor cloud-hypervisor.tgz virtiofsd.zip virtiofsd virtiofsd_bin cni-plugins.tgz
