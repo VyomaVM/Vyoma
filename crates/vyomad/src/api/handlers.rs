@@ -20,7 +20,6 @@ use vyoma_core::fs::VirtioFsManager;
 use vyoma_core::policy::PolicyStatus;
 use vyoma_core::proxy::ProxyManager;
 use vyoma_core::vmm::VmmManager;
-use vyoma_storage::{DmManager, LoopManager, LoopDevice, DmDevice};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -162,7 +161,6 @@ pub struct RunResponse {
 use vyoma_core::layers::LayerManager;
 use vyoma_core::network::NetworkManager;
 use vyoma_core::oci::OciManager;
-use vyoma_core::storage::StorageManager;
 use vyoma_agent_protocol::{AgentRequest, AgentResponse};
 
 #[derive(Deserialize)]
@@ -664,15 +662,10 @@ pub async fn restore_vm(
         ));
     };
 
-    let home = dirs::home_dir().ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No home dir".into()))?;
-    let vyoma_root = home.join(".vyoma");
+    let data_dir = PathBuf::from(&state.data_dir);
+    let vyoma_root = data_dir.join(".vyoma");
     let images_root = vyoma_root.join("images");
     let vms_root = vyoma_root.join("vms");
-
-    // We still assume alpine:latest base for MVP clone
-    let safe_image_name = "alpine_latest";
-    let image_store_path = images_root.join(&safe_image_name);
-    let base_image_file = image_store_path.join("base.ext4");
 
     // 2. New VM ID & Dir (Clone from Snapshot)
     let vm_id = uuid::Uuid::new_v4().to_string();
@@ -680,58 +673,38 @@ pub async fn restore_vm(
     std::fs::create_dir_all(&vm_dir)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // 3. New COW File
-    let cow_file = vm_dir.join("diff.cow");
-
-    if !cow_path.is_empty() && std::path::Path::new(&cow_path).exists() {
+    // 3. Provision QCOW2 disk for restored VM
+    let qcow2_path = vm_dir.join("root.qcow2");
+    let disk_path_str = if !cow_path.is_empty() && std::path::Path::new(&cow_path).exists() {
         info!("Restoring disk state from {:?}", cow_path);
-        let _ = std::fs::copy(&cow_path, &cow_file);
-    }
+        std::fs::copy(&cow_path, &qcow2_path)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to copy snapshot disk: {}", e)))?;
+        qcow2_path.to_string_lossy().to_string()
+    } else {
+        let default_base = images_root.join("alpine_latest").join("rootfs.ext4");
+        let fallback_base = images_root.join("alpine_latest").join("rootfs.sqfs");
+        let base = if default_base.exists() {
+            Some(default_base)
+        } else if fallback_base.exists() {
+            Some(fallback_base)
+        } else {
+            None
+        };
+        if let Some(base_img) = base {
+            vyoma_storage::Qcow2Manager::create_overlay(&qcow2_path, &base_img)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("QCOW2 overlay failed: {}", e)))?;
+        } else {
+            vyoma_storage::Qcow2Manager::create_image(&qcow2_path, 2048)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("QCOW2 init failed: {}", e)))?;
+        }
+        qcow2_path.to_string_lossy().to_string()
+    };
+    let dm_name = format!("qcow2-{}", vm_id);
 
-    // We don't create empty cow file anymore
-    // StorageManager::create_cow_file(&cow_file, size_mb)...
-
-    // 4. Setup Storage Stack
-    let base_loop = StorageManager::setup_loop_device(&base_image_file).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Loop base: {}", e),
-        )
-    })?;
-    let cow_loop = StorageManager::setup_loop_device(&cow_file).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Loop cow: {}", e),
-        )
-    })?;
-
-        use vyoma_storage::DmManager;
-        let dm_name = format!("vyoma-{}", vm_id);
-        let dm_manager = DmManager::new().map_err(|e| {
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("DM init: {}", e))
-        })?;
-        let base_path = std::path::Path::new(&base_loop);
-        let cow_path = std::path::Path::new(&cow_loop);
-        let dm_device = dm_manager.create_snapshot(&dm_name, base_path, cow_path)
-            .map_err(|e| {
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("DM create: {}", e))
-            })?;
-        let dm_path = dm_device.path().to_string_lossy().to_string();
-
-    // 5. Setup Network
-    // Ensure bridge exists (idempotent-ish)
-    let bridge_name = "ign0";
-    let bridge_cidr = "172.16.0.1/24";
-    // We skip bridge setup here assuming it's up from previous run, or we should just call it safe.
-    // NetworkManager::setup_bridge(bridge_name, bridge_cidr)...
-
+    // 5. Setup Network (best-effort TAP if privileged, rootless vsock otherwise)
+    let bridge_name = "vyoma0";
     let tap_name = format!("tap{}", &vm_id[0..8]);
-    NetworkManager::setup_tap(&tap_name, bridge_name).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("TAP setup: {}", e),
-        )
-    })?;
+    let tap_ready = NetworkManager::setup_tap(&tap_name, bridge_name).await.is_ok();
 
     let random_octet = rand::random::<u8>();
     let safe_octet = std::cmp::max(2, std::cmp::min(254, random_octet));
@@ -760,10 +733,8 @@ pub async fn restore_vm(
         ));
     }
 
-    // 8. Add Drives (Must match configuration of snapped VM usually, but we are attaching NEW cow)
-    // Firecracker snapshot restoration often involves re-attaching block devices.
-    // The device ID "rootfs" must match.
-    if let Err(e) = vmm.add_drive("rootfs", &dm_path, true).await {
+    // 8. Add Drives ("rootfs" device ID must match snapshot configuration)
+    if let Err(e) = vmm.add_drive("rootfs", &disk_path_str, true).await {
         let _ = vmm.kill();
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -771,10 +742,12 @@ pub async fn restore_vm(
         ));
     }
 
-    // 9. Add Network
-    if let Err(e) = vmm.add_network_interface("eth0", &tap_name, None).await {
-        let _ = vmm.kill();
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add net: {}", e)));
+    // 9. Add Network if TAP was provisioned
+    if tap_ready {
+        if let Err(e) = vmm.add_network_interface("eth0", &tap_name, None).await {
+            let _ = vmm.kill();
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Add net: {}", e)));
+        }
     }
 
     // 10. Resume
@@ -793,10 +766,10 @@ pub async fn restore_vm(
         id: vm_id.clone(),
         status: VmStatus::Running, // Restored VMs are considered running
         ch_socket_path: socket_path.clone(),
-        tap_name: tap_name.clone(),
+        tap_name: if tap_ready { tap_name.clone() } else { String::new() },
         dm_name: dm_name.clone(),
-        loop_devices: vec![base_loop, cow_loop],
-        cow_file_path: cow_file.to_string_lossy().to_string(),
+        loop_devices: Vec::new(),
+        cow_file_path: disk_path_str,
         ip_address: vm_ip.clone(),
         proxy_tasks,
 

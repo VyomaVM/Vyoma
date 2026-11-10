@@ -160,7 +160,6 @@ pub struct VmState {
 use tracing::{info, error};
 use std::process::Command;
 use vyoma_core::network::NetworkManager;
-use vyoma_core::storage::StorageManager;
 
 impl VmInstance {
     pub fn save_state(&self, data_dir: &str) -> anyhow::Result<()> {
@@ -227,23 +226,8 @@ impl VmInstance {
             }
         }
 
-        // 3. Remove DM Device
-        if let Err(e) = (|| -> Result<(), vyoma_storage::StorageError> {
-            let dm_manager = vyoma_storage::DmManager::new()?;
-            dm_manager.remove_snapshot(&self.dm_name)
-        })() {
-            error!("Failed to remove DM {}: {}", self.dm_name, e);
-        }
-
-        // 4. Detach Loop Devices
-        for dev in &self.loop_devices {
-            if let Err(e) = StorageManager::detach_loop_device(dev) {
-                error!("Failed to detach loop {}: {}", dev, e);
-            }
-        }
-
-        // 5. Remove COW file
-        if std::path::Path::new(&self.cow_file_path).exists() {
+        // 3. Remove QCOW2 / overlay disk file
+        if !self.cow_file_path.is_empty() && std::path::Path::new(&self.cow_file_path).exists() {
             let _ = std::fs::remove_file(&self.cow_file_path);
         }
 
