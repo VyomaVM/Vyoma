@@ -210,6 +210,7 @@ URL:        https://github.com/Subeshrock/micro-vm-ecosystem
 Source0:    vyoma-${VERSION}.tar.gz
 Requires:   iptables
 Requires:   kmod
+Recommends: qemu-img
 
 %description
 Vyoma is a lightweight MicroVM runtime for running containers

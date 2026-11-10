@@ -226,6 +226,7 @@ Section: admin
 Priority: optional
 Architecture: ${ARCH}
 Depends: libc6, openssl, ca-certificates, iptables, kmod
+Recommends: qemu-utils
 Maintainer: Subeshrock <subesh.rock.3@gmail.com>
 Description: Vyoma - MicroVM Ecosystem
  Docker-like experience for Cloud Hypervisor MicroVMs.

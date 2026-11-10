@@ -23,10 +23,6 @@ pub async fn prepare_qcow2_storage(
 ) -> Result<PreparedStorage> {
     info!("Preparing native QCOW2 backing storage for VM {}", vm_id);
     let overlay_path = vm_dir.join("root.qcow2");
-    
-    let backing_path_str = rootfs_base_path.to_str().ok_or_else(|| {
-        anyhow::anyhow!("Invalid base image path: {:?}", rootfs_base_path)
-    })?;
 
     let backing_fmt = if rootfs_base_path.extension().and_then(|e| e.to_str()) == Some("qcow2") {
         "qcow2"
@@ -34,23 +30,13 @@ pub async fn prepare_qcow2_storage(
         "raw"
     };
 
-    let output = std::process::Command::new("qemu-img")
-        .arg("create")
-        .arg("-f")
-        .arg("qcow2")
-        .arg("-b")
-        .arg(backing_path_str)
-        .arg("-F")
-        .arg(backing_fmt)
-        .arg(&overlay_path)
-        .arg("10G")
-        .output()
-        .context("Failed to run qemu-img for QCOW2 overlay creation")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("qemu-img create failed: {}", stderr);
-    }
+    vyoma_storage::Qcow2Manager::create_overlay_with_format(
+        &overlay_path,
+        rootfs_base_path,
+        backing_fmt,
+        None,
+    )
+    .context("Failed to create pure-Rust QCOW2 overlay")?;
 
     let overlay_path_str = overlay_path.to_string_lossy().to_string();
     info!("Native QCOW2 overlay prepared at {}", overlay_path_str);
