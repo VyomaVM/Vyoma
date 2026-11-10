@@ -222,7 +222,7 @@ pub async fn resume_vm(
                     let _ = vmm.set_machine_config(vm.vcpu, vm.mem_size_mib).await;
                     let _ = vmm.start_instance().await;
                 }
-                vm.vmm = vmm;
+                vm.vmm = vmm.into();
             }
 
             vm.status = VmStatus::Running;

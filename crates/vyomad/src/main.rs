@@ -51,16 +51,25 @@ fn check_dependencies(data_dir: &str) -> Result<(), String> {
     let ch_path = std::path::Path::new(data_dir).join("bin/cloud-hypervisor");
     println!("DEBUG: Checking if cloud-hypervisor exists at {:?}", ch_path);
     println!("DEBUG: Metadata: {:?}", std::fs::metadata(&ch_path));
-    if !ch_path.exists() {
-        // Check in common fallback locations
+    let has_ch = if !ch_path.exists() {
         let fallback_paths = vec![
             "/usr/bin/cloud-hypervisor",
             "/usr/local/bin/cloud-hypervisor",
         ];
-        let found = fallback_paths.iter().any(|p| std::path::Path::new(p).exists());
-        if !found {
-            missing.push("cloud-hypervisor (not found in data_dir/bin or /usr/bin)");
-        }
+        fallback_paths.iter().any(|p| std::path::Path::new(p).exists())
+    } else {
+        true
+    };
+    let has_qemu = crate::vm_service::boot::find_qemu_binary().is_some();
+
+    if !has_ch && !has_qemu {
+        missing.push(
+            "cloud-hypervisor (or qemu-system-* fallback for non-KVM hosts) not found in data_dir/bin or /usr/bin",
+        );
+    } else if !has_ch && has_qemu {
+        tracing::warn!(
+            "cloud-hypervisor not found; vyomad will use QEMU TCG fallback when launching VMs."
+        );
     }
 
     if missing.is_empty() {
@@ -125,6 +134,9 @@ struct Args {
     /// Use "*" to allow all origins (not recommended for production).
     #[arg(long)]
     cors_origins: Option<String>,
+    /// Hypervisor backend mode: auto (KVM Cloud Hypervisor with QEMU TCG fallback), cloud-hypervisor, or qemu-tcg
+    #[arg(long, default_value = "auto")]
+    hypervisor: String,
 }
 
 fn main() {
@@ -255,6 +267,12 @@ async fn async_main(args: Args) {
     
     // Get API token from CLI arg or environment variable
     let api_token = args.api_token.clone().or_else(|| std::env::var("VYOMA_API_TOKEN").ok());
+    let hypervisor_raw = std::env::var("VYOMA_HYPERVISOR").unwrap_or_else(|_| args.hypervisor.clone());
+    let hypervisor_mode = vyoma_core::vmm::HypervisorMode::from_str_lossy(&hypervisor_raw)
+        .unwrap_or_else(|e| {
+            error!("{}", e);
+            std::process::exit(1);
+        });
 
      let state = AppState {
          vms: Arc::new(TokioMutex::new(HashMap::new())),
@@ -268,6 +286,7 @@ async fn async_main(args: Args) {
          timemachine,
          policy_manager: Arc::new(StdMutex::new(PolicyManager::new())),
          api_token,
+         hypervisor_mode,
      };
 
     // Run WAL-based crash recovery and adopt surviving VMs
@@ -313,7 +332,7 @@ async fn async_main(args: Args) {
             }
 
             let vm_instance = crate::state::VmInstance {
-                vmm,
+                vmm: vmm.into(),
                 id: rvm.vm_id.clone(),
                 status: crate::state::VmStatus::Running,
                 attestation_status: None,

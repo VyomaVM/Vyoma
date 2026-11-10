@@ -410,7 +410,7 @@ pub async fn branch_vm_handler(
         Err(e) => {
             warn!("Failed to boot branched VM immediately: {}. Registering as prepared instance.", e);
             let vmm = vyoma_core::vmm::VmmManager::new(&ch_socket);
-            (vmm, vec![], vec![], None)
+            (vmm.into(), vec![], vec![], None)
         }
     };
 
@@ -672,7 +672,7 @@ pub async fn restore_vm(
     // Success - Store State
     let proxy_tasks = Vec::new(); // No ports restored for now
     let instance = VmInstance {
-        vmm,
+        vmm: vmm.into(),
         id: vm_id.clone(),
         status: VmStatus::Running, // Restored VMs are considered running
         ch_socket_path: socket_path.clone(),
@@ -1442,7 +1442,7 @@ pub async fn adopt_teleported_vm(
     // Register the adopted VM in the daemon state
     let vmm = VmmManager::new(&ch_socket);
     let instance = Arc::new(TokioMutex::new(VmInstance {
-        vmm,
+        vmm: vmm.into(),
         id: payload.vm_id.clone(),
         status: VmStatus::Running, // Adopted VMs are considered running
         attestation_status: None,

@@ -6,6 +6,8 @@ pub mod storage;
 pub mod network;
 pub mod ch_types;
 pub mod vmm;
+#[cfg(target_os = "linux")]
+pub mod qemu;
 pub mod api;
 #[cfg(target_os = "linux")]
 pub mod proxy;

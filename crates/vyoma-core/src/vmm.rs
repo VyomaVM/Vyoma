@@ -7,6 +7,7 @@ use serde::{Serialize, Deserialize};
 use std::path::Path;
 #[cfg(target_os = "linux")]
 use std::process::{Command, Child, Stdio};
+use std::process::ExitStatus;
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 #[cfg(target_os = "linux")]
@@ -55,9 +56,35 @@ pub struct VmmEvent {
     pub properties: Option<serde_json::Value>,
 }
 
+/// Hypervisor selection strategy for `vyomad` micro-VMs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum HypervisorMode {
+    /// Prefer Cloud Hypervisor KVM when `/dev/kvm` exists; fall back to QEMU TCG when unavailable.
+    #[default]
+    Auto,
+    /// Require Cloud Hypervisor with `/dev/kvm`.
+    CloudHypervisor,
+    /// Force QEMU software TCG emulation (useful on Apple Silicon M1/M2 or non-KVM hosts).
+    QemuTcg,
+}
+
+impl HypervisorMode {
+    pub fn from_str_lossy(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "cloud-hypervisor" | "ch" | "kvm" => Ok(Self::CloudHypervisor),
+            "qemu" | "qemu-tcg" | "tcg" => Ok(Self::QemuTcg),
+            other => Err(anyhow::anyhow!(
+                "Invalid hypervisor mode '{}': expected auto, cloud-hypervisor, or qemu-tcg",
+                other
+            )),
+        }
+    }
+}
+
 /// Platform-independent Virtual Machine Monitor backend abstraction.
 /// Implemented natively on Linux via [`VmmManager`] (Cloud Hypervisor)
-/// and extensible to WSL2 / macOS hypervisors in future cross-platform drivers.
+/// and [`crate::qemu::QemuTcgManager`] (software TCG fallback).
 #[async_trait]
 pub trait VmmBackend: Send + Sync {
     fn socket_path(&self) -> &str;
@@ -65,6 +92,7 @@ pub trait VmmBackend: Send + Sync {
     fn subscribe_events(&self) -> broadcast::Receiver<VmmEvent>;
     fn subscribe_logs(&self) -> broadcast::Receiver<String>;
     fn pid(&self) -> Option<u32>;
+    fn try_wait(&mut self) -> Result<Option<ExitStatus>>;
     fn start_daemon(&mut self, binary_path: &str, netns: Option<&str>, rootless: bool) -> Result<()>;
     async fn check_alive(&self) -> bool;
     async fn set_boot_source(&mut self, kernel_path: &str, boot_args: &str, initramfs: Option<&str>) -> Result<()>;
@@ -74,6 +102,7 @@ pub trait VmmBackend: Send + Sync {
     async fn add_file_system(&mut self, fs_id: &str, socket_path: &str, tag: &str) -> Result<()>;
     async fn add_vsock(&mut self, cid: u32, socket_path: &str) -> Result<()>;
     async fn enable_serial(&mut self, file_path: &str) -> Result<()>;
+    async fn set_tpm(&mut self, socket_path: &str) -> Result<()>;
     async fn start_instance(&self) -> Result<()>;
     async fn pause_instance(&self) -> Result<()>;
     async fn resume_instance(&self) -> Result<()>;
@@ -625,6 +654,10 @@ impl VmmBackend for VmmManager {
         self.pid()
     }
 
+    fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
+        self.try_wait()
+    }
+
     fn start_daemon(&mut self, binary_path: &str, netns: Option<&str>, rootless: bool) -> Result<()> {
         self.start_daemon(binary_path, netns, rootless)
     }
@@ -659,6 +692,10 @@ impl VmmBackend for VmmManager {
 
     async fn enable_serial(&mut self, file_path: &str) -> Result<()> {
         self.enable_serial(file_path).await
+    }
+
+    async fn set_tpm(&mut self, socket_path: &str) -> Result<()> {
+        self.set_tpm(socket_path).await
     }
 
     async fn start_instance(&self) -> Result<()> {
@@ -707,6 +744,149 @@ impl Drop for VmmManager {
     fn drop(&mut self) {
         let _ = self.kill();
     }
+}
+
+/// Polymorphic VMM handle used by `vyomad` so VMs can run natively via Cloud Hypervisor
+/// or transparently fall back to QEMU TCG when `/dev/kvm` is unavailable.
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+pub enum AnyVmm {
+    CloudHypervisor(VmmManager),
+    QemuTcg(crate::qemu::QemuTcgManager),
+}
+
+#[cfg(target_os = "linux")]
+impl From<VmmManager> for AnyVmm {
+    fn from(v: VmmManager) -> Self {
+        Self::CloudHypervisor(v)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl From<crate::qemu::QemuTcgManager> for AnyVmm {
+    fn from(q: crate::qemu::QemuTcgManager) -> Self {
+        Self::QemuTcg(q)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl AnyVmm {
+    fn as_backend(&self) -> &dyn VmmBackend {
+        match self {
+            Self::CloudHypervisor(v) => v,
+            Self::QemuTcg(q) => q,
+        }
+    }
+
+    fn as_backend_mut(&mut self) -> &mut dyn VmmBackend {
+        match self {
+            Self::CloudHypervisor(v) => v,
+            Self::QemuTcg(q) => q,
+        }
+    }
+
+    pub fn pid(&self) -> Option<u32> {
+        self.as_backend().pid()
+    }
+
+    pub fn kill(&mut self) -> Result<()> {
+        self.as_backend_mut().kill()
+    }
+
+    pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
+        self.as_backend_mut().try_wait()
+    }
+
+    pub fn subscribe_events(&self) -> broadcast::Receiver<VmmEvent> {
+        self.as_backend().subscribe_events()
+    }
+
+    pub fn subscribe_logs(&self) -> broadcast::Receiver<String> {
+        self.as_backend().subscribe_logs()
+    }
+
+    pub async fn pause_instance(&self) -> Result<()> {
+        self.as_backend().pause_instance().await
+    }
+
+    pub async fn resume_instance(&self) -> Result<()> {
+        self.as_backend().resume_instance().await
+    }
+
+    pub async fn create_snapshot(&self, snapshot_path: &str, mem_file_path: &str) -> Result<()> {
+        self.as_backend().create_snapshot(snapshot_path, mem_file_path).await
+    }
+
+    pub async fn load_snapshot(&self, snapshot_path: &str, mem_file_path: &str) -> Result<()> {
+        self.as_backend().load_snapshot(snapshot_path, mem_file_path).await
+    }
+
+    pub async fn cancel_migration(&self) -> Result<()> {
+        self.as_backend().cancel_migration().await
+    }
+
+    pub async fn resize_disk(&self, disk_id: &str, desired_size: u64) -> Result<()> {
+        self.as_backend().resize_disk(disk_id, desired_size).await
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[async_trait]
+impl VmmBackend for AnyVmm {
+    fn socket_path(&self) -> &str { self.as_backend().socket_path() }
+    fn event_monitor_path(&self) -> Option<&str> { self.as_backend().event_monitor_path() }
+    fn subscribe_events(&self) -> broadcast::Receiver<VmmEvent> { self.as_backend().subscribe_events() }
+    fn subscribe_logs(&self) -> broadcast::Receiver<String> { self.as_backend().subscribe_logs() }
+    fn pid(&self) -> Option<u32> { self.as_backend().pid() }
+    fn try_wait(&mut self) -> Result<Option<ExitStatus>> { self.as_backend_mut().try_wait() }
+    fn start_daemon(&mut self, binary_path: &str, netns: Option<&str>, rootless: bool) -> Result<()> {
+        self.as_backend_mut().start_daemon(binary_path, netns, rootless)
+    }
+    async fn check_alive(&self) -> bool { self.as_backend().check_alive().await }
+    async fn set_boot_source(&mut self, kernel_path: &str, boot_args: &str, initramfs: Option<&str>) -> Result<()> {
+        self.as_backend_mut().set_boot_source(kernel_path, boot_args, initramfs).await
+    }
+    async fn add_drive(&mut self, drive_id: &str, host_path: &str, is_root: bool) -> Result<()> {
+        self.as_backend_mut().add_drive(drive_id, host_path, is_root).await
+    }
+    async fn set_machine_config(&mut self, vcpu_count: u32, mem_size_mib: u32) -> Result<()> {
+        self.as_backend_mut().set_machine_config(vcpu_count, mem_size_mib).await
+    }
+    async fn add_network_interface(&mut self, iface_id: &str, host_dev_name: &str, guest_mac: Option<&str>) -> Result<()> {
+        self.as_backend_mut().add_network_interface(iface_id, host_dev_name, guest_mac).await
+    }
+    async fn add_file_system(&mut self, fs_id: &str, socket_path: &str, tag: &str) -> Result<()> {
+        self.as_backend_mut().add_file_system(fs_id, socket_path, tag).await
+    }
+    async fn add_vsock(&mut self, cid: u32, socket_path: &str) -> Result<()> {
+        self.as_backend_mut().add_vsock(cid, socket_path).await
+    }
+    async fn enable_serial(&mut self, file_path: &str) -> Result<()> {
+        self.as_backend_mut().enable_serial(file_path).await
+    }
+    async fn set_tpm(&mut self, socket_path: &str) -> Result<()> {
+        self.as_backend_mut().set_tpm(socket_path).await
+    }
+    async fn start_instance(&self) -> Result<()> { self.as_backend().start_instance().await }
+    async fn pause_instance(&self) -> Result<()> { self.as_backend().pause_instance().await }
+    async fn resume_instance(&self) -> Result<()> { self.as_backend().resume_instance().await }
+    async fn create_snapshot(&self, snapshot_path: &str, mem_file_path: &str) -> Result<()> {
+        self.as_backend().create_snapshot(snapshot_path, mem_file_path).await
+    }
+    async fn load_snapshot(&self, snapshot_path: &str, mem_file_path: &str) -> Result<()> {
+        self.as_backend().load_snapshot(snapshot_path, mem_file_path).await
+    }
+    async fn send_migration(&self, target_url: &str, bandwidth_mbps: Option<u32>) -> Result<()> {
+        self.as_backend().send_migration(target_url, bandwidth_mbps).await
+    }
+    async fn receive_migration(&self, receiver_url: &str) -> Result<()> {
+        self.as_backend().receive_migration(receiver_url).await
+    }
+    async fn cancel_migration(&self) -> Result<()> { self.as_backend().cancel_migration().await }
+    async fn resize_disk(&self, disk_id: &str, desired_size: u64) -> Result<()> {
+        self.as_backend().resize_disk(disk_id, desired_size).await
+    }
+    fn kill(&mut self) -> Result<()> { self.as_backend_mut().kill() }
 }
 
 #[cfg(test)]
