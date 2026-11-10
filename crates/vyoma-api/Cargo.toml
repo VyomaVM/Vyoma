@@ -1,0 +1,11 @@
+[package]
+name = "vyoma-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Pure-Rust cross-platform HTTP API request/response DTOs for Vyoma"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror = "1.0"

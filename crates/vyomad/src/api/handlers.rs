@@ -15,7 +15,12 @@ use tokio_util::io::StreamReader;
 use uuid;
 use tempfile;
 use vyoma_teleport::{VmInfo};
-use vyoma_core::api::{PortMapping, VolumeMount};
+pub use vyoma_api::{
+    BranchRequest, BranchResponse, CommitRequest, ExecRequest, ExecResponse, ListResponse,
+    PortMapping, PullRequest, PullResponse, ResizeDiskRequest, ResizeDiskResponse,
+    RestoreRequest, RunRequest, RunResponse, SnapshotQuery, TimeTravelRequest, VmSummary,
+    VolumeMount,
+};
 use vyoma_core::fs::VirtioFsManager;
 use vyoma_core::policy::PolicyStatus;
 use vyoma_core::proxy::ProxyManager;
@@ -122,58 +127,10 @@ pub async fn health_check() -> &'static str {
     "OK"
 }
 
-#[derive(Deserialize)]
-pub struct RunRequest {
-    pub image: String,
-    #[serde(default = "default_vcpu")]
-    pub vcpu: u32,
-    #[serde(default = "default_mem")]
-    pub mem_size_mib: u32,
-    #[serde(default)]
-    pub ports: Vec<PortMapping>,
-    #[serde(default)]
-    pub volumes: Vec<VolumeMount>,
-    #[serde(default)]
-    pub hostname: Option<String>,
-    #[serde(default)]
-    pub networks: Vec<String>,
-    #[serde(default)]
-    pub labels: HashMap<String, String>,
-
-    #[serde(default)]
-    pub base_image_path: String,
-}
-
-fn default_vcpu() -> u32 {
-    1
-}
-fn default_mem() -> u32 {
-    512
-}
-
-#[derive(Serialize)]
-pub struct RunResponse {
-    vm_id: String,
-    status: String,
-    ip_address: String,
-}
-
 use vyoma_core::layers::LayerManager;
 use vyoma_core::network::NetworkManager;
 use vyoma_core::oci::OciManager;
 use vyoma_agent_protocol::{AgentRequest, AgentResponse};
-
-#[derive(Deserialize)]
-pub struct ExecRequest {
-    pub command: Vec<String>,
-}
-
-#[derive(Serialize)]
-pub struct ExecResponse {
-    pub stdout: String,
-    pub stderr: String,
-    pub exit_code: i32,
-}
 
 pub async fn exec_in_vm(
     State(state): State<AppState>,
@@ -288,11 +245,6 @@ pub async fn stop_vm(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
-#[derive(Deserialize)]
-pub struct CommitRequest {
-    new_image_name: String,
-}
-
 pub async fn commit_vm(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -332,11 +284,6 @@ pub async fn resume_vm(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
-#[derive(Deserialize, Default)]
-pub struct SnapshotQuery {
-    pub name: Option<String>,
-}
-
 pub async fn snapshot_vm(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -353,23 +300,6 @@ pub async fn snapshot_vm(
         None => String::new(),
     };
     Ok(format!("Snapshot {}{} created for VM {} at {:?}", result.id, tag_info, id, result.path))
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct BranchRequest {
-    pub from: String,
-    pub new_name: String,
-}
-
-#[derive(Serialize, Debug, Clone)]
-pub struct BranchResponse {
-    pub vm_id: String,
-    pub name: String,
-    pub parent_vm_id: String,
-    pub snapshot_id: String,
-    pub status: String,
-    pub ip_address: String,
-    pub cow_file_path: String,
 }
 
 pub async fn branch_vm_handler(
@@ -535,26 +465,6 @@ pub async fn branch_vm_handler(
         ip_address,
         cow_file_path: new_overlay_path.to_string_lossy().to_string(),
     }))
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct RestoreRequest {
-    // Unified parameters for TimeMachine / tag / ID rollback:
-    pub vm_id: Option<String>,
-    pub from: Option<String>,
-    pub snapshot_id: Option<String>,
-
-    // Raw files fallback (used by vyoma load / import):
-    pub snapshot_path: Option<String>,
-    pub mem_path: Option<String>,
-    pub cow_path: Option<String>,
-    pub original_vm_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct TimeTravelRequest {
-    pub vm_id: String,
-    pub snapshot_id: String,
 }
 
 pub async fn restore_vm_by_id(
@@ -850,37 +760,6 @@ pub async fn history_vm(
     let tm = state.timemachine.read().await;
     let history = tm.get_snapshot_history(&id).unwrap_or_default();
     Ok(Json(HistoryResponse { snapshots: history }))
-}
-
-#[derive(Serialize)]
-struct VmSummary {
-    id: String,
-    status: String,
-    ip_address: String,
-    hostname: Option<String>,
-    labels: HashMap<String, String>,
-    attestation_status: Option<String>,
-
-    // For restart
-    base_image_path: String,
-    vcpu: u32,
-    mem_size_mib: u32,
-}
-
-#[derive(Serialize)]
-pub struct ListResponse {
-    vms: Vec<VmSummary>,
-}
-
-#[derive(Serialize)]
-pub struct PullResponse {
-    status: String,
-    path: String,
-}
-
-#[derive(Deserialize)]
-pub struct PullRequest {
-    image: String,
 }
 
 pub async fn pull_image_handler(
@@ -2268,26 +2147,6 @@ async fn cancel_teleport_internal(
             }
         }
     }
-}
-
-#[derive(Deserialize, Debug)]
-pub struct ResizeDiskRequest {
-    #[serde(default = "default_disk_id")]
-    pub disk_id: String,
-    pub desired_size: u64,
-}
-
-fn default_disk_id() -> String {
-    "rootfs".to_string()
-}
-
-#[derive(Serialize, Debug)]
-pub struct ResizeDiskResponse {
-    pub success: bool,
-    pub vm_id: String,
-    pub disk_id: String,
-    pub desired_size: u64,
-    pub message: String,
 }
 
 pub async fn resize_disk_handler(
