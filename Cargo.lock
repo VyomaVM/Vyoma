@@ -3610,7 +3610,6 @@ dependencies = [
  "anyhow",
  "bincode",
  "chrono",
- "libc",
  "reqwest",
  "serde",
  "serde_json",
@@ -3622,7 +3621,6 @@ dependencies = [
  "tracing",
  "vyoma-core",
  "vyoma-image",
- "vyoma-storage",
 ]
 
 [[package]]
