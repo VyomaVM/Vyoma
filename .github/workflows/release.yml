@@ -10,8 +10,21 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    runs-on: ubuntu-latest
+  build-linux-packages:
+    name: Linux Packages (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-latest
+            musl_target: x86_64-unknown-linux-musl
+            ch_asset: cloud-hypervisor-static
+          - arch: arm64
+            os: ubuntu-24.04-arm
+            musl_target: aarch64-unknown-linux-musl
+            ch_asset: cloud-hypervisor-static-aarch64
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -24,16 +37,18 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl
+          targets: ${{ matrix.musl_target }}
 
       - name: Verify Cloud Hypervisor v54.0 Runtime
         run: |
           mkdir -p bin
           if [ ! -f "bin/cloud-hypervisor" ]; then
-            wget -q -O bin/cloud-hypervisor https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-static
+            wget -q -O bin/cloud-hypervisor "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/${{ matrix.ch_asset }}"
             chmod +x bin/cloud-hypervisor
           fi
-          echo "4f4f98a3d661a40f3e5272627cc895a1b2e525f2f6bedf5f895f9cd21ba5c65b  bin/cloud-hypervisor" | sha256sum -c -
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            echo "4f4f98a3d661a40f3e5272627cc895a1b2e525f2f6bedf5f895f9cd21ba5c65b  bin/cloud-hypervisor" | sha256sum -c -
+          fi
           ./bin/cloud-hypervisor --version
 
       - name: Setup Node.js
@@ -43,10 +58,10 @@ jobs:
 
       - name: Build UI
         run: |
-            cd ui
-            npm install
-            npm run build
-            cd ..
+          cd ui
+          npm install
+          npm run build
+          cd ..
 
       - name: Build Debian Package
         run: ./packaging/deb/build.sh
@@ -54,17 +69,86 @@ jobs:
       - name: Build RPM Package
         run: ./packaging/rpm/build.sh
 
-      - name: Verify Packages
+      - name: Upload Linux Packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: vyoma-linux-pkg-${{ matrix.arch }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+
+  build-cli-binaries:
+    name: CLI Binary (${{ matrix.artifact }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: vyoma-linux-x86_64
+            ext: ""
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: vyoma-linux-aarch64
+            ext: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: vyoma-windows-x86_64
+            ext: ".exe"
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: vyoma-macos-aarch64
+            ext: ""
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: vyoma-macos-x86_64
+            ext: ""
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build vyoma CLI
+        run: cargo build --release --bin vyoma --target ${{ matrix.target }}
+
+      - name: Package CLI archive (Unix)
+        if: runner.os != 'Windows'
         run: |
-          echo "DEB files:" && ls -la dist/*.deb || echo "No DEB files found"
-          echo "RPM files:" && ls -la dist/*.rpm || echo "No RPM files found"
+          mkdir -p dist
+          tar -czf "dist/${{ matrix.artifact }}.tar.gz" -C "target/${{ matrix.target }}/release" "vyoma${{ matrix.ext }}"
+
+      - name: Package CLI archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "target/${{ matrix.target }}/release/vyoma${{ matrix.ext }}" -DestinationPath "dist/${{ matrix.artifact }}.zip" -Force
+
+      - name: Upload CLI Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/*
+
+  publish-release:
+    needs: [build-linux-packages, build-cli-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
 
       - name: Create Release & Upload Assets
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            dist/*.deb
-            dist/*.rpm
+          files: release-assets/*
           generate_release_notes: true
           draft: false
           prerelease: false
