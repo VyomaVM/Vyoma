@@ -49,3 +49,4 @@ __pycache__/
 *.egg-info/
 kernel.bzimage
 *.deb
+PHASE4_SUMMARY.md
