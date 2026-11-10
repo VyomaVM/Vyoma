@@ -5,21 +5,16 @@ if [ "$1" = "1" ] || [ "$1" = "2" ]; then
     DATA_DIR="/var/lib/vyoma"
     BIN_DIR="${DATA_DIR}/bin"
 
-    # Add installing user to vyoma, kvm, disk groups
+    # Add installing user to vyoma and kvm groups
     if [ -n "$SUDO_USER" ]; then
         usermod -aG vyoma "$SUDO_USER" 2>/dev/null || true
         usermod -aG kvm "$SUDO_USER" 2>/dev/null || true
-        usermod -aG disk "$SUDO_USER" 2>/dev/null || true
-        echo "Added $SUDO_USER to vyoma, kvm and disk groups. Log out and back in to use CLI."
+        echo "Added $SUDO_USER to vyoma and kvm groups. Log out and back in to use CLI."
     fi
 
     # Fix /dev/kvm permissions
     chmod 0660 /dev/kvm 2>/dev/null || true
     chown root:kvm /dev/kvm 2>/dev/null || true
-
-    # Fix /dev/mapper/control permissions
-    chmod 0660 /dev/mapper/control 2>/dev/null || true
-    chown root:disk /dev/mapper/control 2>/dev/null || true
 
     # Create runtime directory
     mkdir -p /run/vyoma
