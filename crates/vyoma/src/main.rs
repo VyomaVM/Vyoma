@@ -16,6 +16,7 @@ use tracing::{error, info, warn};
 mod context;
 mod machine;
 mod paths;
+mod remote;
 
 use vyoma_api::PortMapping;
 use vyoma_api::VolumeMount;
@@ -343,6 +344,69 @@ enum Commands {
         #[command(subcommand)]
         command: MachineCommands,
     },
+    /// Connect Windows/macOS CLI to remote Linux KVM daemons directly or over SSH tunnels
+    Remote {
+        #[command(subcommand)]
+        command: RemoteCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum RemoteCommands {
+    /// Verify and save a direct remote http(s):// connection to a Linux KVM daemon
+    Connect {
+        /// Profile/context name (e.g. prod-kvm)
+        name: String,
+        /// Remote daemon host URL (e.g. http://192.168.1.50:8080 or https://vyoma.example.com)
+        #[arg(long)]
+        host: String,
+        /// Optional Bearer API token matching remote `vyomad --api-token`
+        #[arg(long)]
+        api_token: Option<String>,
+        /// Skip live /health & /ps reachability check before saving context
+        #[arg(long, default_value_t = false)]
+        no_verify: bool,
+        /// Do not immediately switch active context to this remote
+        #[arg(long, default_value_t = false)]
+        no_use: bool,
+    },
+    /// Open an SSH port-forwarding tunnel (using native OpenSSH on Windows/macOS/Linux) and activate a local context
+    Tunnel {
+        /// Tunnel / context name
+        name: String,
+        /// SSH target (e.g. ubuntu@192.168.1.50)
+        #[arg(long)]
+        ssh: String,
+        /// SSH server port
+        #[arg(long, default_value_t = 22)]
+        ssh_port: u16,
+        /// Local forwarded TCP port on Windows/macOS client
+        #[arg(long, default_value_t = 18080)]
+        local_port: u16,
+        /// Remote `vyomad` HTTP port on Linux host
+        #[arg(long, default_value_t = 8080)]
+        remote_port: u16,
+        /// Optional SSH private key path (`-i`)
+        #[arg(long)]
+        identity: Option<String>,
+        /// Optional Bearer API token matching remote `vyomad --api-token`
+        #[arg(long)]
+        api_token: Option<String>,
+        /// Run tunnel in the background and track PID for `vyoma remote disconnect`
+        #[arg(short, long, default_value_t = false)]
+        background: bool,
+    },
+    /// Stop a background SSH tunnel
+    Disconnect {
+        /// Tunnel name
+        name: String,
+    },
+    /// Show configured remote contexts and tracked SSH tunnels
+    Status {
+        /// Actively probe HTTP/HTTPS remote endpoints for /health and authentication
+        #[arg(long, default_value_t = false)]
+        probe: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -492,11 +556,14 @@ async fn main() -> Result<()> {
 
     let ctx_store_path = context::default_contexts_path();
 
-    // Handle offline context and machine management commands before opening daemon transport
+    // Handle offline context, machine, and remote management commands before opening daemon transport
     match cli.command {
         Commands::Context { command } => return handle_context_command(&ctx_store_path, command),
         Commands::Machine { command } => {
             return handle_machine_command(command, cli.http_port);
+        }
+        Commands::Remote { command } => {
+            return handle_remote_command(command).await;
         }
         _ => {}
     }
@@ -1720,12 +1787,45 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Context { .. } | Commands::Machine { .. } => {
+        Commands::Context { .. } | Commands::Machine { .. } | Commands::Remote { .. } => {
             unreachable!("handled prior to daemon connection")
         }
     }
 
     Ok(())
+}
+
+async fn handle_remote_command(command: RemoteCommands) -> Result<()> {
+    match command {
+        RemoteCommands::Connect {
+            name,
+            host,
+            api_token,
+            no_verify,
+            no_use,
+        } => remote::connect_remote(name, host, api_token, !no_verify, !no_use).await,
+        RemoteCommands::Tunnel {
+            name,
+            ssh,
+            ssh_port,
+            local_port,
+            remote_port,
+            identity,
+            api_token,
+            background,
+        } => remote::start_ssh_tunnel(
+            name,
+            ssh,
+            ssh_port,
+            local_port,
+            remote_port,
+            identity,
+            api_token,
+            background,
+        ),
+        RemoteCommands::Disconnect { name } => remote::disconnect_tunnel(&name),
+        RemoteCommands::Status { probe } => remote::list_remote_status(probe).await,
+    }
 }
 
 fn handle_machine_command(command: MachineCommands, default_http_port: u16) -> Result<()> {
