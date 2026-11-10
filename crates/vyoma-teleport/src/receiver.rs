@@ -6,15 +6,13 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
 use crate::sender::{VmInfo, MigrationProgress};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReceiveMigrationData {
-    pub receiver_url: String,
-}
+pub use vyoma_core::ch_types::ReceiveMigrationData;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiveMigrationConfig {
     pub receiver_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trusted_source_ips: Option<Vec<String>>,
 }
@@ -45,9 +43,18 @@ impl TeleportReceiver {
         ch_socket_path: &str,
         trusted_source_ips: Option<Vec<String>>,
     ) -> Result<(), String> {
+        self.start_receiving_with_tls(ch_socket_path, trusted_source_ips, None).await
+    }
+
+    pub async fn start_receiving_with_tls(
+        &self,
+        ch_socket_path: &str,
+        trusted_source_ips: Option<Vec<String>>,
+        tls_dir: Option<String>,
+    ) -> Result<(), String> {
         info!(
-            "Instructing Cloud Hypervisor to listen for migration on TCP port 9000, trusted sources: {:?}",
-            trusted_source_ips
+            "Instructing Cloud Hypervisor to listen for migration on TCP port 9000, trusted sources: {:?}, tls_dir: {:?}",
+            trusted_source_ips, tls_dir
         );
 
         let client = Client::builder()
@@ -59,6 +66,7 @@ impl TeleportReceiver {
         let receiver_url = format!("tcp:{}:9000", self.listen_addr);
         let config = ReceiveMigrationConfig {
             receiver_url,
+            tls_dir,
             trusted_source_ips,
         };
 

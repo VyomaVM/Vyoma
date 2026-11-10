@@ -3,18 +3,11 @@ use std::time::Duration;
 use tracing::{error, info, warn};
 use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 use tokio::time::sleep;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SendMigrationData {
-    pub destination_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub local: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bandwidth: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<String>,
-}
+pub use vyoma_core::ch_types::SendMigrationData;
+use vyoma_core::vmm::VmmEvent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmInfo {
@@ -147,6 +140,7 @@ impl Teleporter {
             local: Some(false),
             bandwidth: bandwidth_mbps,
             mode,
+            ..Default::default()
         };
 
         let response = client
@@ -176,6 +170,17 @@ impl Teleporter {
         ch_socket_path: &str,
         progress_callback: Option<Box<dyn Fn(MigrationProgress) + Send + Sync>>,
     ) -> Result<(), String> {
+        self.wait_for_migration_with_events(ch_socket_path, None, progress_callback).await
+    }
+
+    /// Monitor live migration using VMM event stream notifications when provided,
+    /// falling back to periodic `/api/v1/vm.info` checks for telemetry.
+    pub async fn wait_for_migration_with_events(
+        &self,
+        ch_socket_path: &str,
+        mut event_rx: Option<broadcast::Receiver<VmmEvent>>,
+        progress_callback: Option<Box<dyn Fn(MigrationProgress) + Send + Sync>>,
+    ) -> Result<(), String> {
         let client = Client::builder()
             .timeout(Duration::from_secs(5))
             .unix_socket(ch_socket_path)
@@ -195,6 +200,29 @@ impl Teleporter {
                 return Err("Migration timeout: exceeded 10 minutes and cancelled".to_string());
             }
 
+            if let Some(ref mut rx) = event_rx {
+                tokio::select! {
+                    evt_res = rx.recv() => {
+                        if let Ok(evt) = evt_res {
+                            match evt.event.as_str() {
+                                "migration-completed" => {
+                                    info!("Received VMM migration-completed event!");
+                                    return Ok(());
+                                }
+                                "migration-cancelled" => {
+                                    return Err("Migration cancelled".to_string());
+                                }
+                                "migration-failed" => {
+                                    return Err("Migration failed".to_string());
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ = sleep(poll_interval) => {}
+                }
+            }
+
             let response = client
                 .request(Method::GET, "http://localhost/api/v1/vm.info")
                 .send()
@@ -202,7 +230,9 @@ impl Teleporter {
                 .map_err(|e| format!("Failed to query vm.info: {}", e))?;
 
             if !response.status().is_success() {
-                sleep(poll_interval).await;
+                if event_rx.is_none() {
+                    sleep(poll_interval).await;
+                }
                 continue;
             }
 
@@ -287,7 +317,9 @@ impl Teleporter {
                 }
             }
 
-            sleep(poll_interval).await;
+            if event_rx.is_none() {
+                sleep(poll_interval).await;
+            }
         }
     }
 }
@@ -303,12 +335,15 @@ mod tests {
             local: Some(false),
             bandwidth: Some(1000),
             mode: Some("precopy".to_string()),
+            tls_dir: Some("/etc/vyoma/tls".to_string()),
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&data).unwrap();
         assert!(json.contains("\"destination_url\":\"tcp:192.168.1.100:9000\""));
         assert!(json.contains("\"bandwidth\":1000"));
         assert!(json.contains("\"mode\":\"precopy\""));
+        assert!(json.contains("\"tls_dir\":\"/etc/vyoma/tls\""));
         assert!(json.contains("\"local\":false"));
     }
 
@@ -316,15 +351,30 @@ mod tests {
     fn test_send_migration_data_serialization_minimal() {
         let data = SendMigrationData {
             destination_url: "tcp:192.168.1.100:9000".to_string(),
-            local: None,
-            bandwidth: None,
-            mode: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&data).unwrap();
         assert!(json.contains("\"destination_url\":\"tcp:192.168.1.100:9000\""));
         assert!(!json.contains("\"bandwidth\""));
         assert!(!json.contains("\"mode\""));
+        assert!(!json.contains("\"tls_dir\""));
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_migration_reacts_to_vmm_event() {
+        let teleporter = Teleporter::new("vm-evt".to_string(), "10.0.0.5".to_string(), 1024 * 1024);
+        let (tx, rx) = broadcast::channel(8);
+        let _ = tx.send(VmmEvent {
+            timestamp: None,
+            source: "vm".to_string(),
+            event: "migration-completed".to_string(),
+            properties: None,
+        });
+        let res = teleporter
+            .wait_for_migration_with_events("/tmp/nonexistent.sock", Some(rx), None)
+            .await;
+        assert!(res.is_ok());
     }
 
     #[test]

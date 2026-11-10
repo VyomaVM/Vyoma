@@ -395,6 +395,7 @@ impl VmmManager {
             destination_url: target_url.to_string(),
             local: None,
             bandwidth: bandwidth_mbps,
+            ..Default::default()
         };
         self.api_request("/api/v1/vm.send-migration", Method::PUT, Some(&config)).await
     }
@@ -402,6 +403,7 @@ impl VmmManager {
     pub async fn receive_migration(&self, receiver_url: &str) -> Result<()> {
         let config = ReceiveMigrationData {
             receiver_url: receiver_url.to_string(),
+            tls_dir: None,
         };
         self.api_request("/api/v1/vm.receive-migration", Method::PUT, Some(&config)).await
     }

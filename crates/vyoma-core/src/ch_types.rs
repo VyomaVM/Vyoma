@@ -145,18 +145,26 @@ pub struct VmRestoreConfig {
     pub source_url: String, // "file:///path/to/snapshot"
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ReceiveMigrationData {
     pub receiver_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_dir: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SendMigrationData {
     pub destination_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bandwidth: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub downtime_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
