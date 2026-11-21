@@ -3657,7 +3657,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "clap 4.6.0",
@@ -3689,7 +3689,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-agent-vm"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "clap 4.6.0",
@@ -3706,7 +3706,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-api"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3715,7 +3715,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-build"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3735,7 +3735,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-compose"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -3745,7 +3745,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-core"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3771,7 +3771,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-image"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3794,7 +3794,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-integration-tests"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "cpio",
  "flate2",
@@ -3805,7 +3805,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-net"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3830,7 +3830,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-proto"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3850,7 +3850,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-sdk"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3866,7 +3866,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-storage"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -3881,7 +3881,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-teleport"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -3904,7 +3904,7 @@ dependencies = [
 
 [[package]]
 name = "vyoma-vk8s"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "tokio",
@@ -3917,7 +3917,7 @@ dependencies = [
 
 [[package]]
 name = "vyomad"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
