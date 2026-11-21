@@ -15,9 +15,13 @@ pub mod proxy;
 pub mod fs;
 #[cfg(target_os = "linux")]
 pub mod vtpm;
+#[cfg(target_os = "linux")]
 pub mod attest;
+#[cfg(target_os = "linux")]
 pub mod firmware;
+#[cfg(target_os = "linux")]
 pub mod policy;
+#[cfg(target_os = "linux")]
 pub mod unified_attest;
 
 #[cfg(target_os = "linux")]

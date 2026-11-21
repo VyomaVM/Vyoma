@@ -42,12 +42,13 @@ jobs:
       - name: Verify Cloud Hypervisor v54.0 Runtime
         run: |
           mkdir -p bin
-          if [ ! -f "bin/cloud-hypervisor" ]; then
-            wget -q -O bin/cloud-hypervisor "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/${{ matrix.ch_asset }}"
-            chmod +x bin/cloud-hypervisor
-          fi
+          rm -f bin/cloud-hypervisor
+          wget -q -O bin/cloud-hypervisor "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/${{ matrix.ch_asset }}"
+          chmod +x bin/cloud-hypervisor
           if [ "${{ matrix.arch }}" = "amd64" ]; then
             echo "4f4f98a3d661a40f3e5272627cc895a1b2e525f2f6bedf5f895f9cd21ba5c65b  bin/cloud-hypervisor" | sha256sum -c -
+          elif [ "${{ matrix.arch }}" = "arm64" ]; then
+            echo "e8a6d9786ea678e739f1a386682846e93742dcb9c7b6e3e0c62e3bda6cff0ef3  bin/cloud-hypervisor" | sha256sum -c -
           fi
           ./bin/cloud-hypervisor --version
 

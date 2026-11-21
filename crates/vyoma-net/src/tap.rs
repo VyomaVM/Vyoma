@@ -3,11 +3,8 @@ use rtnetlink::{new_connection, Handle};
 use netlink_packet_route::link::State;
 use netlink_packet_route::link::LinkAttribute;
 use futures::stream::TryStreamExt;
-use std::process::Command;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use libc;
-use std::mem;
-use std::ffi::CString;
 
 use crate::error::{NetworkError, Result};
 
@@ -55,9 +52,9 @@ impl TapManager {
             ));
         }
         // Initialize the ifr_name array with zeros (for null termination)
-        let mut ifr_name: [i8; libc::IFNAMSIZ as usize] = [0; libc::IFNAMSIZ as usize];
+        let mut ifr_name: [libc::c_char; libc::IFNAMSIZ as usize] = [0; libc::IFNAMSIZ as usize];
         for (i, &byte) in name_bytes.iter().enumerate() {
-            ifr_name[i] = byte as i8;
+            ifr_name[i] = byte as libc::c_char;
         }
         ifr.ifr_name = ifr_name;
 
