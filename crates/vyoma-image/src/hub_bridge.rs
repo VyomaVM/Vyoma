@@ -67,24 +67,56 @@ impl HubBridge {
             image_ref,
             target_arch,
             config,
-            effective_kernel,
+            effective_kernel.clone(),
             None,
             SquashfsCompression::default(),
         ).map_err(|e| HubBridgeError::ConversionError(e.to_string()))?;
 
-        if let Some(profile) = suggested_profile {
+        if let Some(profile) = suggested_profile.as_ref() {
             info!("Enriching VMIF with kernel profile '{}' for image '{}'", profile.name, image_ref);
-            vmif_image.manifest.kernel_profile = Some(profile.name);
-            vmif_image.manifest.kernel_cmdline = Some(profile.recommended_cmdline);
-            let manifest_path = image_dir.join("vyoma.toml");
-            if let Ok(toml_str) = toml::to_string_pretty(&vmif_image.manifest) {
-                let _ = std::fs::write(&manifest_path, toml_str);
-            }
+            vmif_image.manifest.kernel_profile = Some(profile.name.clone());
+            vmif_image.manifest.kernel_cmdline = Some(profile.recommended_cmdline.clone());
+        }
+
+        // Generate dm-verity Merkle tree root hash for the converted squashfs rootfs
+        let verity_res = crate::verity::generate_verity_from_file(&vmif_image.rootfs_path, None, 4096).ok();
+        let verity_root_hash = verity_res.as_ref().map(|v| v.spec.root_hash.clone());
+        if let Some(ref v) = verity_res {
+            vmif_image.manifest.verity_spec = Some(v.spec.clone());
+        }
+
+        // Attach Software VMIF v2.0 specification
+        let software_spec = crate::vmif::SoftwareArtifactSpec {
+            name: image_ref.to_string(),
+            version: "latest".to_string(),
+            compatible_workloads: suggested_profile.as_ref().map(|p| vec![format!("{:?}", p.workload).to_lowercase()]).unwrap_or_default(),
+            rootfs_digest: vmif_image.manifest.rootfs.clone(),
+            rootfs_size_bytes: vmif_image.manifest.size_bytes,
+            compression: "zstd".to_string(),
+            verity_root_hash,
+            verity_algorithm: Some("sha256".to_string()),
+            verity_block_size: Some(4096),
+            suggested_kernel: effective_kernel.clone(),
+        };
+
+        vmif_image.manifest.schema_version = 2;
+        vmif_image.manifest.artifact_type = crate::vmif::VmifArtifactType::Software;
+        vmif_image.manifest.media_type = Some(crate::vmif::media_types::VMIF_SOFTWARE_V2.to_string());
+        vmif_image.manifest.software_spec = Some(software_spec);
+
+        let manifest_path = image_dir.join("vyoma.toml");
+        if let Ok(toml_str) = toml::to_string_pretty(&vmif_image.manifest) {
+            let _ = std::fs::write(&manifest_path, toml_str);
+        }
+
+        let json_path = image_dir.join("vmif-software.json");
+        if let Ok(canonical_bytes) = crate::canonical::to_canonical_json(&vmif_image.manifest) {
+            let _ = std::fs::write(&json_path, canonical_bytes);
         }
 
         std::fs::remove_dir_all(&staging_dir).ok();
 
-        info!("Successfully converted {} to VMIF", image_ref);
+        info!("Successfully converted {} to Software VMIF v2.0", image_ref);
 
         Ok(vmif_image)
     }
