@@ -109,6 +109,14 @@ enum Commands {
         /// Labels (key=value)
         #[arg(short = 'l', long)]
         labels: Vec<String>,
+
+        /// Specialized kernel profile or image path (e.g. microvm-v6.6, kernels/ai-cuda, or /boot/vmlinuz)
+        #[arg(long)]
+        kernel: Option<String>,
+
+        /// Custom kernel boot parameters (appended to command line)
+        #[arg(long)]
+        kernel_cmdline: Option<String>,
     },
     /// Stop a VM
     Stop {
@@ -349,6 +357,39 @@ enum Commands {
         #[command(subcommand)]
         command: RemoteCommands,
     },
+    /// Generate an Ed25519 developer signing keypair for VMIF v2.0 images
+    Keygen {
+        /// Path to output private key (defaults to ~/.vyoma/keys/developer.key)
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+
+        /// Register the generated public key in ~/.vyoma/trusted_keys/
+        #[arg(long, default_value_t = true)]
+        trust: bool,
+    },
+    /// Manage, inspect, and verify VMIF v2.0 images
+    Image {
+        #[command(subcommand)]
+        command: ImageCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ImageCommands {
+    /// Inspect VMIF artifact metadata, verification status, and verity root hash
+    Inspect {
+        /// Image name (e.g. alpine:latest, myapp:v2)
+        image: String,
+    },
+    /// Cryptographically verify an image's VMIF manifest and dm-verity integrity
+    Verify {
+        /// Image name (e.g. alpine:latest, myapp:v2)
+        image: String,
+
+        /// Optional path to public key for verification
+        #[arg(long)]
+        key: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -530,6 +571,10 @@ struct RunRequest {
     volumes: Vec<VolumeMount>,
     hostname: Option<String>,
     labels: HashMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kernel: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kernel_cmdline: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -556,7 +601,7 @@ async fn main() -> Result<()> {
 
     let ctx_store_path = context::default_contexts_path();
 
-    // Handle offline context, machine, and remote management commands before opening daemon transport
+    // Handle offline context, machine, remote, and keygen management commands before opening daemon transport
     match cli.command {
         Commands::Context { command } => return handle_context_command(&ctx_store_path, command),
         Commands::Machine { command } => {
@@ -564,6 +609,9 @@ async fn main() -> Result<()> {
         }
         Commands::Remote { command } => {
             return handle_remote_command(command).await;
+        }
+        Commands::Keygen { out, trust } => {
+            return handle_keygen_command(out, trust);
         }
         _ => {}
     }
@@ -623,6 +671,8 @@ async fn main() -> Result<()> {
             volumes,
             hostname,
             labels,
+            kernel,
+            kernel_cmdline,
         } => {
             info!("Requesting to run image: {}", image);
 
@@ -670,6 +720,10 @@ async fn main() -> Result<()> {
                 }
             }
 
+            let kernel_cmdline_vec = kernel_cmdline.map(|k| {
+                k.split_whitespace().map(|s| s.to_string()).collect()
+            });
+
             let payload = RunRequest {
                 image,
                 vcpu,
@@ -678,6 +732,8 @@ async fn main() -> Result<()> {
                 volumes: volume_mounts,
                 hostname,
                 labels: label_map,
+                kernel,
+                kernel_cmdline: kernel_cmdline_vec,
             };
 
             let resp = client
@@ -877,6 +933,8 @@ async fn main() -> Result<()> {
                         volumes: vm_state.volumes,
                         hostname: vm_state.hostname,
                         labels: vm_state.labels,
+                        kernel: None,
+                        kernel_cmdline: None,
                     };
 
                     let resp = client
@@ -1489,6 +1547,8 @@ async fn main() -> Result<()> {
                                 l.insert("vyoma.service".to_string(), name.clone());
                                 l
                             },
+                            kernel: service.kernel.clone(),
+                            kernel_cmdline: service.kernel_cmdline.clone(),
                         };
 
                         let resp = client
@@ -1787,7 +1847,10 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Context { .. } | Commands::Machine { .. } | Commands::Remote { .. } => {
+        Commands::Image { command } => {
+            handle_image_command(&client, &daemon_url, command).await?;
+        }
+        Commands::Context { .. } | Commands::Machine { .. } | Commands::Remote { .. } | Commands::Keygen { .. } => {
             unreachable!("handled prior to daemon connection")
         }
     }
@@ -1853,6 +1916,161 @@ fn handle_machine_command(command: MachineCommands, default_http_port: u16) -> R
         MachineCommands::Status { name } => machine::status_machines(name.as_deref()),
         MachineCommands::Rm { name } => machine::remove_machine(&name),
     }
+}
+
+fn handle_keygen_command(out_path: Option<PathBuf>, trust: bool) -> Result<()> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let key_dir = if let Some(ref p) = out_path {
+        p.parent().unwrap_or_else(|| Path::new(".")).to_path_buf()
+    } else {
+        home.join(".vyoma").join("keys")
+    };
+    std::fs::create_dir_all(&key_dir)?;
+
+    let signing_key = vyoma_image::signing::SigningKeyPair::generate();
+    let base_name = if let Some(ref p) = out_path {
+        p.file_stem().unwrap_or_default().to_string_lossy().to_string()
+    } else {
+        "developer".to_string()
+    };
+
+    let (priv_path, pub_path) = signing_key.save_keypair_to_files(&key_dir, &base_name)?;
+
+    println!("{}", "✔ Ed25519 Developer Keypair Generated Successfully".green().bold());
+    println!("  Private Key: {}", priv_path.display().to_string().cyan());
+    println!("  Public Key:  {}", pub_path.display().to_string().cyan());
+
+    if trust {
+        let trusted_dir = home.join(".vyoma").join("trusted_keys");
+        std::fs::create_dir_all(&trusted_dir)?;
+        let key_name = pub_path.file_name().unwrap_or_default();
+        let target_trusted_path = trusted_dir.join(key_name);
+        std::fs::copy(&pub_path, &target_trusted_path)?;
+        println!("  Trust Store: Added to {}", target_trusted_path.display().to_string().green());
+    }
+
+    Ok(())
+}
+
+async fn handle_image_command(client: &Client, daemon_url: &str, command: ImageCommands) -> Result<()> {
+    match command {
+        ImageCommands::Inspect { image } => {
+            let sanitized = image.replace(':', "_").replace('/', "_");
+            let local_manifest_path = dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".vyoma")
+                .join("images")
+                .join(&sanitized)
+                .join("vyoma.toml");
+
+            if local_manifest_path.exists() {
+                if let Ok(m) = vyoma_image::VmifConverter::load_manifest(&local_manifest_path) {
+                    println!("{}", format!("VMIF v2.0 Artifact Inspection: {}", image).bold().cyan());
+                    println!("  Artifact Type:       {:?}", m.artifact_type);
+                    println!("  Schema Version:      {}", m.schema_version);
+                    println!("  Target Architecture: {}", m.arch);
+                    if let Some(ref kernel) = m.kernel {
+                        println!("  Kernel Ref:          {}", kernel);
+                    }
+                    if let Some(ref cmdline) = m.kernel_cmdline {
+                        println!("  Kernel Cmdline:      {}", cmdline.join(" "));
+                    }
+                    if let Some(ref verity) = m.verity_spec {
+                        println!("  dm-verity Root Hash: {}", verity.root_hash.green());
+                    } else if let Some(ref sw) = m.software_spec {
+                        if let Some(ref vh) = sw.verity_root_hash {
+                            println!("  dm-verity Root Hash: {}", vh.green());
+                        }
+                    }
+                    if let Some(ref rep) = m.verification_report {
+                        println!("  Hub Security Scan:   Status: {:?}, CVE Critical: {}, Detonation: {}", 
+                            rep.status, rep.cve_critical_count, rep.detonation_passed);
+                    }
+                    return Ok(());
+                }
+            }
+
+            let resp = client.get(format!("{}/image/inspect/{}", daemon_url, image)).send().await;
+            if let Ok(r) = resp {
+                if r.status().is_success() {
+                    if let Ok(inspect_api) = r.json::<vyoma_api::VmifInspectResponse>().await {
+                        println!("{}", format!("VMIF v2.0 Artifact Inspection (Daemon): {}", image).bold().cyan());
+                        println!("  Artifact Type:       {:?}", inspect_api.artifact_type);
+                        println!("  Schema Version:      {}", inspect_api.schema_version);
+                        println!("  Target Architecture: {}", inspect_api.arch);
+                        if let Some(ref st) = inspect_api.verification_status {
+                            println!("  Verification Status: {:?}", st);
+                        }
+                        if let Some(ref k) = inspect_api.kernel_ref {
+                            println!("  Kernel Ref:          {}", k);
+                        }
+                        if let Some(ref vh) = inspect_api.verity_root_hash {
+                            println!("  dm-verity Root Hash: {}", vh.green());
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+
+            println!("{}", format!("Image '{}' not found in local store or daemon", image).yellow());
+        }
+        ImageCommands::Verify { image, key: _ } => {
+            let sanitized = image.replace(':', "_").replace('/', "_");
+            let image_dir = dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".vyoma")
+                .join("images")
+                .join(&sanitized);
+            let manifest_path = image_dir.join("vyoma.toml");
+            let signed_manifest_path = image_dir.join("vyoma.signed.toml");
+
+            if !manifest_path.exists() && !signed_manifest_path.exists() {
+                println!("{}", format!("Image '{}' not found locally at {:?}", image, image_dir).red());
+                return Ok(());
+            }
+
+            println!("{}", format!("Verifying VMIF Image: {}", image).cyan().bold());
+
+            let mut policy = vyoma_image::signing::TrustPolicy::new(true);
+            let _ = policy.load_standard_trusted_dirs();
+
+            if signed_manifest_path.exists() {
+                let signed_manifest = vyoma_image::SignedManifest::load_from_file(&signed_manifest_path)?;
+                match policy.verify(&signed_manifest) {
+                    Ok(()) => println!("  ✔ Manifest Signature: Verified (Valid Ed25519 signature from trusted key)"),
+                    Err(e) => println!("  ✘ Manifest Signature: Untrusted or Invalid ({})", e),
+                }
+            } else {
+                println!("  ⚠ Manifest Signature: Unsigned (no vyoma.signed.toml found)");
+            }
+
+            if let Ok(manifest) = vyoma_image::VmifConverter::load_manifest(&manifest_path) {
+                let verity_hash = manifest.verity_spec.as_ref().map(|v| v.root_hash.clone())
+                    .or_else(|| manifest.software_spec.as_ref().and_then(|s| s.verity_root_hash.clone()));
+
+                if let Some(expected_hash) = verity_hash {
+                    let rootfs_path = image_dir.join("rootfs.sqfs");
+                    if rootfs_path.exists() {
+                        let rootfs_bytes = std::fs::read(&rootfs_path)?;
+                        let res = vyoma_image::verity::generate_verity_from_bytes(&rootfs_bytes, None, 4096)
+                            .map_err(|e| anyhow::anyhow!("Verity calc failed: {}", e))?;
+                        if res.spec.root_hash.to_lowercase() == expected_hash.to_lowercase() {
+                            println!("  ✔ dm-verity Integrity: Verified (Root Hash: {})", res.spec.root_hash.green());
+                        } else {
+                            println!("  ✘ dm-verity Integrity: MISMATCH (Expected {}, got {})", expected_hash, res.spec.root_hash.red());
+                        }
+                    } else {
+                        println!("  ⚠ dm-verity: rootfs.sqfs not found locally for verification");
+                    }
+                } else {
+                    println!("  ⚠ dm-verity: No root hash embedded in manifest");
+                }
+            }
+
+            println!("{}", "Verification finished.".bold());
+        }
+    }
+    Ok(())
 }
 
 fn handle_context_command(store_path: &Path, command: ContextCommands) -> Result<()> {
@@ -2688,6 +2906,8 @@ async fn start_service_helper(
             l.insert("vyoma.service".to_string(), name.to_string());
             l
         },
+        kernel: service.kernel.clone(),
+        kernel_cmdline: service.kernel_cmdline.clone(),
     };
 
     let resp = client
@@ -2925,6 +3145,87 @@ mod tests {
 
         // When specified non-existent file:
         assert!(resolve_compose_file(Some("/nonexistent/file.yml")).is_err());
+    }
+
+    #[test]
+    fn test_cli_parse_run_with_kernel_and_cmdline() {
+        let cli = Cli::try_parse_from([
+            "vyoma",
+            "run",
+            "alpine:latest",
+            "--kernel",
+            "microvm-v6.6",
+            "--kernel-cmdline",
+            "console=ttyS0 quiet",
+        ]).unwrap();
+
+        match cli.command {
+            Commands::Run { image, kernel, kernel_cmdline, .. } => {
+                assert_eq!(image, "alpine:latest");
+                assert_eq!(kernel, Some("microvm-v6.6".to_string()));
+                assert_eq!(kernel_cmdline, Some("console=ttyS0 quiet".to_string()));
+            }
+            _ => panic!("Expected Commands::Run"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_keygen_and_execution() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let key_path = temp_dir.path().join("mydev.key");
+
+        let cli = Cli::try_parse_from([
+            "vyoma",
+            "keygen",
+            "--out",
+            key_path.to_str().unwrap(),
+            "--trust",
+        ]).unwrap();
+
+        match cli.command {
+            Commands::Keygen { out, trust } => {
+                assert_eq!(out, Some(key_path.clone()));
+                assert!(trust);
+            }
+            _ => panic!("Expected Commands::Keygen"),
+        }
+
+        assert!(handle_keygen_command(Some(key_path.clone()), false).is_ok());
+        assert!(key_path.exists());
+        assert!(key_path.with_extension("pub").exists());
+    }
+
+    #[test]
+    fn test_cli_parse_image_inspect_and_verify() {
+        let cli_inspect = Cli::try_parse_from([
+            "vyoma",
+            "image",
+            "inspect",
+            "myapp:v2",
+        ]).unwrap();
+
+        match cli_inspect.command {
+            Commands::Image { command } => match command {
+                ImageCommands::Inspect { image } => assert_eq!(image, "myapp:v2"),
+                _ => panic!("Expected ImageCommands::Inspect"),
+            },
+            _ => panic!("Expected Commands::Image"),
+        }
+
+        let cli_verify = Cli::try_parse_from([
+            "vyoma",
+            "image",
+            "verify",
+            "myapp:v2",
+        ]).unwrap();
+
+        match cli_verify.command {
+            Commands::Image { command } => match command {
+                ImageCommands::Verify { image, .. } => assert_eq!(image, "myapp:v2"),
+                _ => panic!("Expected ImageCommands::Verify"),
+            },
+            _ => panic!("Expected Commands::Image"),
+        }
     }
 }
 
