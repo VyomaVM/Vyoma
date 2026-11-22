@@ -149,8 +149,24 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         &request.volumes,
     ).await?;
 
-    let kernel_path = image::resolve_kernel_from_manifest(&prepared_image.manifest, &state.data_dir)
-        .unwrap_or_else(|| image::get_default_kernel_path(&state.data_dir));
+    let kernel_path = image::resolve_kernel(
+        request.kernel.as_deref(),
+        &prepared_image.manifest,
+        &state.data_dir,
+    );
+
+    let effective_cmdline: Option<String> = request.kernel_cmdline.as_ref()
+        .map(|v| v.join(" "))
+        .or_else(|| {
+            prepared_image.manifest.as_ref()
+                .and_then(|m| m.composite_spec.as_ref())
+                .map(|c| c.cmdline_overrides.join(" "))
+        })
+        .or_else(|| {
+            prepared_image.manifest.as_ref()
+                .and_then(|m| m.kernel_cmdline.as_ref())
+                .map(|k| k.join(" "))
+        });
 
     let ch_config = config::build_ch_config(
         &state,
@@ -161,6 +177,7 @@ pub async fn run_vm(state: Arc<AppState>, request: VmRunRequest) -> Result<VmRun
         &network_config,
         &agent_config,
         &kernel_path,
+        effective_cmdline.as_deref(),
     );
 
     let cgroup_path = setup_cgroups(&state, &vm_id, request.vcpu, request.mem_size_mib)?;

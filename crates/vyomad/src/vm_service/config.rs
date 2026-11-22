@@ -13,6 +13,7 @@ pub fn build_ch_config(
     network_config: &VmNetworkConfig,
     agent_config: &AgentConfig,
     kernel_path: &PathBuf,
+    extra_cmdline: Option<&str>,
 ) -> ChConfig {
     let socket_path = vm_dir.join("ch.sock").to_string_lossy().to_string();
     let ch_path = {
@@ -25,13 +26,21 @@ pub fn build_ch_config(
     };
     let vsock_path = vm_dir.join("vsock.sock");
 
-    let boot_args = format!(
+    let mut boot_args = format!(
         "console=ttyS0 reboot=k panic=1 root=/dev/vda rw ip={}::{}:255.255.255.0:{}:eth0:off:{} init=/sbin/vyoma-init",
         network_config.ip_address,
         network_config.gateway,
         vm_id,
         network_config.gateway
     );
+
+    if let Some(extra) = extra_cmdline {
+        let trimmed = extra.trim();
+        if !trimmed.is_empty() {
+            boot_args.push(' ');
+            boot_args.push_str(trimmed);
+        }
+    }
 
     let initramfs_path = agent_config.initramfs_path.as_ref()
         .map(|p| p.to_string_lossy().to_string());

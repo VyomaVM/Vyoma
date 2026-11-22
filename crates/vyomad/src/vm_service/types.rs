@@ -14,6 +14,8 @@ pub struct VmRunRequest {
     pub networks: Vec<String>,
     pub labels: HashMap<String, String>,
     pub base_image_path: String,
+    pub kernel: Option<String>,
+    pub kernel_cmdline: Option<Vec<String>>,
 }
 
 impl From<crate::api::handlers::RunRequest> for VmRunRequest {
@@ -28,6 +30,8 @@ impl From<crate::api::handlers::RunRequest> for VmRunRequest {
             networks: req.networks.clone(),
             labels: req.labels.clone(),
             base_image_path: req.base_image_path.clone(),
+            kernel: req.kernel.clone(),
+            kernel_cmdline: req.kernel_cmdline.clone(),
         }
     }
 }
@@ -273,6 +277,8 @@ mod tests {
                 ("env".to_string(), "prod".to_string()),
             ]),
             base_image_path: String::new(),
+            kernel: None,
+            kernel_cmdline: None,
         };
         assert_eq!(req.labels.get("service"), Some(&"web".to_string()));
         assert_eq!(req.labels.len(), 2);

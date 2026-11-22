@@ -66,6 +66,8 @@ impl VmService for GrpcVmService {
             networks: req.networks.clone(),
             labels,
             base_image_path: String::new(), // will be resolved during creation
+            kernel: None,
+            kernel_cmdline: None,
         };
 
         let state = Arc::clone(&self.state);

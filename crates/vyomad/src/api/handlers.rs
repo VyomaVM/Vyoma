@@ -398,6 +398,8 @@ pub async fn branch_vm_handler(
         networks: vec!["default".to_string()],
         labels: HashMap::new(),
         base_image_path: parent_image.clone(),
+        kernel: None,
+        kernel_cmdline: None,
     };
 
     let (vmm, proxy_tasks, fs_managers, vtpm_manager) = match crate::vm_service::boot::start_vm(

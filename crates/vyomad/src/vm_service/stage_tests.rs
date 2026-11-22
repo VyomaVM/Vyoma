@@ -98,6 +98,8 @@ mod tests {
                 ("env".to_string(), "prod".to_string()),
             ]),
             base_image_path: "/home/.vyoma/images/nginx".to_string(),
+            kernel: None,
+            kernel_cmdline: None,
         };
         
         assert_eq!(req.vcpu, 4);
