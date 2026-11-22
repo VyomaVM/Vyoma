@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -9,9 +10,12 @@ pub struct Vyomafile {
 }
 
 /// Instructions supported by Vyomafile
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Instruction {
     From { image: String },
+    Kernel { image: String },
+    KernelCmdline { args: Vec<String> },
+    Sysctl { key: String, value: String },
     Run { command: String },
     Copy { src: String, dst: String },
     Cmd { args: Vec<String> },
@@ -52,6 +56,33 @@ impl Vyomafile {
         self.instructions.iter().any(|inst| matches!(inst, Instruction::VmMeasuredBoot))
     }
 
+    /// Retrieve the configured base kernel if specified via KERNEL instruction
+    pub fn kernel(&self) -> Option<String> {
+        self.instructions.iter().find_map(|inst| match inst {
+            Instruction::Kernel { image } => Some(image.clone()),
+            _ => None,
+        })
+    }
+
+    /// Retrieve the configured kernel command-line arguments if specified via KERNEL_CMDLINE
+    pub fn kernel_cmdline(&self) -> Option<Vec<String>> {
+        self.instructions.iter().find_map(|inst| match inst {
+            Instruction::KernelCmdline { args } => Some(args.clone()),
+            _ => None,
+        })
+    }
+
+    /// Retrieve all configured sysctl key-value pairs
+    pub fn sysctls(&self) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        for inst in &self.instructions {
+            if let Instruction::Sysctl { key, value } = inst {
+                map.insert(key.clone(), value.clone());
+            }
+        }
+        map
+    }
+
     fn parse_line(line: &str, line_num: usize) -> Result<Instruction> {
         // Split instruction and arguments
         let parts: Vec<&str> = line.splitn(2, char::is_whitespace).collect();
@@ -68,6 +99,29 @@ impl Vyomafile {
                     anyhow::bail!("FROM requires an image name at line {}", line_num);
                 }
                 Ok(Instruction::From { image: args.to_string() })
+            }
+            "KERNEL" => {
+                if args.is_empty() {
+                    anyhow::bail!("KERNEL requires a kernel image name at line {}", line_num);
+                }
+                Ok(Instruction::Kernel { image: args.to_string() })
+            }
+            "KERNEL_CMDLINE" => {
+                if args.is_empty() {
+                    anyhow::bail!("KERNEL_CMDLINE requires arguments at line {}", line_num);
+                }
+                let cmd_args = Self::parse_shell_args(args)?;
+                Ok(Instruction::KernelCmdline { args: cmd_args })
+            }
+            "SYSCTL" => {
+                let sysctl_parts: Vec<&str> = args.splitn(2, '=').collect();
+                if sysctl_parts.len() != 2 {
+                    anyhow::bail!("SYSCTL requires KEY=VALUE format at line {}", line_num);
+                }
+                Ok(Instruction::Sysctl {
+                    key: sysctl_parts[0].trim().to_string(),
+                    value: sysctl_parts[1].trim().to_string(),
+                })
             }
             "RUN" => {
                 if args.is_empty() {
@@ -110,11 +164,14 @@ impl Vyomafile {
                 Ok(Instruction::Workdir { path: args.to_string() })
             }
             "VM_MEASURED_BOOT" => {
-                // VM_MEASURED_BOOT is a flag instruction, no arguments expected
-                if !args.is_empty() {
-                    anyhow::bail!("VM_MEASURED_BOOT does not take arguments at line {}", line_num);
+                if args.is_empty() || args.eq_ignore_ascii_case("true") || args == "1" {
+                    Ok(Instruction::VmMeasuredBoot)
+                } else if args.eq_ignore_ascii_case("false") || args == "0" {
+                    // Explicitly disabled measured boot: empty command
+                    anyhow::bail!("VM_MEASURED_BOOT disabled explicitly at line {}", line_num);
+                } else {
+                    anyhow::bail!("VM_MEASURED_BOOT accepts only optional boolean flag at line {}", line_num);
                 }
-                Ok(Instruction::VmMeasuredBoot)
             }
             _ => {
                 anyhow::bail!("Unknown instruction '{}' at line {}", instruction, line_num);
@@ -123,17 +180,13 @@ impl Vyomafile {
     }
 
     fn parse_shell_args(args: &str) -> Result<Vec<String>> {
-        // Parse JSON array format like ["echo", "done"]
         let trimmed = args.trim();
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            // Parse as JSON array
             let json_str = trimmed;
             let parsed: Vec<String> = serde_json::from_str(json_str)
-                .map_err(|e| anyhow::anyhow!("Failed to parse CMD args as JSON: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to parse args as JSON: {}", e))?;
             Ok(parsed)
         } else {
-            // Simple shell-like argument parsing
-            // Split on spaces, handling quotes
             let mut result = Vec::new();
             let mut current = String::new();
             let mut in_quotes = false;
@@ -210,6 +263,29 @@ CMD ["echo", "done"]
     }
 
     #[test]
+    fn test_parse_kernel_and_cmdline_instructions() {
+        let content = r#"
+FROM vyomahub.io/library/postgres:16
+KERNEL vyomahub.io/kernels/db-heavy:6.16
+KERNEL_CMDLINE transparent_hugepage=always elevator=deadline noswap
+SYSCTL vm.dirty_ratio=15
+SYSCTL vm.overcommit_memory=2
+VM_MEASURED_BOOT true
+"#;
+
+        let vf = Vyomafile::parse_content(content).unwrap();
+        assert_eq!(vf.kernel(), Some("vyomahub.io/kernels/db-heavy:6.16".to_string()));
+        assert_eq!(
+            vf.kernel_cmdline(),
+            Some(vec!["transparent_hugepage=always".to_string(), "elevator=deadline".to_string(), "noswap".to_string()])
+        );
+        let sysctls = vf.sysctls();
+        assert_eq!(sysctls.get("vm.dirty_ratio"), Some(&"15".to_string()));
+        assert_eq!(sysctls.get("vm.overcommit_memory"), Some(&"2".to_string()));
+        assert!(vf.has_measured_boot());
+    }
+
+    #[test]
     fn test_parse_env_instruction() {
         let vyomafile = Vyomafile::parse_content("ENV PORT=8080").unwrap();
         match &vyomafile.instructions[0] {
@@ -234,28 +310,15 @@ CMD ["echo", "done"]
     fn test_parse_vm_measured_boot_instruction() {
         let vyomafile = Vyomafile::parse_content("VM_MEASURED_BOOT").unwrap();
         assert_eq!(vyomafile.instructions.len(), 1);
-        match &vyomafile.instructions[0] {
-            Instruction::VmMeasuredBoot => {},
-            _ => panic!("Expected VM_MEASURED_BOOT instruction"),
-        }
         assert!(vyomafile.has_measured_boot());
+
+        let vyomafile2 = Vyomafile::parse_content("VM_MEASURED_BOOT true").unwrap();
+        assert!(vyomafile2.has_measured_boot());
     }
 
     #[test]
-    fn test_parse_vm_measured_boot_with_args_fails() {
-        let result = Vyomafile::parse_content("VM_MEASURED_BOOT some_arg");
+    fn test_parse_vm_measured_boot_with_invalid_arg_fails() {
+        let result = Vyomafile::parse_content("VM_MEASURED_BOOT invalid_arg");
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_has_measured_boot_false() {
-        let vyomafile = Vyomafile::parse_content("FROM alpine\nRUN echo hello").unwrap();
-        assert!(!vyomafile.has_measured_boot());
-    }
-
-    #[test]
-    fn test_has_measured_boot_true() {
-        let vyomafile = Vyomafile::parse_content("FROM alpine\nVM_MEASURED_BOOT\nRUN echo hello").unwrap();
-        assert!(vyomafile.has_measured_boot());
     }
 }

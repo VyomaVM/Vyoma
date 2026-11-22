@@ -119,6 +119,15 @@ impl BuildRunner {
                     info!("Processing FROM {}", image);
                     current_rootfs = Some(self.handle_from(&image).await?);
                 }
+                Instruction::Kernel { image } => {
+                    info!("Processing KERNEL {}", image);
+                }
+                Instruction::KernelCmdline { args } => {
+                    info!("Processing KERNEL_CMDLINE {:?}", args);
+                }
+                Instruction::Sysctl { key, value } => {
+                    info!("Processing SYSCTL {}={}", key, value);
+                }
                 Instruction::Run { command } => {
                     info!("Processing RUN {}", command);
                     if let Some(ref rootfs) = current_rootfs {
@@ -162,15 +171,14 @@ impl BuildRunner {
                 }
                 Instruction::VmMeasuredBoot => {
                     info!("Processing VM_MEASURED_BOOT directive - measured boot enabled");
-                    // The measured flag is already set at the build runner level,
-                    // so we just log here for clarity
+                    self.measured = true;
                 }
             }
         }
 
         // Finalize the image
         if let Some(final_rootfs) = current_rootfs {
-            self.finalize_image(&final_rootfs, image_name, &current_config).await
+            self.finalize_image(&final_rootfs, image_name, &current_config, &vyomafile).await
         } else {
             Err(BuildError::ExecutionError(
                 "No FROM instruction found".to_string()
@@ -923,6 +931,7 @@ poweroff -f
         rootfs_path: &Path,
         image_name: &str,
         config: &OciImageConfig,
+        vyomafile: &Vyomafile,
     ) -> Result<BuildResult, BuildError> {
         info!("Finalizing image {}", image_name);
 
@@ -935,7 +944,7 @@ poweroff -f
         std::fs::copy(rootfs_path, &final_rootfs)?;
 
         // Create manifest
-        let converter = VmifConverter::new();
+        let _converter = VmifConverter::new();
         let manifest_path = output_dir.join("vyoma.toml");
 
         // Convert config types
@@ -963,12 +972,26 @@ poweroff -f
 
         let mut manifest = vyoma_image::VmifManifest::new(
             "amd64".to_string(),
-            None,
+            vyomafile.kernel(),
             None,
             format!("sha256:{}", hash),
             image_config,
             std::fs::metadata(&final_rootfs)?.len(),
         );
+
+        if let Some(kernel) = vyomafile.kernel() {
+            manifest.kernel_profile = Some(kernel);
+            manifest.artifact_type = vyoma_image::VmifArtifactType::Composite;
+        }
+
+        if let Some(cmdline) = vyomafile.kernel_cmdline() {
+            manifest.kernel_cmdline = Some(cmdline);
+        }
+
+        // Pre-compute dm-verity Merkle tree root hash
+        if let Ok(verity_res) = vyoma_image::generate_verity_from_file(&final_rootfs, None, 4096) {
+            manifest.verity_spec = Some(verity_res.spec);
+        }
 
         // Set measured boot PCR policy if measured build
         if let Some(ref pcrs) = pcr_policy {
