@@ -17,7 +17,7 @@ fi
 [ -d "$HOME/.local/lib" ] && export LD_LIBRARY_PATH="$HOME/.local/lib:${LD_LIBRARY_PATH:-}"
 
 VERSION="${VERSION:-$(grep -m1 '^version = ' Cargo.toml 2>/dev/null | cut -d '"' -f 2)}"
-VERSION="${VERSION:-3.1.0}"
+VERSION="${VERSION:-3.2.0}"
 HOST_ARCH="${TARGET_ARCH:-$(uname -m)}"
 case "$HOST_ARCH" in
     x86_64|amd64)

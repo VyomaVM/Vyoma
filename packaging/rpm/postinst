@@ -63,7 +63,7 @@ if [ "$1" = "1" ] || [ "$1" = "2" ]; then
         echo "Notice: vyomad.service is not active yet. Check 'systemctl status vyomad' or verify /dev/kvm permissions."
     fi
 
-    echo "Vyoma v3.1.0 installed successfully!"
+    echo "Vyoma v3.2.0 installed successfully!"
     echo "Open http://localhost:8080 for the dashboard"
     echo "Run 'vyoma run nginx:latest' to start your first VM"
 fi
