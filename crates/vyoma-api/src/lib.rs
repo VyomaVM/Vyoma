@@ -70,6 +70,10 @@ pub struct RunRequest {
     pub labels: HashMap<String, String>,
     #[serde(default)]
     pub base_image_path: String,
+    #[serde(default)]
+    pub kernel: Option<String>,
+    #[serde(default)]
+    pub kernel_cmdline: Option<Vec<String>>,
 }
 
 impl Default for RunRequest {
@@ -84,6 +88,8 @@ impl Default for RunRequest {
             networks: Vec::new(),
             labels: HashMap::new(),
             base_image_path: String::new(),
+            kernel: None,
+            kernel_cmdline: None,
         }
     }
 }
@@ -200,6 +206,8 @@ pub struct ListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PullRequest {
     pub image: String,
+    #[serde(default)]
+    pub artifact_type: Option<String>,
 }
 
 /// Response returned after pulling an image.
@@ -207,6 +215,95 @@ pub struct PullRequest {
 pub struct PullResponse {
     pub status: String,
     pub path: String,
+}
+
+/// VMIF artifact classification for the daemon API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VmifArtifactTypeApi {
+    Software,
+    Kernel,
+    Composite,
+    Appliance,
+}
+
+impl Default for VmifArtifactTypeApi {
+    fn default() -> Self {
+        Self::Appliance
+    }
+}
+
+/// App Store certification status for the daemon API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VerificationStatusApi {
+    Certified,
+    Community,
+    Flagged,
+    PendingReview,
+}
+
+impl Default for VerificationStatusApi {
+    fn default() -> Self {
+        Self::PendingReview
+    }
+}
+
+/// Verification report response DTO.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VerificationReportResponse {
+    pub artifact_digest: String,
+    pub status: VerificationStatusApi,
+    pub issuer: String,
+    pub signed_at: String,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub static_scan_passed: bool,
+    #[serde(default)]
+    pub cve_critical_count: u32,
+    #[serde(default)]
+    pub detonation_passed: bool,
+    #[serde(default)]
+    pub golden_pcrs: HashMap<u32, String>,
+    #[serde(default)]
+    pub verity_root_hash: Option<String>,
+}
+
+/// Request to verify an image against local trust store or hub authority (`POST /images/verify`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifyImageRequest {
+    pub image_ref: String,
+    #[serde(default)]
+    pub enforce_certified: bool,
+}
+
+/// Response from verifying an image (`POST /images/verify`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifyImageResponse {
+    pub image_ref: String,
+    pub status: VerificationStatusApi,
+    pub is_trusted: bool,
+    pub message: String,
+    #[serde(default)]
+    pub report: Option<VerificationReportResponse>,
+}
+
+/// Inspection metadata for a VMIF v2.0 image (`GET /images/:id/inspect`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VmifInspectResponse {
+    pub schema_version: u32,
+    pub artifact_type: VmifArtifactTypeApi,
+    pub media_type: String,
+    pub arch: String,
+    #[serde(default)]
+    pub software_name: Option<String>,
+    #[serde(default)]
+    pub kernel_ref: Option<String>,
+    #[serde(default)]
+    pub verity_root_hash: Option<String>,
+    #[serde(default)]
+    pub verification_status: Option<VerificationStatusApi>,
 }
 
 fn default_disk_id() -> String {
@@ -262,5 +359,71 @@ mod tests {
         assert_eq!(parsed.vms[0].id, "vm-1");
         assert!(parsed.vms[0].labels.is_empty());
         assert_eq!(parsed.vms[0].vcpu, 0);
+    }
+
+    #[test]
+    fn run_request_with_decoupled_kernel() {
+        let json = r#"{
+            "image": "vyomahub.io/library/postgres:16",
+            "kernel": "vyomahub.io/kernels/db:6.16",
+            "kernel_cmdline": ["transparent_hugepage=always", "elevator=deadline"]
+        }"#;
+        let req: RunRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.image, "vyomahub.io/library/postgres:16");
+        assert_eq!(req.kernel, Some("vyomahub.io/kernels/db:6.16".to_string()));
+        assert_eq!(req.kernel_cmdline, Some(vec!["transparent_hugepage=always".to_string(), "elevator=deadline".to_string()]));
+        assert_eq!(req.vcpu, 1);
+        assert_eq!(req.mem_size_mib, 512);
+    }
+
+    #[test]
+    fn pull_request_with_artifact_type() {
+        let json = r#"{"image": "vyoma/kernel-db:6.16", "artifact_type": "kernel"}"#;
+        let req: PullRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.image, "vyoma/kernel-db:6.16");
+        assert_eq!(req.artifact_type, Some("kernel".to_string()));
+    }
+
+    #[test]
+    fn verification_report_roundtrip() {
+        let mut pcrs = HashMap::new();
+        pcrs.insert(0, "a1b2c3d4e5f6...".to_string());
+        let report = VerificationReportResponse {
+            artifact_digest: "sha256:4a8b79e1...".to_string(),
+            status: VerificationStatusApi::Certified,
+            issuer: "Vyoma Notary CA".to_string(),
+            signed_at: "2026-11-21T12:00:00Z".to_string(),
+            expires_at: Some("2027-11-21T12:00:00Z".to_string()),
+            static_scan_passed: true,
+            cve_critical_count: 0,
+            detonation_passed: true,
+            golden_pcrs: pcrs,
+            verity_root_hash: Some("3f2504e0...".to_string()),
+        };
+
+        let json = serde_json::to_string(&report).unwrap();
+        let parsed: VerificationReportResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.status, VerificationStatusApi::Certified);
+        assert_eq!(parsed.cve_critical_count, 0);
+    }
+
+    #[test]
+    fn vmif_inspect_response_roundtrip() {
+        let inspect = VmifInspectResponse {
+            schema_version: 2,
+            artifact_type: VmifArtifactTypeApi::Software,
+            media_type: "application/vnd.vyoma.image.software.v2+json".to_string(),
+            arch: "x86_64".to_string(),
+            software_name: Some("vyoma/postgres".to_string()),
+            kernel_ref: Some("vyomahub.io/kernels/db:6.16".to_string()),
+            verity_root_hash: Some("3f2504e0...".to_string()),
+            verification_status: Some(VerificationStatusApi::Certified),
+        };
+
+        let json = serde_json::to_string(&inspect).unwrap();
+        let parsed: VmifInspectResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.schema_version, 2);
+        assert_eq!(parsed.artifact_type, VmifArtifactTypeApi::Software);
+        assert_eq!(parsed.verification_status, Some(VerificationStatusApi::Certified));
     }
 }
