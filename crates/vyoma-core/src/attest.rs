@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use tracing::{info, warn};
 
 #[allow(unused_imports)]
@@ -85,9 +85,81 @@ pub struct AttestationResponse {
     pub error: Option<String>,
 }
 
+/// Cryptographically verify a TPM quote signature against a trusted Attestation Identity Key (AIK).
+pub fn verify_quote_signature(quote: &TpmQuote, aik_public_key_bytes: &[u8]) -> Result<()> {
+    if aik_public_key_bytes.len() != 32 {
+        return Err(anyhow!("Invalid Ed25519 AIK public key length: expected 32 bytes, got {}", aik_public_key_bytes.len()));
+    }
+    let key_array: [u8; 32] = aik_public_key_bytes.try_into()
+        .map_err(|_| anyhow!("Failed to convert public key bytes"))?;
+    let verifying_key = VerifyingKey::from_bytes(&key_array)
+        .map_err(|e| anyhow!("Invalid Ed25519 AIK public key: {}", e))?;
+
+    if quote.signature.len() != 64 {
+        return Err(anyhow!("Invalid quote signature length: expected 64 bytes, got {}", quote.signature.len()));
+    }
+    let sig_array: [u8; 64] = quote.signature.as_slice().try_into()
+        .map_err(|_| anyhow!("Failed to convert signature bytes"))?;
+    let signature = Signature::from_bytes(&sig_array);
+
+    verifying_key.verify(&quote.quote, &signature)
+        .map_err(|e| anyhow!("TPM quote signature verification failed: {}", e))?;
+
+    Ok(())
+}
+
+/// Cryptographically verify an AMD SEV-SNP attestation report signature against a VCEK public key.
+pub fn verify_snp_signature(report: &SnpAttestationReport, vcek_public_key_bytes: &[u8]) -> Result<()> {
+    if vcek_public_key_bytes.len() != 32 {
+        return Err(anyhow!("Invalid Ed25519 VCEK public key length: expected 32 bytes, got {}", vcek_public_key_bytes.len()));
+    }
+    let key_array: [u8; 32] = vcek_public_key_bytes.try_into()
+        .map_err(|_| anyhow!("Failed to convert VCEK key bytes"))?;
+    let verifying_key = VerifyingKey::from_bytes(&key_array)
+        .map_err(|e| anyhow!("Invalid Ed25519 VCEK public key: {}", e))?;
+
+    if report.signature.len() != 64 {
+        return Err(anyhow!("Invalid SEV-SNP signature length: expected 64 bytes, got {}", report.signature.len()));
+    }
+    let sig_array: [u8; 64] = report.signature.as_slice().try_into()
+        .map_err(|_| anyhow!("Failed to convert signature bytes"))?;
+    let signature = Signature::from_bytes(&sig_array);
+
+    // Build the canonical signed payload: measurement || report_data || report_id
+    let mut signed_payload = Vec::new();
+    signed_payload.extend_from_slice(&report.measurement);
+    signed_payload.extend_from_slice(&report.report_data);
+    signed_payload.extend_from_slice(&report.report_id);
+
+    verifying_key.verify(&signed_payload, &signature)
+        .or_else(|_| verifying_key.verify(&report.measurement, &signature))
+        .map_err(|e| anyhow!("SEV-SNP report signature verification failed: {}", e))?;
+
+    Ok(())
+}
+
+/// Verify that an actual dm-verity root hash matches the expected hash.
+pub fn verify_dm_verity_roothash(actual: &str, expected: &str) -> Result<()> {
+    let clean_actual = actual.trim().trim_start_matches("sha256:").to_lowercase();
+    let clean_expected = expected.trim().trim_start_matches("sha256:").to_lowercase();
+
+    if clean_actual.is_empty() || clean_expected.is_empty() {
+        return Err(anyhow!("dm-verity root hash cannot be empty"));
+    }
+
+    if clean_actual == clean_expected {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "dm-verity root hash mismatch: expected {}, got {}",
+            clean_expected, clean_actual
+        ))
+    }
+}
+
 pub struct AttestationVerifier {
-    pcr_policy: PcrPolicy,
-    trusted_keys: Vec<Vec<u8>>,
+    pub pcr_policy: PcrPolicy,
+    pub trusted_keys: Vec<Vec<u8>>,
 }
 
 impl AttestationVerifier {
@@ -106,6 +178,20 @@ impl AttestationVerifier {
     pub fn verify_quote(&self, quote: &TpmQuote, expected_pcrs: &HashMap<u32, String>) -> Result<()> {
         if quote.pcr_values.is_empty() {
             return Err(anyhow!("Empty PCR values in quote"));
+        }
+
+        // If trusted AIK keys are configured, verify the quote signature
+        if !self.trusted_keys.is_empty() {
+            let mut signature_valid = false;
+            for key in &self.trusted_keys {
+                if verify_quote_signature(quote, key).is_ok() {
+                    signature_valid = true;
+                    break;
+                }
+            }
+            if !signature_valid {
+                return Err(anyhow!("TPM quote signature could not be verified with any trusted AIK key"));
+            }
         }
 
         for (pcr_index, expected_hash) in expected_pcrs {
@@ -165,6 +251,20 @@ impl AttestationVerifier {
 
         if report.authority_chain.is_empty() {
             return Err(anyhow!("SNP report missing authority chain"));
+        }
+
+        // If trusted VCEK keys are configured, verify the report signature
+        if !self.trusted_keys.is_empty() {
+            let mut signature_valid = false;
+            for key in &self.trusted_keys {
+                if verify_snp_signature(report, key).is_ok() {
+                    signature_valid = true;
+                    break;
+                }
+            }
+            if !signature_valid {
+                return Err(anyhow!("SNP report signature could not be verified with any trusted VCEK key"));
+            }
         }
 
         if let Some(expected) = expected_measurement {
@@ -246,6 +346,7 @@ pub fn parse_pcr_values(data: &[u8]) -> Result<HashMap<u32, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
 
     #[test]
     fn test_attestation_verifier_new() {
@@ -274,5 +375,95 @@ mod tests {
         assert_eq!(request.vm_id, "test-vm");
         assert_eq!(request.pcr_selection, vec![7, 9, 10]);
         assert!(!request.nonce.is_empty());
+    }
+
+    #[test]
+    fn test_verify_quote_signature_success_and_failure() {
+        let signing_key = SigningKey::from_bytes(&[77u8; 32]);
+        let verifying_key = signing_key.verifying_key();
+        let pubkey_bytes = verifying_key.to_bytes().to_vec();
+
+        let quote_payload = b"TPM2_QUOTE_PAYLOAD_TEST_DATA";
+        let sig = signing_key.sign(quote_payload);
+
+        let quote = TpmQuote {
+            quote: quote_payload.to_vec(),
+            signature: sig.to_bytes().to_vec(),
+            pcr_values: HashMap::new(),
+            timestamp: "2026-11-22T00:00:00Z".to_string(),
+        };
+
+        // Verification success
+        assert!(verify_quote_signature(&quote, &pubkey_bytes).is_ok());
+
+        // Verification failure with altered payload
+        let bad_quote = TpmQuote {
+            quote: b"TAMPERED_PAYLOAD".to_vec(),
+            signature: sig.to_bytes().to_vec(),
+            pcr_values: HashMap::new(),
+            timestamp: "2026-11-22T00:00:00Z".to_string(),
+        };
+        assert!(verify_quote_signature(&bad_quote, &pubkey_bytes).is_err());
+
+        // Verification failure with different key
+        let other_key = SigningKey::from_bytes(&[88u8; 32]);
+        assert!(verify_quote_signature(&quote, &other_key.verifying_key().to_bytes()).is_err());
+    }
+
+    #[test]
+    fn test_verify_snp_signature() {
+        let signing_key = SigningKey::from_bytes(&[99u8; 32]);
+        let verifying_key = signing_key.verifying_key();
+        let pubkey_bytes = verifying_key.to_bytes().to_vec();
+
+        let measurement = vec![0xaa; 32];
+        let report_data = vec![0xbb; 64];
+        let report_id = vec![0xcc; 32];
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&measurement);
+        payload.extend_from_slice(&report_data);
+        payload.extend_from_slice(&report_id);
+
+        let sig = signing_key.sign(&payload);
+
+        let report = SnpAttestationReport {
+            version: 1,
+            guest_svn: 1,
+            policy: SnpPolicy { flags: 0, symmetric: 0, tcb: 0 },
+            family_id: vec![0; 16],
+            image_id: vec![0; 16],
+            vmpl: 0,
+            authority_chain: vec![vec![1, 2, 3]],
+            host_data: vec![0; 32],
+            id_key_digest: vec![0; 32],
+            author_key_digest: vec![0; 32],
+            report_data,
+            measurement: measurement.clone(),
+            host_svn: 1,
+            report_id,
+            report_id_ma: vec![0; 32],
+            reported_tcb: SnpReportedTcb { boot_loader: 1, tee: 1, snp: 1, microcode: 1 },
+            signature: sig.to_bytes().to_vec(),
+        };
+
+        assert!(verify_snp_signature(&report, &pubkey_bytes).is_ok());
+
+        // Verifier integration
+        let verifier = AttestationVerifier::new(PcrPolicy::new())
+            .with_trusted_key(pubkey_bytes);
+        assert!(verifier.verify_snp_report(&report, Some(&hex::encode(&measurement))).is_ok());
+    }
+
+    #[test]
+    fn test_verify_dm_verity_roothash() {
+        let hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        assert!(verify_dm_verity_roothash(hash, hash).is_ok());
+        assert!(verify_dm_verity_roothash(&format!("sha256:{}", hash), hash).is_ok());
+        assert!(verify_dm_verity_roothash(hash, &format!("sha256:{}", hash.to_uppercase())).is_ok());
+
+        let wrong_hash = "0000000000fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        assert!(verify_dm_verity_roothash(wrong_hash, hash).is_err());
+        assert!(verify_dm_verity_roothash("", hash).is_err());
     }
 }

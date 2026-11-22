@@ -275,6 +275,19 @@ pub enum VmifError {
     InvalidArtifactType(VmifArtifactType, String),
 }
 
+impl Default for VmifManifest {
+    fn default() -> Self {
+        Self::new(
+            "x86_64".to_string(),
+            None,
+            None,
+            "rootfs.sqfs".to_string(),
+            OciImageConfig::default(),
+            0,
+        )
+    }
+}
+
 impl VmifManifest {
     /// Constructs a backward-compatible v1 VMIF Appliance manifest.
     pub fn new(

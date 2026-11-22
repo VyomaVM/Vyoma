@@ -20,6 +20,8 @@ base64 = "0.22.1"
 dirs = "6.0.0"
 hex = "0.4"
 async-trait = "0.1"
+sha2 = "0.10"
+ed25519-dalek = { version = "2.0", features = ["rand_core", "serde"] }
 vyoma-api = { path = "../vyoma-api" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
