@@ -78,8 +78,8 @@ impl SigningKeyPair {
     }
 
     pub fn sign_manifest(&self, manifest: &VmifManifest) -> Result<SignedManifest, SigningError> {
-        let manifest_bytes =
-            serde_json::to_vec(manifest).map_err(|e| SigningError::SignError(e.to_string()))?;
+        let manifest_bytes = crate::canonical::to_canonical_json(manifest)
+            .map_err(|e| SigningError::SignError(e.to_string()))?;
 
         let signature = self.signing_key.sign(&manifest_bytes);
 
@@ -91,15 +91,24 @@ impl SigningKeyPair {
     }
 
     pub fn verify_manifest(&self, signed: &SignedManifest) -> Result<(), SigningError> {
-        let manifest_bytes = serde_json::to_vec(&signed.manifest)
+        let canonical_bytes = crate::canonical::to_canonical_json(&signed.manifest)
             .map_err(|e| SigningError::VerifyError(e.to_string()))?;
 
         let signature = Signature::from_slice(&signed.signature)
             .map_err(|e| SigningError::VerifyError(e.to_string()))?;
 
-        self.verifying_key
-            .verify(&manifest_bytes, &signature)
+        // Primary: verify against RFC 8785 canonical JSON bytes
+        if self.verifying_key.verify(&canonical_bytes, &signature).is_ok() {
+            return Ok(());
+        }
+
+        // Backward compatibility fallback: verify against legacy serde_json::to_vec
+        let legacy_bytes = serde_json::to_vec(&signed.manifest)
             .map_err(|e| SigningError::VerifyError(e.to_string()))?;
+
+        self.verifying_key
+            .verify(&legacy_bytes, &signature)
+            .map_err(|e| SigningError::VerifyError(format!("Signature verification failed: {}", e)))?;
 
         Ok(())
     }
@@ -236,14 +245,23 @@ impl TrustPolicy {
         )
         .map_err(|e| SigningError::VerifyError(format!("Invalid key: {:?}", e)))?;
 
-        let manifest_bytes = serde_json::to_vec(&signed.manifest)
+        let canonical_bytes = crate::canonical::to_canonical_json(&signed.manifest)
             .map_err(|e| SigningError::VerifyError(e.to_string()))?;
 
         let signature = Signature::from_slice(&signed.signature)
             .map_err(|e| SigningError::VerifyError(e.to_string()))?;
 
+        // Primary: verify against RFC 8785 canonical bytes
+        if verifying_key.verify(&canonical_bytes, &signature).is_ok() {
+            return Ok(());
+        }
+
+        // Backward compatibility fallback: verify against legacy serde_json::to_vec
+        let legacy_bytes = serde_json::to_vec(&signed.manifest)
+            .map_err(|e| SigningError::VerifyError(e.to_string()))?;
+
         verifying_key
-            .verify(&manifest_bytes, &signature)
+            .verify(&legacy_bytes, &signature)
             .map_err(|e| SigningError::VerifyError(e.to_string()))?;
 
         Ok(())
@@ -412,5 +430,63 @@ mod tests {
         assert_eq!(loaded.manifest.rootfs, signed.manifest.rootfs);
         assert_eq!(loaded.manifest.kernel, signed.manifest.kernel);
         assert_eq!(loaded.signature, signed.signature);
+    }
+
+    #[test]
+    fn test_canonical_signing_determinism() {
+        let keypair = SigningKeyPair::generate();
+        let mut labels = std::collections::HashMap::new();
+        labels.insert("z-key".to_string(), "z-value".to_string());
+        labels.insert("a-key".to_string(), "a-value".to_string());
+
+        let config = crate::vmif::OciImageConfig::default();
+        let manifest = VmifManifest::new(
+            "amd64".to_string(),
+            None,
+            None,
+            "sha256:abc123".to_string(),
+            config,
+            1024000,
+        ).with_labels(labels);
+
+        let signed = keypair.sign_manifest(&manifest).unwrap();
+        assert!(keypair.verify_manifest(&signed).is_ok());
+
+        // Verify that canonical JSON serializer orders keys lexicographically
+        let canonical_bytes = crate::canonical::to_canonical_json(&manifest).unwrap();
+        let json_str = String::from_utf8(canonical_bytes).unwrap();
+        assert!(json_str.find("a-key").unwrap() < json_str.find("z-key").unwrap());
+    }
+
+    #[test]
+    fn test_legacy_signature_backward_compat_fallback() {
+        use ed25519_dalek::Signer;
+        let keypair = SigningKeyPair::generate();
+        let config = crate::vmif::OciImageConfig::default();
+        let manifest = VmifManifest::new(
+            "amd64".to_string(),
+            None,
+            None,
+            "sha256:legacy123".to_string(),
+            config,
+            1024000,
+        );
+
+        // Sign using legacy non-canonical serde_json::to_vec
+        let legacy_bytes = serde_json::to_vec(&manifest).unwrap();
+        let sig = keypair.signing_key.sign(&legacy_bytes);
+
+        let legacy_signed = SignedManifest {
+            manifest: manifest.clone(),
+            signature: sig.to_bytes().to_vec(),
+            public_key: keypair.public_key_bytes(),
+        };
+
+        // Verification must succeed via legacy fallback
+        assert!(keypair.verify_manifest(&legacy_signed).is_ok());
+
+        let mut policy = TrustPolicy::new(true);
+        policy.add_trusted_key(keypair.public_key_bytes());
+        assert!(policy.verify(&legacy_signed).is_ok());
     }
 }
