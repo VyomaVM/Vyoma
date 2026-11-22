@@ -136,6 +136,53 @@ impl SigningKeyPair {
         let data = std::fs::read(path)?;
         self.verify_binary(&data, signature)
     }
+
+    /// Saves the keypair into a private key file (`<key_base_name>.key`) and public key file (`<key_base_name>.pub`).
+    pub fn save_keypair_to_files(&self, keys_dir: &Path, key_base_name: &str) -> Result<(PathBuf, PathBuf), SigningError> {
+        std::fs::create_dir_all(keys_dir)?;
+
+        let priv_path = keys_dir.join(format!("{}.key", key_base_name));
+        let pub_path = keys_dir.join(format!("{}.pub", key_base_name));
+
+        let (seed, pub_bytes) = self.to_seed_and_public();
+        let mut key_file_data = seed;
+        key_file_data.extend_from_slice(&pub_bytes);
+
+        std::fs::write(&priv_path, key_file_data)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&priv_path, std::fs::Permissions::from_mode(0o600));
+        }
+
+        std::fs::write(&pub_path, pub_bytes)?;
+
+        Ok((priv_path, pub_path))
+    }
+
+    /// Loads a keypair from a private key file (`.key`).
+    pub fn load_keypair_from_file(key_path: &Path) -> Result<Self, SigningError> {
+        let data = std::fs::read(key_path)?;
+        if data.len() == 64 {
+            Self::from_seed_and_public(&data[..32], &data[32..])
+        } else if data.len() == 32 {
+            let signing_key = SigningKey::from_bytes(
+                data.as_slice()
+                    .try_into()
+                    .map_err(|_| SigningError::KeyError("Invalid seed length".to_string()))?,
+            );
+            let verifying_key = signing_key.verifying_key();
+            Ok(Self {
+                signing_key,
+                verifying_key,
+            })
+        } else {
+            Err(SigningError::KeyError(format!(
+                "Invalid private key file length: {} bytes (expected 32 or 64)",
+                data.len()
+            )))
+        }
+    }
 }
 
 pub fn compute_hash(data: &[u8]) -> Vec<u8> {
@@ -215,6 +262,19 @@ impl TrustPolicy {
                 info!("Loaded trusted key from {:?}", path);
             }
         }
+
+        Ok(())
+    }
+
+    /// Loads trusted public keys from standard user (`~/.vyoma/trusted_keys/`) and system (`/etc/vyoma/trusted_keys/`) paths.
+    pub fn load_standard_trusted_dirs(&mut self) -> Result<(), SigningError> {
+        if let Ok(home) = std::env::var("HOME") {
+            let user_dir = Path::new(&home).join(".vyoma").join("trusted_keys");
+            self.load_trusted_keys_from_dir(user_dir)?;
+        }
+
+        let sys_dir = PathBuf::from("/etc/vyoma/trusted_keys");
+        self.load_trusted_keys_from_dir(sys_dir)?;
 
         Ok(())
     }
@@ -488,5 +548,34 @@ mod tests {
         let mut policy = TrustPolicy::new(true);
         policy.add_trusted_key(keypair.public_key_bytes());
         assert!(policy.verify(&legacy_signed).is_ok());
+    }
+
+    #[test]
+    fn test_save_and_load_developer_keypair() {
+        let keypair = SigningKeyPair::generate();
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let (priv_path, pub_path) = keypair.save_keypair_to_files(temp_dir.path(), "developer").unwrap();
+        assert!(priv_path.exists());
+        assert!(pub_path.exists());
+
+        let loaded = SigningKeyPair::load_keypair_from_file(&priv_path).unwrap();
+        assert_eq!(loaded.public_key_bytes(), keypair.public_key_bytes());
+
+        // Test trust policy loading from directory
+        let mut policy = TrustPolicy::new(true);
+        policy.load_trusted_keys_from_dir(temp_dir.path().to_path_buf()).unwrap();
+
+        let config = crate::vmif::OciImageConfig::default();
+        let manifest = VmifManifest::new(
+            "amd64".to_string(),
+            None,
+            None,
+            "sha256:test123".to_string(),
+            config,
+            1024,
+        );
+        let signed = loaded.sign_manifest(&manifest).unwrap();
+        assert!(policy.verify(&signed).is_ok());
     }
 }
