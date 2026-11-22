@@ -16,6 +16,10 @@ pub struct ComposeV3 {
 pub struct ServiceV3 {
     pub image: Option<String>,
     #[serde(default)]
+    pub kernel: Option<String>,
+    #[serde(default)]
+    pub kernel_cmdline: Option<Vec<String>>,
+    #[serde(default)]
     pub ports: Vec<PortEntry>,
     #[serde(default)]
     pub volumes: Vec<VolumeEntry>,

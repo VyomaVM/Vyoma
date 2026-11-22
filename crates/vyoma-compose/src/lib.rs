@@ -62,6 +62,10 @@ pub struct VolumeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Service {
     pub image: Option<String>,
+    #[serde(default)]
+    pub kernel: Option<String>,
+    #[serde(default)]
+    pub kernel_cmdline: Option<Vec<String>>,
     pub build: Option<BuildSource>,
     pub cpus: Option<u32>,
     pub memory: Option<u32>,
@@ -182,6 +186,8 @@ impl VyomaCompose {
         for (name, svc) in &self.services {
             let mut service_v3 = ServiceV3 {
                 image: svc.image.clone(),
+                kernel: svc.kernel.clone(),
+                kernel_cmdline: svc.kernel_cmdline.clone(),
                 ..Default::default()
             };
 
@@ -283,6 +289,8 @@ impl ServiceV3 {
     fn new() -> Self {
         Self {
             image: None,
+            kernel: None,
+            kernel_cmdline: None,
             ports: Vec::new(),
             volumes: Vec::new(),
             environment: HashMap::new(),
@@ -415,5 +423,44 @@ networks:
 "#;
         let compose = VyomaCompose::from_str(yaml).unwrap();
         assert!(compose.is_network_external("ext-network"));
+    }
+
+    #[test]
+    fn test_compose_with_specialized_kernel() {
+        let yaml = r#"
+version: "3.9"
+services:
+  database:
+    image: vyomahub.io/library/postgres:16
+    kernel: vyomahub.io/kernels/db-heavy:6.16
+    kernel_cmdline:
+      - transparent_hugepage=always
+      - elevator=deadline
+    ports:
+      - "5432:5432"
+  api:
+    image: vyomahub.io/library/node:20-alpine
+    kernel: vyomahub.io/kernels/net-edge:latest
+    ports:
+      - "8080:80"
+"#;
+        let compose = VyomaCompose::from_str(yaml).unwrap();
+        let db = compose.services.get("database").unwrap();
+        assert_eq!(db.image, Some("vyomahub.io/library/postgres:16".to_string()));
+        assert_eq!(db.kernel, Some("vyomahub.io/kernels/db-heavy:6.16".to_string()));
+        assert_eq!(
+            db.kernel_cmdline,
+            Some(vec!["transparent_hugepage=always".to_string(), "elevator=deadline".to_string()])
+        );
+
+        let v3 = compose.to_v3().unwrap();
+        let db_v3 = v3.services.get("database").unwrap();
+        assert_eq!(db_v3.kernel, Some("vyomahub.io/kernels/db-heavy:6.16".to_string()));
+        assert_eq!(
+            db_v3.kernel_cmdline,
+            Some(vec!["transparent_hugepage=always".to_string(), "elevator=deadline".to_string()])
+        );
+        let api_v3 = v3.services.get("api").unwrap();
+        assert_eq!(api_v3.kernel, Some("vyomahub.io/kernels/net-edge:latest".to_string()));
     }
 }
